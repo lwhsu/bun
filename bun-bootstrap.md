@@ -445,3 +445,26 @@ Planned immediate next steps once `release-bindings` exits:
   - stage0: `build/freebsd-bootstrap/stage0/bun --version` => `0.0.0`
   - final: `build/freebsd-release-ozig/bun --version` => `1.3.10`
   - smoke: `build/freebsd-release-ozig/bun -e 'console.log(1+1)'` => `2`
+
+## 2026-02-19 step 2 hardening (resolver/fd workaround area)
+
+- Hardened `src/resolver/resolver.zig` in `dirInfoCachedMaybeLog`:
+  - Added explicit queue-capacity guard before writing `dir_entry_paths_to_resolve_buf`.
+  - Added explicit open-dir capacity guard before appending into `open_dirs_buf`.
+  - Kept the first `0..64` deferred close loop as compile-time-unrolled (existing FreeBSD ReleaseFast workaround path), and added bounded runtime close for entries beyond 64 to avoid descriptor leaks.
+- Goal:
+  - reduce risk of out-of-bounds writes/leaks in deep directory traversal while preserving the prior FreeBSD runtime-crash workaround semantics.
+
+### Validation notes
+
+- `zig fmt --check src/resolver/resolver.zig src/fd.zig` passes.
+- Re-check performed with timestamp gating:
+  - `src/resolver/resolver.zig` mtime: `2026-02-19 01:24:38`
+  - `build/freebsd-release-ozig/bun-zig.o` mtime: `2026-02-19 01:38:56` (newer than source)
+  - `build/freebsd-release-ozig/bun` was older, so rebuild/relink was rerun.
+  - rebuilt `build/freebsd-release-ozig/bun` mtime: `2026-02-19 01:43:07`
+- Runtime verification after rebuild:
+  - `./build/freebsd-release-ozig/bun --version` => `1.3.10`
+  - `./build/freebsd-release-ozig/bun -e 'console.log(1+1)'` => `2`
+  - `./build/freebsd-release-ozig/bun-profile --version` => `1.3.10`
+  - `./build/freebsd-release-ozig/bun-profile -e 'console.log(40+2)'` => `42`
