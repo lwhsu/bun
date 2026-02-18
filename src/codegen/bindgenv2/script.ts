@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import * as helpers from "../helpers";
+import { writeSync } from "node:fs";
 import { NamedType, Type } from "./internal/base";
 
 const USAGE = `\
@@ -17,6 +18,14 @@ Commands:
 
 let codegenPath: string;
 let sources: string[];
+
+function writeStdout(text: string): void {
+  writeSync(1, text);
+}
+
+function writeStderr(text: string): void {
+  writeSync(2, text);
+}
 
 function getNamedExports(): NamedType[] {
   return sources.flatMap(path => {
@@ -69,7 +78,7 @@ function listOutputs(): void {
     if (type.hasCppSource) outputs.push(cppSourcePath(type));
     if (type.hasZigSource) outputs.push(zigSourcePath(type));
   }
-  process.stdout.write(outputs.join(";"));
+  writeStdout(outputs.join(";"));
 }
 
 function generate(): void {
@@ -86,14 +95,14 @@ function generate(): void {
     const namedExportsSet = new Set(namedExports);
     for (const type of namedDependencies) {
       if (!namedExportsSet.has(type)) {
-        console.error(`error: named type must be exported: ${type.name}`);
+        writeStderr(`error: named type must be exported: ${type.name}\n`);
         process.exit(1);
       }
     }
     const namedTypeNames = new Set<string>();
     for (const type of namedExports) {
       if (namedTypeNames.size == namedTypeNames.add(type.name).size) {
-        console.error(`error: multiple types with same name: ${type.name}`);
+        writeStderr(`error: multiple types with same name: ${type.name}\n`);
         process.exit(1);
       }
     }
@@ -105,7 +114,7 @@ function generate(): void {
     names.add(type.name);
     names.add(zigNamespace);
     if (names.size !== size + 2) {
-      console.error(`error: duplicate name: ${type.name}`);
+      writeStderr(`error: duplicate name: ${type.name}\n`);
       process.exit(1);
     }
 
@@ -144,23 +153,23 @@ function generate(): void {
 function main(): void {
   const args = helpers.argParse(["command", "codegen-path", "sources", "help"]);
   if (Object.keys(args).length === 0) {
-    process.stderr.write(USAGE);
+    writeStderr(USAGE);
     process.exit(1);
   }
   const { command, "codegen-path": codegenPathArg, sources: sourcesArg, help } = args;
   if (help != null) {
-    process.stdout.write(USAGE);
+    writeStdout(USAGE);
     process.exit(0);
   }
 
   if (typeof codegenPathArg !== "string") {
-    console.error("error: missing --codegen-path");
+    writeStderr("error: missing --codegen-path\n");
     process.exit(1);
   }
   codegenPath = codegenPathArg;
 
   if (typeof sourcesArg !== "string") {
-    console.error("error: missing --sources");
+    writeStderr("error: missing --sources\n");
     process.exit(1);
   }
   sources = sourcesArg.split(",").filter(x => x);
@@ -174,9 +183,9 @@ function main(): void {
       break;
     default:
       if (typeof command === "string") {
-        console.error("error: unknown command: " + command);
+        writeStderr("error: unknown command: " + command + "\n");
       } else {
-        console.error("error: missing --command");
+        writeStderr("error: missing --command\n");
       }
       process.exit(1);
   }

@@ -12,6 +12,7 @@ BUILD_DIR="${BUN_FREEBSD_REPRO_BUILD_DIR:-${ROOT_DIR}/build/freebsd-release-ozig
 TARGET="${BUN_FREEBSD_REPRO_TARGET:-bun}"
 BUILD_TYPE="${BUN_FREEBSD_REPRO_BUILD_TYPE:-Release}"
 JOBS="${BUN_FREEBSD_REPRO_JOBS:-$(sysctl -n hw.ncpu)}"
+WEBKIT_PATH="${BUN_FREEBSD_REPRO_WEBKIT_PATH:-${ROOT_DIR}/build/freebsd-bootstrap/bun-webkit}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -37,7 +38,7 @@ if [[ "${BUN_FREEBSD_REPRO_CLEAN:-1}" == "1" ]]; then
 fi
 
 export BUN_FREEBSD_NPM_INSTALL=1
-export BUN_FREEBSD_BINDGENV2_NODE=1
+export BUN_FREEBSD_BINDGENV2_NODE=0
 export BUN_FREEBSD_CODEGEN_NODE=1
 
 echo "[freebsd-repro] stage0: ${STAGE0_BIN}"
@@ -50,6 +51,7 @@ cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" -G Ninja \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
   -DOS=freebsd \
   -DARCH=x64 \
+  -DWEBKIT_PATH="${WEBKIT_PATH}" \
   -DBUN_EXECUTABLE="${STAGE0_BIN}"
 
 if [[ "${BUN_FREEBSD_REPRO_CONFIGURE_ONLY:-0}" == "1" ]]; then

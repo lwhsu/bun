@@ -91,15 +91,17 @@ For current-tree CMake/Ninja builds on FreeBSD, set:
 
 ```bash
 export BUN_FREEBSD_NPM_INSTALL=1
-export BUN_FREEBSD_BINDGENV2_NODE=1
+export BUN_FREEBSD_BINDGENV2_NODE=0
 export BUN_FREEBSD_CODEGEN_NODE=1
 ```
 
 Rationale:
 
 - `BUN_FREEBSD_NPM_INSTALL=1` forces npm fallback for dependency install steps.
-- `BUN_FREEBSD_BINDGENV2_NODE=1` and `BUN_FREEBSD_CODEGEN_NODE=1` use Node runners
-  for bindgen/codegen paths that are still unstable with stage0 (`0.0.0`).
+- `BUN_FREEBSD_BINDGENV2_NODE=0` enables split mode:
+  - stage0 for bindgen-v2 `list-outputs` at configure time
+  - Node runner for bindgen-v2 `generate` when `BUN_FREEBSD_CODEGEN_NODE=1`
+- `BUN_FREEBSD_CODEGEN_NODE=1` keeps Node runners for remaining unstable codegen paths.
 
 Example release build:
 
@@ -122,7 +124,7 @@ Default behavior:
 - uses `build/freebsd-bootstrap/stage0/bun` as host bun (`-DBUN_EXECUTABLE`)
 - forces current required FreeBSD toggles:
   - `BUN_FREEBSD_NPM_INSTALL=1`
-  - `BUN_FREEBSD_BINDGENV2_NODE=1`
+  - `BUN_FREEBSD_BINDGENV2_NODE=0`
   - `BUN_FREEBSD_CODEGEN_NODE=1`
 - reconfigures `build/freebsd-release-ozig`
 - builds `bun`
@@ -135,6 +137,19 @@ BUN_FREEBSD_REPRO_CLEAN=0 ./scripts/freebsd-checkpoint-repro.sh
 BUN_FREEBSD_REPRO_CONFIGURE_ONLY=1 ./scripts/freebsd-checkpoint-repro.sh
 BUN_FREEBSD_REPRO_TARGET=bun-profile ./scripts/freebsd-checkpoint-repro.sh
 ```
+
+## Stage0 EBADF Repro
+
+When stage0 fails during bindgen/codegen with `EBADF`, run:
+
+```bash
+./scripts/freebsd-stage0-ebadf-repro.sh
+```
+
+This reproduces and logs:
+
+- minimal `process.stdout.write()` failure on stage0
+- bindgen-v2 `--command=list-outputs` failure used by CMake configure
 
 ## Validate
 

@@ -468,3 +468,85 @@ Planned immediate next steps once `release-bindings` exits:
   - `./build/freebsd-release-ozig/bun -e 'console.log(1+1)'` => `2`
   - `./build/freebsd-release-ozig/bun-profile --version` => `1.3.10`
   - `./build/freebsd-release-ozig/bun-profile -e 'console.log(40+2)'` => `42`
+
+## 2026-02-19 step 3 (deterministic stage0 EBADF repro)
+
+- Added repro entry point:
+  - `scripts/freebsd-stage0-ebadf-repro.sh`
+- It captures two deterministic failures against stage0:
+  1. minimal stdout path:
+     - `stage0 -e 'process.stdout.write("ok\n")'`
+  2. exact CMake bindgen-v2 `list-outputs` path:
+     - `stage0 run src/codegen/bindgenv2/script.ts --command=list-outputs ...`
+- Both currently fail with `EBADF` and non-zero exit.
+
+### Evidence (current run)
+
+- Repro #1:
+  - syscall: `fstat`
+  - error: `EBADF: Bad file descriptor`
+  - path: `NativeWritable_lazyConstruct` / `NativeWritablePrototypeWrite`
+- Repro #2:
+  - syscall: `write` with `fd: 22`
+  - error: `EBADF: Bad file descriptor`
+  - callsite: `src/codegen/bindgenv2/script.ts:72` (`process.stdout.write(outputs.join(";"))`)
+- stage0 banner in failures:
+  - `Bun v0.0.0 (Linux x64 baseline)`
+
+### Saved logs
+
+- `build/freebsd-bootstrap/logs/stage0-ebadf-min-stdout.out`
+- `build/freebsd-bootstrap/logs/stage0-ebadf-min-stdout.err`
+- `build/freebsd-bootstrap/logs/stage0-ebadf-bindgen-list-outputs.out`
+- `build/freebsd-bootstrap/logs/stage0-ebadf-bindgen-list-outputs.err`
+
+## 2026-02-19 step 4 (bindgen-v2 stage0 output-path fix)
+
+- Implemented targeted workaround in:
+  - `src/codegen/bindgenv2/script.ts`
+- Change:
+  - replaced `process.stdout.write` / `process.stderr.write` / `console.error` output paths with direct fd writes via `node:fs` `writeSync(1/2, ...)`.
+- Rationale:
+  - stage0 (`0.0.0`) on FreeBSD currently fails when Node stream-backed stdio initializes (`EBADF`), but direct fd writes work.
+
+### Validation
+
+- Direct stage0 bindgen-v2 list-outputs now succeeds:
+  - command:
+    - `stage0 bun run src/codegen/bindgenv2/script.ts --command=list-outputs ...`
+  - result:
+    - exit code `0`
+    - output written to stdout (non-empty)
+- CMake configure validation with stage0 bindgen-v2 enabled:
+  - env:
+    - `BUN_FREEBSD_NPM_INSTALL=1`
+    - `BUN_FREEBSD_CODEGEN_NODE=1`
+    - `BUN_FREEBSD_BINDGENV2_NODE=0`
+  - result:
+    - configure completed successfully (with local `WEBKIT_PATH`)
+
+### Fallback reduction status
+
+- `BUN_FREEBSD_BINDGENV2_NODE` can now be set to `0` in the checkpoint path.
+- Remaining fallback still required:
+  - `BUN_FREEBSD_CODEGEN_NODE=1`
+
+### 2026-02-19 update: split bindgen-v2 mode
+
+- CMake now supports split bindgen-v2 execution when:
+  - `BUN_FREEBSD_BINDGENV2_NODE=0`
+  - `BUN_FREEBSD_CODEGEN_NODE=1`
+- Behavior:
+  - configure-time `list-outputs`: stage0 bun
+  - build-time `generate`: Node runner
+- Evidence:
+  - configure log (`/tmp/freebsd-bindgen-split-configure.log`) shows stage0 invocation during bindgen-v2 list-output discovery.
+  - generated `build/freebsd-bindgen-split-check/build.ninja` contains:
+    - bindgen-v2 `generate` command using `node scripts/bindgenv2-node-runner.mjs`.
+
+### Remaining blocker for fully removing codegen Node fallback
+
+- Stage0 still fails in several runtime paths used by other codegen/install steps (examples seen when those paths hit stage0 directly):
+  - `Bun.spawnSync(...)` in `src/codegen/generate-jssink.ts` (`posix_spawn` EPERM)
+  - `bun install --frozen-lockfile` segfault in stage0
+  - `src/codegen/bindgen.ts` failure (`@lezer/cpp` module / bind parse errors under stage0 runtime)
