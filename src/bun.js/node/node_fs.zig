@@ -3595,7 +3595,7 @@ pub const NodeFS = struct {
             return ret.errnoSysP(c.copyfile(src, dest, null, mode), .copyfile, src) orelse ret.success;
         }
 
-        if (comptime Environment.isLinux) {
+        if (comptime (Environment.isLinux or Environment.isFreeBSD)) {
             var src_buf: bun.PathBuffer = undefined;
             var dest_buf: bun.PathBuffer = undefined;
             const src = args.src.sliceZ(&src_buf);
@@ -3609,7 +3609,7 @@ pub const NodeFS = struct {
                 src_fd.close();
             }
 
-            const stat_: linux.Stat = switch (Syscall.fstat(src_fd)) {
+            const stat_: bun.Stat = switch (Syscall.fstat(src_fd)) {
                 .result => |result| result,
                 .err => |err| return Maybe(Return.CopyFile){ .err = err },
             };

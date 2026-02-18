@@ -829,9 +829,9 @@ const metadata_version_line = std.fmt.comptimePrint(
 
 fn handleSegfaultPosix(sig: i32, info: *const std.posix.siginfo_t, _: ?*const anyopaque) callconv(.c) noreturn {
     const addr = switch (bun.Environment.os) {
-        .linux => @intFromPtr(info.fields.sigfault.addr),
+        .linux => if (bun.Environment.isFreeBSD) @intFromPtr(info.addr) else @intFromPtr(info.fields.sigfault.addr),
         .mac => @intFromPtr(info.addr),
-        .windows, .wasm => @compileError("unreachable"),
+        .wasm, .windows => @compileError("unreachable"),
     };
 
     crashHandler(

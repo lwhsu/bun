@@ -1308,7 +1308,6 @@ pub const StandaloneModuleGraph = struct {
             // if we hit this branch then the file is corrupted and we should just give up
             return null;
         }
-
         var to_read = try bun.default_allocator.alloc(u8, offsets.byte_count);
         var to_read_from = to_read;
 
@@ -1409,6 +1408,12 @@ pub const StandaloneModuleGraph = struct {
 
         switch (Environment.os) {
             .linux => {
+                if (comptime Environment.isFreeBSD) {
+                    const self_exe_path = try bun.selfExePath();
+                    const file = try std.fs.openFileAbsoluteZ(self_exe_path.ptr, .{});
+                    return .fromStdFile(file);
+                }
+
                 if (std.fs.openFileAbsoluteZ("/proc/self/exe", .{})) |easymode| {
                     return .fromStdFile(easymode);
                 } else |_| {

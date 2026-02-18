@@ -1,0 +1,52 @@
+diff --git a/src/bun.js/bindings/BunProcess.cpp b/src/bun.js/bindings/BunProcess.cpp
+index 95f17f52b1..9fd40f34c7 100644
+--- a/src/bun.js/bindings/BunProcess.cpp
++++ b/src/bun.js/bindings/BunProcess.cpp
+@@ -67,7 +67,7 @@
+ #include <mach/mach_time.h>
+ #endif
+ 
+-#if defined(__linux__)
++#if defined(__linux__) || defined(__FreeBSD__)
+ #include <sys/resource.h>
+ #include <sys/time.h>
+ #include <sys/stat.h>
+@@ -90,6 +90,14 @@
+ #define BUN_WEBKIT_VERSION "unknown"
+ #endif
+ 
++#if !defined(REPORTED_NODEJS_VERSION)
++#define REPORTED_NODEJS_VERSION "22.6.0"
++#endif
++
++#if !defined(REPORTED_NODEJS_ABI_VERSION)
++#define REPORTED_NODEJS_ABI_VERSION 127
++#endif
++
+ using JSGlobalObject = JSC::JSGlobalObject;
+ using Exception = JSC::Exception;
+ using JSValue = JSC::JSValue;
+@@ -141,6 +149,8 @@ static JSValue constructPlatform(VM& vm, JSObject* processObject)
+     return JSC::jsString(vm, makeAtomString("darwin"_s));
+ #elif defined(__linux__)
+     return JSC::jsString(vm, makeAtomString("linux"_s));
++#elif defined(__FreeBSD__)
++    return JSC::jsString(vm, makeAtomString("freebsd"_s));
+ #elif OS(WINDOWS)
+     return JSC::jsString(vm, makeAtomString("win32"_s));
+ #else
+@@ -2498,6 +2508,14 @@ err:
+     return EINVAL;
+ #elif OS(WINDOWS)
+     return uv_resident_set_memory(rss);
++#elif defined(__FreeBSD__)
++    struct rusage usage;
++    if (getrusage(RUSAGE_SELF, &usage) == 0) {
++        *rss = static_cast<size_t>(usage.ru_maxrss) * 1024;
++        return 0;
++    }
++
++    return errno;
+ #else
+ #error "Unknown platform"
+ #endif

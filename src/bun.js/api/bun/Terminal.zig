@@ -433,8 +433,10 @@ fn createPtyPosix(cols: u16, rows: u16) CreatePtyError!PtyResult {
             .IXANY = true, // Any character restarts output
             .IMAXBEL = true, // Ring bell on input queue full
             .BRKINT = true, // Signal interrupt on break
-            .IUTF8 = true, // Input is UTF-8
         };
+        if (@hasField(@TypeOf(t.iflag), "IUTF8")) {
+            @field(t.iflag, "IUTF8") = true; // Input is UTF-8
+        }
 
         // Output flags: standard terminal output processing
         t.oflag = .{

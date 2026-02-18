@@ -1,0 +1,41 @@
+--- a/src/js_lexer/identifier_data.zig
++++ b/src/js_lexer/identifier_data.zig
+@@ -94,6 +94,11 @@
+ 
+ const Cache = @import("./identifier_cache.zig");
+ 
++fn chdirToSourceDir() !void {
++    const source_dir = std.fs.path.dirname(@src().file) orelse "src/js_lexer";
++    try std.posix.chdir(source_dir);
++}
++
+ pub fn main() anyerror!void {
+     var id_start_cached = Cache.CachedBitset{ .range = id_start_range, .len = id_start_count + 1 };
+     var id_continue_cached = Cache.CachedBitset{ .range = id_end_range, .len = id_end_count + 1 };
+@@ -101,7 +106,7 @@
+     const id_continue_data = std.mem.asBytes(&id_continue.masks);
+     const id_start_data = std.mem.asBytes(&id_start.masks);
+ 
+-    try std.posix.chdir(std.fs.path.dirname(@src().file).?);
++    try chdirToSourceDir();
+     var start = try std.fs.cwd().createFileZ("id_start_bitset.meta.blob", .{ .truncate = true });
+     try start.writeAll(std.mem.asBytes(&id_start_cached));
+     start.close();
+@@ -122,7 +127,7 @@
+ test "Check" {
+     const id_start_cached_correct = Cache.CachedBitset{ .range = id_start_range, .len = id_start_count + 1 };
+     const id_continue_cached_correct = Cache.CachedBitset{ .range = id_end_range, .len = id_end_count + 1 };
+-    try std.posix.chdir(std.fs.path.dirname(@src().file).?);
++    try chdirToSourceDir();
+     var start_cached = try std.fs.cwd().openFileZ("id_start_bitset.meta.blob", .{ .mode = .read_only });
+     const start_cached_data = try start_cached.readToEndAlloc(std.heap.c_allocator, 4096);
+ 
+@@ -145,7 +150,7 @@
+ test "Check #2" {
+     const id_start_cached_correct = Cache.CachedBitset{ .range = id_start_range, .len = id_start_count + 1 };
+     const id_continue_cached_correct = Cache.CachedBitset{ .range = id_end_range, .len = id_end_count + 1 };
+-    try std.posix.chdir(std.fs.path.dirname(@src().file).?);
++    try chdirToSourceDir();
+     const start_cached_data = std.mem.asBytes(&Cache.id_start_meta);
+ 
+     try std.testing.expectEqualSlices(u8, start_cached_data, std.mem.asBytes(&id_start_cached_correct));

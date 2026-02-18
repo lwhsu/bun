@@ -17,6 +17,7 @@ pub const isPosix = !isWindows and !isWasm;
 pub const isDebug = builtin.mode == .Debug;
 pub const isTest = builtin.is_test;
 pub const isLinux = builtin.target.os.tag == .linux;
+pub const isFreeBSD = builtin.target.os.tag == .freebsd;
 pub const isAarch64 = builtin.target.cpu.arch.isAARCH64();
 pub const isX86 = builtin.target.cpu.arch.isX86();
 pub const isX64 = builtin.target.cpu.arch == .x86_64;
@@ -133,6 +134,8 @@ pub const OperatingSystem = enum {
 pub const os: OperatingSystem = if (isMac)
     .mac
 else if (isLinux)
+    .linux
+else if (isFreeBSD)
     .linux
 else if (isWindows)
     .windows

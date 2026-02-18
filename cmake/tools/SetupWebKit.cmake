@@ -187,6 +187,24 @@ if(WEBKIT_LOCAL)
   return()
 endif()
 
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  # FreeBSD does not have published prebuilt WebKit archives, but allow using
+  # an already-built local WebKit directory via -DWEBKIT_PATH=...
+  if(EXISTS ${WEBKIT_LIB_PATH}/libJavaScriptCore.a
+     AND EXISTS ${WEBKIT_LIB_PATH}/libWTF.a
+     AND EXISTS ${WEBKIT_LIB_PATH}/libbmalloc.a)
+    message(STATUS "Using local WebKit from WEBKIT_PATH=${WEBKIT_PATH}")
+    return()
+  endif()
+
+  message(FATAL_ERROR
+    "Prebuilt WebKit archives are not published for FreeBSD. "
+    "Use -DWEBKIT_LOCAL=ON with a local vendor/WebKit checkout, "
+    "or set -DWEBKIT_PATH=<path-to-a-local-WebKit-build> that contains "
+    "libJavaScriptCore.a, libWTF.a, and libbmalloc.a."
+  )
+endif()
+
 if(WIN32)
   set(WEBKIT_OS "windows")
 elseif(APPLE)

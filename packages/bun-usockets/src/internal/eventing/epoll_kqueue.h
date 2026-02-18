@@ -33,7 +33,34 @@
 #define LIBUS_SOCKET_READABLE 1
 #define LIBUS_SOCKET_WRITABLE 2
 
+#if defined(__FreeBSD__)
+#include <stdint.h>
+#define kevent64_s kevent
+#ifndef KEVENT_FLAG_ERROR_EVENTS
+#define KEVENT_FLAG_ERROR_EVENTS 0
+#endif
+#ifndef KEVENT_FLAG_IMMEDIATE
+#define KEVENT_FLAG_IMMEDIATE 0
+#endif
+#define EV_SET64(kevp, a, b, c, d, e, f, g, h) \
+    EV_SET((kevp), (a), (b), (c), (d), (e), ((void *)(uintptr_t)(f)))
+static inline int kevent64(int kq, const struct kevent64_s *changelist, int nchanges,
+                           struct kevent64_s *eventlist, int nevents, unsigned int flags,
+                           const struct timespec *timeout) {
+    (void)flags;
+    return kevent(
+        kq,
+        (const struct kevent *)changelist,
+        nchanges,
+        (struct kevent *)eventlist,
+        nevents,
+        timeout);
+}
+#endif
+
+#if defined(__APPLE__)
 #include <mach/mach.h>
+#endif
 #endif
 
 struct us_loop_t {

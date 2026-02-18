@@ -49,6 +49,14 @@ extern "C" int kill(int pid, int sig)
 #endif
 #endif
 
+#if defined(__FreeBSD__)
+#include <atomic>
+
+namespace WTF::Detail {
+std::atomic<int> wtfStringCopyCount;
+}
+#endif
+
 // if linux
 #if defined(__linux__)
 #include <features.h>

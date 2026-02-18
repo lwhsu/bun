@@ -928,6 +928,8 @@ pub const FilePoll = struct {
                 this.deactivate(loop);
                 return .initErr(bun.sys.Error.fromCode(errno, .kqueue));
             }
+        } else if (comptime Environment.isFreeBSD) {
+            return .initErr(.{ .errno = @intFromEnum(bun.sys.E.INVAL), .syscall = .kevent });
         } else {
             @compileError("unsupported platform");
         }
@@ -1077,6 +1079,8 @@ pub const FilePoll = struct {
                 std.math.minInt(@TypeOf(rc))...-1 => return bun.sys.Maybe(void).errnoSys(@intFromEnum(errno), .kevent).?,
                 else => {},
             }
+        } else if (comptime Environment.isFreeBSD) {
+            return .initErr(.{ .errno = @intFromEnum(bun.sys.E.INVAL), .syscall = .kevent });
         } else {
             @compileError("unsupported platform");
         }

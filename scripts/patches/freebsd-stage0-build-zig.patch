@@ -1,0 +1,47 @@
+--- a/build.zig
++++ b/build.zig
+@@ -137,21 +137,23 @@ pub fn build(b: *Build) !void {
+     var target_query = b.standardTargetOptionsQueryOnly(.{});
+     const optimize = b.standardOptimizeOption(.{});
+ 
+-    const os, const arch = brk: {
++    const os, const arch, const resolved_os_tag = brk: {
+         // resolve the target query to pick up what operating system and cpu
+         // architecture that is desired. this information is used to slightly
+         // refine the query.
+         const temp_resolved = b.resolveTargetQuery(target_query);
+         const arch = temp_resolved.result.cpu.arch;
++        const os_tag = temp_resolved.result.os.tag;
+         const os: OperatingSystem = if (arch.isWasm())
+             .wasm
+-        else switch (temp_resolved.result.os.tag) {
++        else switch (os_tag) {
+             .macos => .mac,
+             .linux => .linux,
++            .freebsd => .linux,
+             .windows => .windows,
+             else => |t| std.debug.panic("Unsupported OS tag {}", .{t}),
+         };
+-        break :brk .{ os, arch };
++        break :brk .{ os, arch, os_tag };
+     };
+ 
+     // target must be refined to support older but very popular devices on
+@@ -163,7 +165,7 @@ pub fn build(b: *Build) !void {
+     }
+ 
+     target_query.os_version_min = getOSVersionMin(os);
+-    target_query.glibc_version = getOSGlibCVersion(os);
++    target_query.glibc_version = if (resolved_os_tag == .linux) getOSGlibCVersion(os) else null;
+ 
+     const target = b.resolveTargetQuery(target_query);
+ 
+@@ -372,7 +374,7 @@ pub fn addBunObject(b: *Build, opts: *BunBuildOptions) *Compile {
+         obj.link_function_sections = true;
+         obj.link_data_sections = true;
+ 
+-        if (opts.optimize == .Debug) {
++        if (opts.optimize == .Debug and opts.target.result.os.tag != .freebsd) {
+             obj.root_module.valgrind = true;
+         }
+     }

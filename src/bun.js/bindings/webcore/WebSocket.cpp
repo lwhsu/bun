@@ -670,7 +670,7 @@ ExceptionOr<void> WebSocket::connect(const String& url, const Vector<String>& pr
     if (this->m_upgradeClient == nullptr) {
         m_state = CLOSED;
         if (auto* context = scriptExecutionContext()) {
-            context->postTask([this, protectedThis = Ref { *this }](ScriptExecutionContext& context) {
+            context->postTask([protectedThis = Ref { *this }](ScriptExecutionContext& context) {
                 ASSERT(scriptExecutionContext());
                 auto* globalObject = context.jsGlobalObject();
 
@@ -1256,7 +1256,7 @@ void WebSocket::didConnect()
             this->decPendingActivityCount();
         } else {
             this->incPendingActivityCount();
-            context->postTask([this, protectedThis = Ref { *this }](ScriptExecutionContext& context) {
+            context->postTask([protectedThis = Ref { *this }](ScriptExecutionContext& context) {
                 ASSERT(scriptExecutionContext());
                 protectedThis->dispatchEvent(Event::create(eventNames().openEvent, Event::CanBubble::No, Event::IsCancelable::No));
                 protectedThis->decPendingActivityCount();
@@ -1289,7 +1289,7 @@ void WebSocket::didReceiveMessage(String&& message)
 
     if (auto* context = scriptExecutionContext()) {
         this->incPendingActivityCount();
-        context->postTask([this, message_ = WTF::move(message), protectedThis = Ref { *this }](ScriptExecutionContext& context) {
+        context->postTask([message_ = WTF::move(message), protectedThis = Ref { *this }](ScriptExecutionContext& context) {
             ASSERT(scriptExecutionContext());
             protectedThis->dispatchEvent(MessageEvent::create(message_, protectedThis->m_url.string()));
             protectedThis->decPendingActivityCount();
@@ -1324,7 +1324,7 @@ void WebSocket::didReceiveBinaryData(const AtomString& eventName, const std::spa
         if (auto* context = scriptExecutionContext()) {
             RefPtr<Blob> blob = Blob::create(binaryData, context->jsGlobalObject());
             this->incPendingActivityCount();
-            context->postTask([this, name = eventName, blob = blob.releaseNonNull(), protectedThis = Ref { *this }](ScriptExecutionContext& context) {
+            context->postTask([name = eventName, blob = blob.releaseNonNull(), protectedThis = Ref { *this }](ScriptExecutionContext& context) {
                 ASSERT(scriptExecutionContext());
                 protectedThis->dispatchEvent(MessageEvent::create(name, blob, protectedThis->m_url.string()));
                 protectedThis->decPendingActivityCount();
@@ -1479,14 +1479,14 @@ void WebSocket::didClose(unsigned unhandledBufferedAmount, unsigned short code, 
 
         // we deinit if possible in the next tick
         if (auto* context = scriptExecutionContext()) {
-            context->postTask([this, protectedThis = Ref { *this }](ScriptExecutionContext& context) {
+            context->postTask([protectedThis = Ref { *this }](ScriptExecutionContext& context) {
                 ASSERT(scriptExecutionContext());
                 protectedThis->disablePendingActivity();
             });
             return;
         }
     } else if (auto* context = scriptExecutionContext()) {
-        context->postTask([this, code, wasClean, reason, protectedThis = Ref { *this }](ScriptExecutionContext& context) {
+        context->postTask([code, wasClean, reason, protectedThis = Ref { *this }](ScriptExecutionContext& context) {
             ASSERT(scriptExecutionContext());
             protectedThis->dispatchEvent(CloseEvent::create(wasClean, code, reason));
             protectedThis->disablePendingActivity();

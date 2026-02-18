@@ -1,0 +1,40 @@
+diff --git a/src/bun.js/bindings/c-bindings.cpp b/src/bun.js/bindings/c-bindings.cpp
+index a4c7ab8e6e..cdff66ce31 100644
+--- a/src/bun.js/bindings/c-bindings.cpp
++++ b/src/bun.js/bindings/c-bindings.cpp
+@@ -440,7 +440,7 @@ extern "C" void bun_initialize_process()
+     bun_close_range(4, ~0U, CLOSE_RANGE_CLOEXEC);
+ #endif
+ 
+-#if OS(LINUX) || OS(DARWIN)
++#if OS(LINUX) || OS(DARWIN) || OS(FREEBSD)
+ 
+     int devNullFd_ = -1;
+     bool anyTTYs = false;
+@@ -564,7 +564,7 @@ extern "C" int32_t open_as_nonblocking_tty(int32_t fd, int32_t mode)
+ static bool can_open_as_nonblocking_tty(int32_t fd)
+ {
+     int result;
+-#if OS(LINUX) || OS(FreeBSD)
++#if OS(LINUX) || OS(FREEBSD)
+     int dummy = 0;
+ 
+     result = ioctl(fd, TIOCGPTN, &dummy) != 0;
+@@ -627,7 +627,7 @@ extern "C" void Bun__disableSOLinger(SOCKET fd)
+ 
+ // Handle signals in bun.spawnSync.
+ // If we receive a signal, we want to forward the signal to the child process.
+-#if OS(LINUX) || OS(DARWIN)
++#if OS(LINUX) || OS(DARWIN) || OS(FREEBSD)
+ #include <signal.h>
+ #include <pthread.h>
+ 
+@@ -662,7 +662,7 @@ extern "C" void Bun__disableSOLinger(SOCKET fd)
+ 
+ #endif
+ 
+-#if OS(DARWIN)
++#if OS(DARWIN) || OS(FREEBSD)
+ #define FOR_EACH_SIGNAL(M) FOR_EACH_POSIX_SIGNAL(M)
+ #endif
+ 

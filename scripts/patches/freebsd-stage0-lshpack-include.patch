@@ -1,0 +1,12 @@
+diff --git a/Makefile b/Makefile
+index f162b339f7..8d4f5d54c0 100644
+--- a/Makefile
++++ b/Makefile
+@@ -391,6 +391,7 @@ endif
+ ifeq ($(OS_NAME),freebsd)
+ 	INCLUDE_DIRS += $(LINUX_INCLUDE_DIRS)
+ 	INCLUDE_DIRS += -I/usr/local/include
++	INCLUDE_DIRS += -I$(BUN_DEPS_DIR)/ls-hpack
+ 	SQLITE_OBJECT = $(realpath $(BUN_DEPS_OUT_DIR))/sqlite3.o
+ endif
+ 

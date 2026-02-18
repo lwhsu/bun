@@ -77,6 +77,12 @@ pub const darwin = struct {
         break :blk @extern(T, .{ .name = if (bun.Environment.isAarch64) "stat" else "stat64" });
     };
 };
+pub const freebsd = struct {
+    pub const memmem = bun.c.memmem;
+    pub const lstat = @extern(*const fn ([*:0]const u8, [*c]bun.c.struct_stat) callconv(.c) c_int, .{ .name = "lstat" });
+    pub const fstat = @extern(*const fn (c_int, [*c]bun.c.struct_stat) callconv(.c) c_int, .{ .name = "fstat" });
+    pub const stat = @extern(*const fn ([*:0]const u8, [*c]bun.c.struct_stat) callconv(.c) c_int, .{ .name = "stat" });
+};
 pub const windows = struct {
     /// Windows doesn't have memmem, so we need to implement it
     /// This is used in src/string/immutable.zig
@@ -114,7 +120,9 @@ pub const windows = struct {
     };
 };
 
-pub const current = switch (bun.Environment.os) {
+pub const current = if (bun.Environment.isFreeBSD)
+    freebsd
+else switch (bun.Environment.os) {
     .linux => linux,
     .windows => windows,
     .mac => darwin,

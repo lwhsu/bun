@@ -145,36 +145,70 @@ pub fn NewIterator(comptime use_windows_ospath: bool) type {
             pub fn next(self: *Self) Result {
                 start_over: while (true) {
                     if (self.index >= self.end_index) {
-                        const rc = linux.getdents64(self.dir.cast(), &self.buf, self.buf.len);
-                        if (Result.errnoSys(rc, .getdents64)) |err| return err;
+                        const rc = if (comptime builtin.os.tag == .freebsd)
+                            posix.system.getdents(self.dir.cast(), &self.buf, self.buf.len)
+                        else
+                            linux.getdents64(self.dir.cast(), &self.buf, self.buf.len);
+                        if (Result.errnoSys(rc, .getdents64)) |err| {
+                            // FreeBSD can report ENOENT when iterating an unlinked but still-open directory.
+                            if (comptime builtin.os.tag == .freebsd) {
+                                if (err.getErrno() == .NOENT) {
+                                    return .{ .result = null };
+                                }
+                            }
+                            return err;
+                        }
                         if (rc == 0) return .{ .result = null };
                         self.index = 0;
-                        self.end_index = rc;
+                        self.end_index = @as(usize, @intCast(rc));
                     }
                     const linux_entry = @as(*align(1) linux.dirent64, @ptrCast(&self.buf[self.index]));
-                    const next_index = self.index + linux_entry.reclen;
+                    const bsd_entry = @as(*align(1) posix.system.dirent, @ptrCast(&self.buf[self.index]));
+                    const next_index = self.index + if (comptime builtin.os.tag == .freebsd)
+                        (if (@hasDecl(posix.system.dirent, "reclen")) bsd_entry.reclen() else bsd_entry.reclen)
+                    else
+                        linux_entry.reclen;
                     self.index = next_index;
 
-                    const name = mem.sliceTo(@as([*:0]u8, @ptrCast(&linux_entry.name)), 0);
+                    const name = if (comptime builtin.os.tag == .freebsd)
+                        (if (@hasField(posix.system.dirent, "namlen"))
+                            @as([*]u8, @ptrCast(&bsd_entry.name))[0..bsd_entry.namlen]
+                        else
+                            mem.sliceTo(@as([*:0]u8, @ptrCast(&bsd_entry.name)), 0))
+                    else
+                        mem.sliceTo(@as([*:0]u8, @ptrCast(&linux_entry.name)), 0);
 
                     // skip . and .. entries
                     if (strings.eqlComptime(name, ".") or strings.eqlComptime(name, "..")) {
                         continue :start_over;
                     }
 
-                    const entry_kind: Entry.Kind = switch (linux_entry.type) {
-                        linux.DT.BLK => Entry.Kind.block_device,
-                        linux.DT.CHR => Entry.Kind.character_device,
-                        linux.DT.DIR => Entry.Kind.directory,
-                        linux.DT.FIFO => Entry.Kind.named_pipe,
-                        linux.DT.LNK => Entry.Kind.sym_link,
-                        linux.DT.REG => Entry.Kind.file,
-                        linux.DT.SOCK => Entry.Kind.unix_domain_socket,
-                        // DT_UNKNOWN: Some filesystems (e.g., bind mounts, FUSE, NFS)
-                        // don't provide d_type. Callers should use lstatat() to determine
-                        // the type when needed (lazy stat pattern for performance).
-                        else => Entry.Kind.unknown,
-                    };
+                    const entry_kind: Entry.Kind = if (comptime builtin.os.tag == .freebsd)
+                        switch (bsd_entry.type) {
+                            posix.DT.BLK => Entry.Kind.block_device,
+                            posix.DT.CHR => Entry.Kind.character_device,
+                            posix.DT.DIR => Entry.Kind.directory,
+                            posix.DT.FIFO => Entry.Kind.named_pipe,
+                            posix.DT.LNK => Entry.Kind.sym_link,
+                            posix.DT.REG => Entry.Kind.file,
+                            posix.DT.SOCK => Entry.Kind.unix_domain_socket,
+                            posix.DT.WHT => Entry.Kind.whiteout,
+                            else => Entry.Kind.unknown,
+                        }
+                    else
+                        switch (linux_entry.type) {
+                            linux.DT.BLK => Entry.Kind.block_device,
+                            linux.DT.CHR => Entry.Kind.character_device,
+                            linux.DT.DIR => Entry.Kind.directory,
+                            linux.DT.FIFO => Entry.Kind.named_pipe,
+                            linux.DT.LNK => Entry.Kind.sym_link,
+                            linux.DT.REG => Entry.Kind.file,
+                            linux.DT.SOCK => Entry.Kind.unix_domain_socket,
+                            // DT_UNKNOWN: Some filesystems (e.g., bind mounts, FUSE, NFS)
+                            // don't provide d_type. Callers should use lstatat() to determine
+                            // the type when needed (lazy stat pattern for performance).
+                            else => Entry.Kind.unknown,
+                        };
                     return .{
                         .result = IteratorResult{
                             .name = PathString.init(name),

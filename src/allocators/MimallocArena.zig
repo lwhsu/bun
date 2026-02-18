@@ -213,6 +213,10 @@ fn vtable_free(
     // so it's faster if we don't pass that value through
     // but its good to have that assertion
     if (comptime bun.Environment.isDebug) {
+        if (comptime bun.Environment.isFreeBSD) {
+            mimalloc.mi_free(buf.ptr);
+            return;
+        }
         assert(mimalloc.mi_is_in_heap_region(buf.ptr));
         if (mimalloc.mustUseAlignedAlloc(alignment))
             mimalloc.mi_free_size_aligned(buf.ptr, buf.len, alignment.toByteUnits())

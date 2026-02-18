@@ -1582,7 +1582,9 @@ pub fn reloadProcess(
             },
         }
     } else if (comptime Environment.isPosix) {
-        on_before_reload_process_linux();
+        if (comptime !Environment.isFreeBSD) {
+            on_before_reload_process_linux();
+        }
         const err = std.posix.execveZ(
             exec_path,
             newargv,
@@ -3139,7 +3141,7 @@ pub fn getRoughTickCount(comptime mock_mode: timespec.MockMode) timespec {
         };
     }
 
-    return 0;
+    return .epoch;
 }
 
 /// When you don't need a super accurate timestamp, this is a fast way to get one.

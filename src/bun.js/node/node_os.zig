@@ -405,6 +405,13 @@ pub fn hostname(global: *jsc.JSGlobalObject) bun.JSError!jsc.JSValue {
 }
 
 pub fn loadavg(global: *jsc.JSGlobalObject) bun.JSError!jsc.JSValue {
+    if (comptime Environment.isFreeBSD) {
+        return jsc.JSArray.create(global, &.{
+            jsc.JSValue.jsNumber(0),
+            jsc.JSValue.jsNumber(0),
+            jsc.JSValue.jsNumber(0),
+        });
+    }
     const result = switch (bun.Environment.os) {
         .mac => loadavg: {
             var avg: c.struct_loadavg = undefined;
@@ -488,7 +495,7 @@ fn networkInterfacesPosix(globalThis: *jsc.JSGlobalObject) bun.JSError!jsc.JSVal
             if (iface.ifa_addr == null) return false;
             return if (comptime Environment.isLinux)
                 return iface.ifa_addr.*.sa_family == std.posix.AF.PACKET
-            else if (comptime Environment.isMac)
+            else if (comptime (Environment.isMac or Environment.isFreeBSD))
                 return iface.ifa_addr.?.*.sa_family == std.posix.AF.LINK
             else
                 @compileError("unreachable");
@@ -584,7 +591,7 @@ fn networkInterfacesPosix(globalThis: *jsc.JSGlobalObject) bun.JSError!jsc.JSVal
                 //  cast to a link-layer socket address
                 if (comptime Environment.isLinux) {
                     break @as(?*std.posix.sockaddr.ll, @ptrCast(@alignCast(ll_iface.ifa_addr)));
-                } else if (comptime Environment.isMac) {
+                } else if (comptime (Environment.isMac or Environment.isFreeBSD)) {
                     break @as(?*c.sockaddr_dl, @ptrCast(@alignCast(ll_iface.ifa_addr)));
                 } else {
                     @compileError("unreachable");
@@ -595,7 +602,7 @@ fn networkInterfacesPosix(globalThis: *jsc.JSGlobalObject) bun.JSError!jsc.JSVal
                 // Encode its link-layer address.  We need 2*6 bytes for the
                 //  hex characters and 5 for the colon separators
                 var mac_buf: [17]u8 = undefined;
-                const addr_data = if (comptime Environment.isLinux) ll_addr.addr else if (comptime Environment.isMac) ll_addr.sdl_data[ll_addr.sdl_nlen..] else @compileError("unreachable");
+                const addr_data = if (comptime Environment.isLinux) ll_addr.addr else if (comptime (Environment.isMac or Environment.isFreeBSD)) ll_addr.sdl_data[ll_addr.sdl_nlen..] else @compileError("unreachable");
                 if (addr_data.len < 6) {
                     const mac = "00:00:00:00:00:00";
                     interface.put(globalThis, jsc.ZigString.static("mac"), jsc.ZigString.init(mac).withEncoding().toJS(globalThis));
@@ -753,6 +760,13 @@ fn networkInterfacesWindows(globalThis: *jsc.JSGlobalObject) bun.JSError!jsc.JSV
 
 pub fn release() bun.String {
     var name_buffer: [bun.HOST_NAME_MAX]u8 = undefined;
+    if (comptime Environment.isFreeBSD) {
+        var uts_buf: c.struct_utsname = undefined;
+        _ = c.uname(&uts_buf);
+        const result = bun.sliceTo(&uts_buf.release, 0);
+        bun.copy(u8, &name_buffer, result);
+        return bun.String.cloneUTF8(name_buffer[0..result.len]);
+    }
 
     const value = switch (Environment.os) {
         .linux => slice: {
@@ -856,6 +870,9 @@ pub fn setPriority2(global: *jsc.JSGlobalObject, priority: i32) !void {
 }
 
 pub fn totalmem() u64 {
+    if (comptime Environment.isFreeBSD) {
+        return libuv.uv_get_total_memory();
+    }
     switch (bun.Environment.os) {
         .mac => {
             var memory_: [32]c_ulonglong = undefined;
@@ -886,6 +903,14 @@ pub fn totalmem() u64 {
 }
 
 pub fn uptime(global: *jsc.JSGlobalObject) bun.JSError!f64 {
+    if (comptime Environment.isFreeBSD) {
+        var uptime_value: f64 = undefined;
+        const err = libuv.uv_uptime(&uptime_value);
+        if (err != 0) {
+            return 0;
+        }
+        return uptime_value;
+    }
     switch (Environment.os) {
         .windows => {
             var uptime_value: f64 = undefined;
@@ -956,6 +981,13 @@ pub fn userInfo(globalThis: *jsc.JSGlobalObject, options: gen.UserInfoOptions) b
 
 pub fn version() bun.JSError!bun.String {
     var name_buffer: [bun.HOST_NAME_MAX]u8 = undefined;
+    if (comptime Environment.isFreeBSD) {
+        var uts_buf: c.struct_utsname = undefined;
+        _ = c.uname(&uts_buf);
+        const result = bun.sliceTo(&uts_buf.version, 0);
+        bun.copy(u8, &name_buffer, result);
+        return bun.String.cloneUTF8(name_buffer[0..result.len]);
+    }
 
     const slice: []const u8 = switch (Environment.os) {
         .mac => slice: {

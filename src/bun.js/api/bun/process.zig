@@ -27,6 +27,30 @@ const win_rusage = struct {
     nivcsw: u0 = 0,
 };
 
+const freebsd_timeval = extern struct {
+    sec: i64 = 0,
+    usec: i64 = 0,
+};
+
+const freebsd_rusage = extern struct {
+    utime: freebsd_timeval = .{},
+    stime: freebsd_timeval = .{},
+    maxrss: i64 = 0,
+    ixrss: i64 = 0,
+    idrss: i64 = 0,
+    isrss: i64 = 0,
+    minflt: i64 = 0,
+    majflt: i64 = 0,
+    nswap: i64 = 0,
+    inblock: i64 = 0,
+    oublock: i64 = 0,
+    msgsnd: i64 = 0,
+    msgrcv: i64 = 0,
+    nsignals: i64 = 0,
+    nvcsw: i64 = 0,
+    nivcsw: i64 = 0,
+};
+
 const IO_COUNTERS = extern struct {
     ReadOperationCount: u64 = 0,
     WriteOperationCount: u64 = 0,
@@ -69,7 +93,12 @@ pub fn uv_getrusage(process: *uv.uv_process_t) win_rusage {
 
     return usage_info;
 }
-pub const Rusage = if (Environment.isWindows) win_rusage else std.posix.rusage;
+pub const Rusage = if (Environment.isWindows)
+    win_rusage
+else if (Environment.isFreeBSD)
+    freebsd_rusage
+else
+    std.posix.rusage;
 
 // const ShellSubprocessMini = bun.shell.ShellSubprocessMini;
 pub const ProcessExitHandler = struct {
@@ -1248,6 +1277,7 @@ pub fn spawnProcessPosix(
     var attr = try PosixSpawn.Attr.init();
     defer attr.deinit();
 
+    const POSIX_SPAWN_SETSID = if (@hasDecl(bun.c, "POSIX_SPAWN_SETSID")) bun.c.POSIX_SPAWN_SETSID else 0;
     var flags: i32 = bun.c.POSIX_SPAWN_SETSIGDEF | bun.c.POSIX_SPAWN_SETSIGMASK;
 
     if (comptime Environment.isMac) {
@@ -1263,7 +1293,7 @@ pub fn spawnProcessPosix(
     }
 
     if (options.detached) {
-        flags |= bun.c.POSIX_SPAWN_SETSID;
+        flags |= POSIX_SPAWN_SETSID;
     }
 
     // Pass PTY slave fd to attr for controlling terminal setup

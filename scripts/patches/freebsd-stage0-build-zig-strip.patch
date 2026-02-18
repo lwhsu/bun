@@ -1,0 +1,12 @@
+diff --git a/build.zig b/build.zig
+index 4cdff8250e..9ef5f71b57 100644
+--- a/build.zig
++++ b/build.zig
+@@ -350,7 +350,7 @@ pub fn addBunObject(b: *Build, opts: *BunBuildOptions) *Compile {
+ 
+         .omit_frame_pointer = false,
+-        .strip = false, // stripped at the end
++        .strip = if (opts.target.result.os.tag == .freebsd) true else false, // stripped at the end
+     });
+     obj.bundle_compiler_rt = false;
+     obj.formatted_panics = true;

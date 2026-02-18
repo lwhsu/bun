@@ -110,7 +110,11 @@ pub fn exit(code: u32) noreturn {
     bun.crash_handler.sleepForeverIfAnotherThreadIsCrashing();
 
     if (Environment.isDebug) {
-        bun.assert(bun.debug_allocator_data.backing.?.deinit() == .ok);
+        if (!Environment.isFreeBSD) {
+            bun.assert(bun.debug_allocator_data.backing.?.deinit() == .ok);
+        } else {
+            _ = bun.debug_allocator_data.backing.?.deinit();
+        }
         bun.debug_allocator_data.backing = null;
     }
 
@@ -119,6 +123,17 @@ pub fn exit(code: u32) noreturn {
 
     switch (Environment.os) {
         .mac => std.c.exit(@bitCast(code)),
+        .linux => {
+            if (Environment.isFreeBSD) {
+                std.c.exit(@bitCast(code));
+            }
+            if (Environment.enable_asan) {
+                std.c.exit(@bitCast(code));
+                std.c.abort(); // exit should be noreturn
+            }
+            bun.c.quick_exit(@bitCast(code));
+            std.c.abort(); // quick_exit should be noreturn
+        },
         .windows => {
             Bun__onExit();
             std.os.windows.kernel32.ExitProcess(code);

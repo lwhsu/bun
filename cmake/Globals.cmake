@@ -101,6 +101,8 @@ elseif(CMAKE_HOST_WIN32)
   set(HOST_OS "windows")
 elseif(CMAKE_HOST_LINUX)
   set(HOST_OS "linux")
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "FreeBSD")
+  set(HOST_OS "freebsd")
 else()
   unsupported(CMAKE_HOST_SYSTEM_NAME)
 endif()
@@ -670,16 +672,31 @@ function(register_bun_install)
     message(FATAL_ERROR "register_bun_install: ${NPM_CWD}/package.json does not have dependencies?")
   endif()
 
+  if("$ENV{BUN_FREEBSD_NPM_INSTALL}" STREQUAL "1")
+    set(BUN_INSTALL_COMMAND
+      npm
+      install
+      --no-package-lock
+      --ignore-scripts
+      --no-audit
+      --no-fund
+    )
+  else()
+    set(BUN_INSTALL_COMMAND
+      ${BUN_EXECUTABLE}
+      ${BUN_FLAGS}
+      install
+      --frozen-lockfile
+    )
+  endif()
+
   register_command(
     COMMENT
       ${NPM_COMMENT}
     CWD
       ${NPM_CWD}
     COMMAND
-      ${BUN_EXECUTABLE}
-        ${BUN_FLAGS}
-        install
-        --frozen-lockfile
+      ${BUN_INSTALL_COMMAND}
     SOURCES
       ${NPM_CWD}/package.json
     OUTPUTS

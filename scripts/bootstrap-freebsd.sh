@@ -1,0 +1,589 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$(uname -s)" != "FreeBSD" ]]; then
+  echo "error: scripts/bootstrap-freebsd.sh must run on FreeBSD" >&2
+  exit 1
+fi
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+LEGACY_COMMIT="${BUN_FREEBSD_BOOTSTRAP_COMMIT:-8d7d58606b}"
+BOOTSTRAP_DIR="${BUN_FREEBSD_BOOTSTRAP_DIR:-${ROOT_DIR}/build/freebsd-bootstrap}"
+LEGACY_WORKTREE="${BOOTSTRAP_DIR}/legacy-worktree"
+LEGACY_STAGE0="${LEGACY_WORKTREE}/packages/bun-freebsd-x64/bun"
+STAGE0_DIR="${BOOTSTRAP_DIR}/stage0"
+STAGE0_BIN="${STAGE0_DIR}/bun"
+SHIM_BIN_DIR="${BOOTSTRAP_DIR}/shim-bin"
+BUILD_DIR="${BUN_FREEBSD_BUILD_DIR:-${ROOT_DIR}/build/debug}"
+LEGACY_ZIG="${BUN_FREEBSD_LEGACY_ZIG:-}"
+LEGACY_WEBKIT_DIR="${BUN_FREEBSD_LEGACY_WEBKIT_OUT_DIR:-${BOOTSTRAP_DIR}/bun-webkit-legacy}"
+WEBKIT_REPO_SOURCE="${BUN_FREEBSD_WEBKIT_REPO_SOURCE:-${ROOT_DIR}/vendor/WebKit}"
+LEGACY_WEBKIT_SOURCE="${BUN_FREEBSD_LEGACY_WEBKIT_SOURCE:-${BOOTSTRAP_DIR}/webkit-src-legacy}"
+CURRENT_WEBKIT_DIR="${BUN_FREEBSD_WEBKIT_OUT_DIR:-${BOOTSTRAP_DIR}/bun-webkit}"
+CURRENT_WEBKIT_SOURCE="${BUN_FREEBSD_WEBKIT_SOURCE:-${BOOTSTRAP_DIR}/webkit-src-current}"
+LEGACY_CODEGEN_HELPER="${ROOT_DIR}/scripts/bootstrap-freebsd-generate-legacy-codegen.mjs"
+BUILD_TYPE="${BUN_FREEBSD_CMAKE_BUILD_TYPE:-Release}"
+BUILD_DIR_DEFAULT_SUFFIX="$(printf '%s' "${BUILD_TYPE}" | tr '[:upper:]' '[:lower:]')"
+if [[ -z "${BUN_FREEBSD_BUILD_DIR:-}" ]]; then
+  BUILD_DIR="${ROOT_DIR}/build/${BUILD_DIR_DEFAULT_SUFFIX}"
+fi
+FINAL_TARGET="${BUN_FREEBSD_BUILD_TARGET:-}"
+if [[ -z "${FINAL_TARGET}" ]]; then
+  if [[ "${BUILD_TYPE}" == "Debug" ]]; then
+    FINAL_TARGET="bun-debug"
+  else
+    FINAL_TARGET="bun"
+  fi
+fi
+CURRENT_ZIG="${BUN_FREEBSD_CURRENT_ZIG:-zig}"
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "error: missing command '$1'" >&2
+    exit 1
+  fi
+}
+
+require_cmd git
+require_cmd cmake
+require_cmd ninja
+require_cmd gmake
+require_cmd node
+require_cmd npm
+require_cmd perl
+require_cmd python3
+require_cmd clang
+require_cmd clang++
+require_cmd zig
+
+zig_is_013() {
+  local zig_bin="$1"
+  local version
+  version="$(${zig_bin} version 2>/dev/null || true)"
+  [[ "${version}" == 0.13.* ]]
+}
+
+pick_legacy_zig() {
+  if [[ -n "${LEGACY_ZIG}" ]]; then
+    if ! command -v "${LEGACY_ZIG}" >/dev/null 2>&1; then
+      echo "error: BUN_FREEBSD_LEGACY_ZIG was set but not found: ${LEGACY_ZIG}" >&2
+      exit 1
+    fi
+    if ! zig_is_013 "${LEGACY_ZIG}"; then
+      echo "error: ${LEGACY_ZIG} is not Zig 0.13.x (required for ${LEGACY_COMMIT})" >&2
+      "${LEGACY_ZIG}" version >&2 || true
+      exit 1
+    fi
+    return 0
+  fi
+
+  if command -v zig013 >/dev/null 2>&1; then
+    LEGACY_ZIG="zig013"
+    return 0
+  fi
+
+  if command -v zig >/dev/null 2>&1 && zig_is_013 zig; then
+    LEGACY_ZIG="zig"
+    return 0
+  fi
+
+  cat >&2 <<EOF2
+error: missing Zig 0.13.x for cold-start commit ${LEGACY_COMMIT}
+This bootstrap path does not compile with Zig 0.14+.
+
+FreeBSD pkg currently provides:
+  zig-0.15.2
+  zig014-0.14.0
+
+Please install Zig 0.13.0 manually and expose it as 'zig013', e.g.:
+  sudo mkdir -p /opt
+  # unpack zig 0.13.0 into /opt (offline/manual)
+  sudo ln -sf /opt/zig-freebsd-x86_64-0.13.0/zig /usr/local/bin/zig013
+
+Or point directly to it:
+  BUN_FREEBSD_LEGACY_ZIG=/absolute/path/to/zig-0.13.0 ${0##*/}
+EOF2
+  exit 1
+}
+
+resolve_legacy_commit() {
+  git -C "${ROOT_DIR}" rev-parse --verify "${LEGACY_COMMIT}^{commit}"
+}
+
+resolve_legacy_webkit_commit() {
+  local cmakelists="${LEGACY_WORKTREE}/CMakeLists.txt"
+  if [[ -f "${cmakelists}" ]]; then
+    local cmake_tag
+    cmake_tag="$(
+      awk '/set\(WEBKIT_TAG [0-9a-f]{40}\)/ { tag=$2; gsub("\\)", "", tag); print tag; exit }' \
+        "${cmakelists}"
+    )"
+    if [[ -n "${cmake_tag}" ]]; then
+      echo "${cmake_tag}"
+      return 0
+    fi
+  fi
+
+  local gitlink_commit
+  gitlink_commit="$(git -C "${LEGACY_WORKTREE}" ls-tree HEAD src/bun.js/WebKit | awk '{print $3}')"
+  if [[ -z "${gitlink_commit}" ]]; then
+    echo "error: failed to resolve legacy WebKit commit from ${LEGACY_WORKTREE}" >&2
+    exit 1
+  fi
+  echo "${gitlink_commit}"
+}
+
+resolve_current_webkit_commit() {
+  local setup_cmake="${ROOT_DIR}/cmake/tools/SetupWebKit.cmake"
+  local webkit_commit
+  webkit_commit="$(
+    awk '/set\(WEBKIT_VERSION [0-9a-f]{40}\)/ { version=$2; gsub("\\)", "", version); print version; exit }' \
+      "${setup_cmake}"
+  )"
+  if [[ -z "${webkit_commit}" ]]; then
+    echo "error: failed to parse WEBKIT_VERSION from ${setup_cmake}" >&2
+    exit 1
+  fi
+  echo "${webkit_commit}"
+}
+
+read_packaged_webkit_commit() {
+  local package_dir="$1"
+  local cmakeconfig="${package_dir}/include/cmakeconfig.h"
+  if [[ -f "${cmakeconfig}" ]]; then
+    local commit
+    commit="$(awk -F'"' '/^#define BUN_WEBKIT_VERSION "/ { print $2; exit }' "${cmakeconfig}")"
+    if [[ -n "${commit}" ]]; then
+      echo "${commit}"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+ensure_webkit_source_checkout() {
+  local source_dir="$1"
+  local expected_commit="$2"
+  local label="$3"
+
+  if [[ ! -d "${WEBKIT_REPO_SOURCE}/.git" ]]; then
+    echo "error: missing WebKit git repository at ${WEBKIT_REPO_SOURCE}" >&2
+    echo "  set BUN_FREEBSD_WEBKIT_REPO_SOURCE=/path/to/WebKit clone" >&2
+    exit 1
+  fi
+
+  if ! git -C "${WEBKIT_REPO_SOURCE}" cat-file -e "${expected_commit}^{commit}" >/dev/null 2>&1; then
+    cat >&2 <<EOF2
+error: ${label} WebKit commit ${expected_commit} is not available in ${WEBKIT_REPO_SOURCE}
+
+Please fetch this commit in the local WebKit clone (offline/manual as needed), then retry.
+EOF2
+    exit 1
+  fi
+
+  if [[ -e "${source_dir}/.git" ]]; then
+    local current_commit
+    current_commit="$(git -C "${source_dir}" rev-parse HEAD)"
+    if [[ "${current_commit}" == "${expected_commit}" ]]; then
+      echo "[bootstrap] using cached ${label} WebKit source checkout: ${source_dir} (${expected_commit})"
+      return 0
+    fi
+  fi
+
+  echo "[bootstrap] preparing ${label} WebKit source checkout at ${source_dir} (${expected_commit})"
+  rm -rf "${source_dir}"
+  git -C "${WEBKIT_REPO_SOURCE}" worktree prune
+  git -C "${WEBKIT_REPO_SOURCE}" worktree add --detach -f "${source_dir}" "${expected_commit}"
+}
+
+apply_patch_if_needed() {
+  local patch_file="$1"
+  local patch_label="$2"
+
+  if git -C "${LEGACY_WORKTREE}" apply --check --whitespace=nowarn "${patch_file}" >/dev/null 2>&1; then
+    echo "[bootstrap] applying ${patch_label}"
+    git -C "${LEGACY_WORKTREE}" apply --whitespace=nowarn "${patch_file}"
+    return 0
+  fi
+
+  if git -C "${LEGACY_WORKTREE}" apply --reverse --check --whitespace=nowarn "${patch_file}" >/dev/null 2>&1; then
+    echo "[bootstrap] skipping ${patch_label} (already applied)"
+    return 0
+  fi
+
+  echo "error: ${patch_label} does not apply to ${LEGACY_WORKTREE} HEAD ($(git -C "${LEGACY_WORKTREE}" rev-parse --short HEAD))" >&2
+  echo "  patch: ${patch_file}" >&2
+  exit 1
+}
+
+patch_legacy_worktree_for_freebsd() {
+  local makefile_file="${LEGACY_WORKTREE}/Makefile"
+  local makefile_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-makefile.patch"
+  if [[ -f "${makefile_file}" ]] && grep -q "release-only: release-bindings build-obj" "${makefile_file}"; then
+    if [[ ! -f "${makefile_patch}" ]]; then
+      echo "error: missing patch file: ${makefile_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${makefile_patch}" "FreeBSD legacy Makefile compatibility patch"
+  fi
+
+  local lshpack_include_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-lshpack-include.patch"
+  if [[ -f "${makefile_file}" ]] && grep -q 'INCLUDE_DIRS += -I/usr/local/include' "${makefile_file}" && ! grep -q 'INCLUDE_DIRS += -I$(BUN_DEPS_DIR)/ls-hpack' "${makefile_file}"; then
+    if [[ ! -f "${lshpack_include_patch}" ]]; then
+      echo "error: missing patch file: ${lshpack_include_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${lshpack_include_patch}" "FreeBSD ls-hpack include compatibility patch"
+  fi
+
+  local build_zig_file="${LEGACY_WORKTREE}/build.zig"
+  local build_zig_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-build-zig.patch"
+  if [[ -f "${build_zig_file}" ]] && grep -q "Unsupported OS tag" "${build_zig_file}"; then
+    if [[ ! -f "${build_zig_patch}" ]]; then
+      echo "error: missing patch file: ${build_zig_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${build_zig_patch}" "FreeBSD legacy build.zig compatibility patch"
+  fi
+
+  local build_zig_strip_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-build-zig-strip.patch"
+  if [[ -f "${build_zig_file}" ]] && grep -q 'strip = false, // stripped at the end' "${build_zig_file}"; then
+    if [[ ! -f "${build_zig_strip_patch}" ]]; then
+      echo "error: missing patch file: ${build_zig_strip_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${build_zig_strip_patch}" "FreeBSD legacy build.zig strip workaround"
+  fi
+
+  local env_zig_file="${LEGACY_WORKTREE}/src/env.zig"
+  local env_zig_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-env.patch"
+  if [[ -f "${env_zig_file}" ]] && grep -q "pub const isLinux" "${env_zig_file}"; then
+    if [[ ! -f "${env_zig_patch}" ]]; then
+      echo "error: missing patch file: ${env_zig_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${env_zig_patch}" "FreeBSD legacy env.zig compatibility patch"
+  fi
+
+  local prim_file="${LEGACY_WORKTREE}/src/deps/mimalloc/src/prim/unix/prim.c"
+  if [[ -f "${prim_file}" ]] && grep -q 'try_alignment, hint);' "${prim_file}"; then
+    # FreeBSD/MAP_ALIGNED path in this historical tree logs `hint` before declaration.
+    sed -i '' 's/try_alignment, hint);/try_alignment, addr);/g' "${prim_file}"
+  fi
+
+  local usockets_internal_h="${LEGACY_WORKTREE}/packages/bun-usockets/src/internal/internal.h"
+  local usockets_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-bun-usockets.patch"
+  if [[ -f "${usockets_internal_h}" ]] && grep -q '^#if defined(LIBUS_USE_KQUEUE)$' "${usockets_internal_h}"; then
+    if [[ ! -f "${usockets_patch}" ]]; then
+      echo "error: missing patch file: ${usockets_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${usockets_patch}" "FreeBSD bun-usockets compatibility patch"
+  fi
+
+  local identifier_data_file="${LEGACY_WORKTREE}/src/js_lexer/identifier_data.zig"
+  local identifier_data_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-identifier-data.patch"
+  if [[ -f "${identifier_data_file}" ]] && grep -Fq 'std.fs.path.dirname(@src().file).?' "${identifier_data_file}"; then
+    if [[ ! -f "${identifier_data_patch}" ]]; then
+      echo "error: missing patch file: ${identifier_data_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${identifier_data_patch}" "FreeBSD identifier-cache compatibility patch"
+  fi
+
+  local bun_process_file="${LEGACY_WORKTREE}/src/bun.js/bindings/BunProcess.cpp"
+  local bun_process_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-bun-process.patch"
+  if [[ -f "${bun_process_file}" ]] && grep -q '#error "Unknown platform"' "${bun_process_file}"; then
+    if [[ ! -f "${bun_process_patch}" ]]; then
+      echo "error: missing patch file: ${bun_process_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${bun_process_patch}" "FreeBSD BunProcess compatibility patch"
+  fi
+
+  local c_bindings_file="${LEGACY_WORKTREE}/src/bun.js/bindings/c-bindings.cpp"
+  local c_bindings_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-c-bindings.patch"
+  if [[ -f "${c_bindings_file}" ]] && grep -q 'OS(FreeBSD)' "${c_bindings_file}"; then
+    if [[ ! -f "${c_bindings_patch}" ]]; then
+      echo "error: missing patch file: ${c_bindings_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${c_bindings_patch}" "FreeBSD c-bindings compatibility patch"
+  fi
+
+}
+
+generate_legacy_codegen_files() {
+  if [[ ! -f "${LEGACY_CODEGEN_HELPER}" ]]; then
+    echo "error: missing codegen helper: ${LEGACY_CODEGEN_HELPER}" >&2
+    exit 1
+  fi
+
+  echo "[bootstrap] generating legacy codegen files without host bun"
+  node "${LEGACY_CODEGEN_HELPER}" "${LEGACY_WORKTREE}" "${LEGACY_WORKTREE}/build/codegen"
+}
+
+sync_legacy_codegen_outputs() {
+  echo "[bootstrap] syncing generated legacy codegen outputs"
+
+  local codegen_dir="${LEGACY_WORKTREE}/build/codegen"
+  local bindings_dir="${LEGACY_WORKTREE}/src/bun.js/bindings"
+  local src_dir="${LEGACY_WORKTREE}/src"
+
+  if [[ ! -d "${codegen_dir}" ]]; then
+    echo "error: missing generated codegen directory: ${codegen_dir}" >&2
+    exit 1
+  fi
+
+  local generated_files=(
+    "ZigGeneratedClasses.h"
+    "ZigGeneratedClasses.cpp"
+    "ZigGeneratedClasses.zig"
+    "ZigGeneratedClasses+DOMClientIsoSubspaces.h"
+    "ZigGeneratedClasses+DOMIsoSubspaces.h"
+    "ZigGeneratedClasses+lazyStructureHeader.h"
+    "ZigGeneratedClasses+lazyStructureImpl.h"
+    "SyntheticModuleType.h"
+    "InternalModuleRegistry+createInternalModuleById.h"
+    "InternalModuleRegistryConstants.h"
+    "InternalModuleRegistry+enum.h"
+    "InternalModuleRegistry+numberOfModules.h"
+    "NativeModuleImpl.h"
+    "GeneratedJS2Native.h"
+    "BunObject.lut.h"
+    "ZigGlobalObject.lut.h"
+    "JSBuffer.lut.h"
+    "BunProcess.lut.h"
+    "ProcessBindingConstants.lut.h"
+    "ProcessBindingNatives.lut.h"
+    "JSSink.h"
+    "JSSink.cpp"
+    "JSSink.lut.h"
+  )
+
+  mkdir -p "${bindings_dir}"
+  for name in "${generated_files[@]}"; do
+    if [[ -f "${codegen_dir}/${name}" ]]; then
+      cp "${codegen_dir}/${name}" "${bindings_dir}/${name}"
+    fi
+  done
+
+  if [[ -f "${codegen_dir}/ResolvedSourceTag.zig" ]]; then
+    cp "${codegen_dir}/ResolvedSourceTag.zig" "${src_dir}/ResolvedSourceTag.zig"
+  fi
+  if [[ -f "${codegen_dir}/ErrorCode.zig" ]]; then
+    cp "${codegen_dir}/ErrorCode.zig" "${src_dir}/ErrorCode.zig"
+  fi
+  if [[ -f "${codegen_dir}/ErrorCode+Data.h" ]]; then
+    cp "${codegen_dir}/ErrorCode+Data.h" "${bindings_dir}/ErrorCode+Data.h"
+  fi
+  if [[ -f "${codegen_dir}/ErrorCode+List.h" ]]; then
+    cp "${codegen_dir}/ErrorCode+List.h" "${bindings_dir}/ErrorCode+List.h"
+  fi
+}
+
+pick_legacy_ar() {
+  if command -v llvm-ar >/dev/null 2>&1; then
+    command -v llvm-ar
+    return 0
+  fi
+  if command -v ar >/dev/null 2>&1; then
+    command -v ar
+    return 0
+  fi
+  echo "error: missing ar" >&2
+  exit 1
+}
+
+pick_legacy_ranlib() {
+  if command -v llvm-ranlib >/dev/null 2>&1; then
+    command -v llvm-ranlib
+    return 0
+  fi
+  if command -v ranlib >/dev/null 2>&1; then
+    command -v ranlib
+    return 0
+  fi
+  echo "error: missing ranlib" >&2
+  exit 1
+}
+
+LEGACY_COMMIT_SHA="$(resolve_legacy_commit)"
+CURRENT_WEBKIT_COMMIT="$(resolve_current_webkit_commit)"
+NPM_CLIENT_OVERRIDE="$(command -v npm) --legacy-peer-deps --include=dev"
+CURRENT_ZIG_BIN="$(command -v "${CURRENT_ZIG}" 2>/dev/null || true)"
+if [[ -z "${CURRENT_ZIG_BIN}" ]]; then
+  echo "error: current-tree zig not found: ${CURRENT_ZIG}" >&2
+  exit 1
+fi
+
+user_supplied_current_webkit_path() {
+  for arg in "$@"; do
+    case "${arg}" in
+      -DWEBKIT_PATH=*|-DWEBKIT_LOCAL=*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+ensure_freebsd_webkit_package() {
+  local package_dir="$1"
+  local expected_commit="$2"
+  local package_label="$3"
+  local webkit_source_override="$4"
+  local require_simdutf="${5:-1}"
+  local commit_short="${expected_commit:0:12}"
+  local webkit_build_dir="${package_dir}-build-${commit_short}"
+  local packaged_commit=""
+  local package_ready=0
+
+  if [[ -f "${package_dir}/lib/libJavaScriptCore.a" \
+    && -f "${package_dir}/lib/libWTF.a" ]]; then
+    package_ready=1
+  fi
+
+  if [[ "${package_ready}" == "1" && "${require_simdutf}" == "1" && ! -f "${package_dir}/include/wtf/SIMDUTF.h" ]]; then
+    package_ready=0
+  fi
+
+  if [[ "${package_ready}" == "1" ]]; then
+    packaged_commit="$(read_packaged_webkit_commit "${package_dir}" || true)"
+    if [[ -n "${packaged_commit}" && "${packaged_commit}" == "${expected_commit}" ]]; then
+      echo "[bootstrap] using cached ${package_label} WebKit package: ${package_dir} (${packaged_commit})"
+      return 0
+    fi
+
+    if [[ -z "${packaged_commit}" ]]; then
+      echo "[bootstrap] cached ${package_label} WebKit package is missing BUN_WEBKIT_VERSION metadata: ${package_dir}"
+    else
+      echo "[bootstrap] cached ${package_label} WebKit package commit mismatch:"
+      echo "  expected: ${expected_commit}"
+      echo "  actual:   ${packaged_commit}"
+    fi
+  fi
+
+  echo "[bootstrap] preparing ${package_label} FreeBSD WebKit package (${expected_commit})"
+  if [[ -n "${webkit_source_override}" ]]; then
+    BUN_FREEBSD_WEBKIT_SOURCE="${webkit_source_override}" \
+      BUN_FREEBSD_WEBKIT_BUILD_DIR="${webkit_build_dir}" \
+      BUN_FREEBSD_WEBKIT_OUT_DIR="${package_dir}" \
+      BUN_FREEBSD_WEBKIT_COMMIT="${expected_commit}" \
+      BUN_FREEBSD_WEBKIT_REQUIRE_SIMDUTF="${require_simdutf}" \
+      "${ROOT_DIR}/scripts/prepare-webkit-freebsd.sh"
+  else
+    BUN_FREEBSD_WEBKIT_BUILD_DIR="${webkit_build_dir}" \
+    BUN_FREEBSD_WEBKIT_OUT_DIR="${package_dir}" \
+      BUN_FREEBSD_WEBKIT_COMMIT="${expected_commit}" \
+      BUN_FREEBSD_WEBKIT_REQUIRE_SIMDUTF="${require_simdutf}" \
+      "${ROOT_DIR}/scripts/prepare-webkit-freebsd.sh"
+  fi
+}
+
+ensure_legacy_worktree() {
+  if [[ -e "${LEGACY_WORKTREE}/.git" ]]; then
+    local current_sha
+    current_sha="$(git -C "${LEGACY_WORKTREE}" rev-parse HEAD)"
+    if [[ "${current_sha}" != "${LEGACY_COMMIT_SHA}" ]]; then
+      echo "[bootstrap] removing stale legacy worktree at ${LEGACY_WORKTREE}"
+      rm -rf "${LEGACY_WORKTREE}"
+      git -C "${ROOT_DIR}" worktree prune
+    fi
+  fi
+
+  if [[ ! -e "${LEGACY_WORKTREE}/.git" ]]; then
+    echo "[bootstrap] creating legacy worktree at ${LEGACY_WORKTREE} (${LEGACY_COMMIT_SHA})"
+    git -C "${ROOT_DIR}" worktree add --detach -f "${LEGACY_WORKTREE}" "${LEGACY_COMMIT_SHA}"
+  fi
+}
+
+mkdir -p "${BOOTSTRAP_DIR}" "${STAGE0_DIR}" "${SHIM_BIN_DIR}"
+ln -sf "$(command -v gmake)" "${SHIM_BIN_DIR}/make"
+
+if [[ ! -x "${STAGE0_BIN}" ]]; then
+  pick_legacy_zig
+  LEGACY_ZIG_BIN="$(command -v "${LEGACY_ZIG}")"
+  LEGACY_AR="$(pick_legacy_ar)"
+  LEGACY_RANLIB="$(pick_legacy_ranlib)"
+  ln -sf "${LEGACY_ZIG_BIN}" "${SHIM_BIN_DIR}/zig"
+
+  if [[ "${BUN_FREEBSD_ALLOW_DOWNLOADS:-0}" != "1" ]]; then
+    cat >&2 <<EOF2
+error: cold-start build may fetch git submodules, npm packages, and vendored deps.
+Set BUN_FREEBSD_ALLOW_DOWNLOADS=1 to proceed intentionally.
+EOF2
+    exit 1
+  fi
+
+  ensure_legacy_worktree
+  LEGACY_WEBKIT_COMMIT="${BUN_FREEBSD_LEGACY_WEBKIT_COMMIT:-$(resolve_legacy_webkit_commit)}"
+  ensure_webkit_source_checkout "${LEGACY_WEBKIT_SOURCE}" "${LEGACY_WEBKIT_COMMIT}" "legacy stage0"
+  patch_legacy_worktree_for_freebsd
+  ensure_freebsd_webkit_package "${LEGACY_WEBKIT_DIR}" "${LEGACY_WEBKIT_COMMIT}" "legacy stage0" "${LEGACY_WEBKIT_SOURCE}" "1"
+  mkdir -p "${LEGACY_WORKTREE}/build/bun-deps"
+
+  LEGACY_UWS_LDFLAGS="-I${LEGACY_WORKTREE}/src/deps/boringssl/include -I${LEGACY_WORKTREE}/src/deps/zlib -I${LEGACY_WORKTREE}/src/deps/libdeflate -I${LEGACY_WORKTREE}/src/deps/ls-hpack -I${LEGACY_WEBKIT_DIR}/include"
+
+  echo "[bootstrap] building stage0 from legacy source tree"
+  (
+    cd "${LEGACY_WORKTREE}"
+    PATH="${SHIM_BIN_DIR}:${PATH}" \
+      gmake AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" vendor
+
+    patch_legacy_worktree_for_freebsd
+    generate_legacy_codegen_files
+    sync_legacy_codegen_outputs
+
+    PATH="${SHIM_BIN_DIR}:${PATH}" \
+      gmake AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" identifier-cache
+
+    PATH="${SHIM_BIN_DIR}:${PATH}" \
+      gmake AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" sqlite
+    PATH="${SHIM_BIN_DIR}:${PATH}" \
+      gmake AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" release-bindings
+    PATH="${SHIM_BIN_DIR}:${PATH}" \
+      gmake AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" build-obj
+    PATH="${SHIM_BIN_DIR}:${PATH}" \
+      gmake AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" bun-link-lld-release
+  )
+
+  if [[ ! -x "${LEGACY_STAGE0}" ]]; then
+    echo "error: expected stage0 binary not found at ${LEGACY_STAGE0}" >&2
+    exit 1
+  fi
+
+  install -m 0755 "${LEGACY_STAGE0}" "${STAGE0_BIN}"
+fi
+
+echo "[bootstrap] stage0 ready: ${STAGE0_BIN}"
+"${STAGE0_BIN}" --version
+
+if ! user_supplied_current_webkit_path "$@"; then
+  ensure_webkit_source_checkout "${CURRENT_WEBKIT_SOURCE}" "${CURRENT_WEBKIT_COMMIT}" "current"
+  ensure_freebsd_webkit_package "${CURRENT_WEBKIT_DIR}" "${CURRENT_WEBKIT_COMMIT}" "current" "${CURRENT_WEBKIT_SOURCE}" "1"
+fi
+
+echo "[bootstrap] configuring current tree"
+BUN_FREEBSD_BINDGENV2_NODE=1 \
+BUN_FREEBSD_GENERATE_CLASSES_NODE=1 \
+BUN_FREEBSD_CODEGEN_NODE=1 \
+BUN_FREEBSD_NPM_INSTALL=1 \
+cmake \
+  -S "${ROOT_DIR}" \
+  -B "${BUILD_DIR}" \
+  -GNinja \
+  -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+  -DBUN_EXECUTABLE="${STAGE0_BIN}" \
+  -DUSE_SYSTEM_ZIG=ON \
+  -DZIG_EXECUTABLE="${CURRENT_ZIG_BIN}" \
+  -DWEBKIT_PATH="${CURRENT_WEBKIT_DIR}" \
+  "$@"
+
+echo "[bootstrap] building ${FINAL_TARGET} (${BUILD_TYPE})"
+cmake --build "${BUILD_DIR}" --target "${FINAL_TARGET}"
+
+echo "[bootstrap] complete"
+echo "  stage0: ${STAGE0_BIN}"
+echo "  final : ${BUILD_DIR}/${FINAL_TARGET}"

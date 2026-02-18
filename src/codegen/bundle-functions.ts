@@ -28,7 +28,7 @@ import { applyGlobalReplacements, define } from "./replacements";
 const PARALLEL = false;
 const KEEP_TMP = true;
 
-if (import.meta.main) {
+if (import.meta.main && process.argv[1]?.includes("bundle-functions")) {
   throw new Error("This script is not meant to be run directly");
 }
 

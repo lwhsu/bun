@@ -597,6 +597,21 @@ pub const CopyFile = struct {
             }
 
             this.doClose();
+        } else if (comptime Environment.isFreeBSD) {
+            var wrote: usize = 0;
+            const limit = if (this.max_length == Blob.max_size or this.max_length == 0)
+                0
+            else
+                @as(usize, @intCast(this.max_length));
+            switch (jsc.Node.fs.NodeFS.copyFileUsingReadWriteLoop("", "", this.source_fd, this.destination_fd, limit, &wrote)) {
+                .err => |err| {
+                    this.system_error = err.toSystemError();
+                },
+                .result => {
+                    this.read_len = @truncate(wrote);
+                },
+            }
+            this.doClose();
         } else {
             @compileError("TODO: implement copyfile");
         }

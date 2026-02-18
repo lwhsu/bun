@@ -1,0 +1,142 @@
+diff --git a/Makefile b/Makefile
+index d9f2ae2fd9..07a8ba5e4e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -142,6 +142,10 @@ ifeq ($(OS_NAME),linux)
+ CPU_COUNT = $(shell nproc)
+ endif
+ 
++ifeq ($(OS_NAME),freebsd)
++CPU_COUNT = $(shell sysctl -n hw.ncpu)
++endif
++
+ CPUS ?= $(CPU_COUNT)
+ USER ?= $(echo $USER)
+ 
+@@ -187,6 +191,11 @@ LIBICONV_PATH =
+ AR = $(shell which llvm-ar-16 2>/dev/null || which llvm-ar 2>/dev/null || which ar 2>/dev/null)
+ endif
+ 
++ifeq ($(OS_NAME),freebsd)
++LIBICONV_PATH =
++AR = $(shell which llvm-ar-16 2>/dev/null || which llvm-ar 2>/dev/null || which ar 2>/dev/null)
++endif
++
+ OPTIMIZATION_LEVEL=-O3 $(MARCH_NATIVE)
+ DEBUG_OPTIMIZATION_LEVEL= -O1 $(MARCH_NATIVE) -gdwarf-4
+ CFLAGS_WITHOUT_MARCH = $(MACOS_MIN_FLAG) $(OPTIMIZATION_LEVEL) -fno-exceptions -fvisibility=hidden -fvisibility-inlines-hidden -mno-omit-leaf-frame-pointer -fno-omit-frame-pointer -fno-asynchronous-unwind-tables -fno-unwind-tables -fno-pie -fno-pic
+@@ -223,8 +232,8 @@ JSC_INCLUDE_DIR ?= $(JSC_BASE_DIR)/include
+ ZLIB_INCLUDE_DIR ?= $(BUN_DEPS_DIR)/zlib
+ ZLIB_LIB_DIR ?= $(BUN_DEPS_DIR)/zlib
+ 
+-JSC_FILES := $(JSC_LIB)/libJavaScriptCore.a $(JSC_LIB)/libWTF.a  $(JSC_LIB)/libbmalloc.a
+-JSC_FILES_DEBUG := $(JSC_LIB_DEBUG)/libJavaScriptCore.a $(JSC_LIB_DEBUG)/libWTF.a  $(JSC_LIB_DEBUG)/libbmalloc.a
++JSC_FILES := $(JSC_LIB)/libJavaScriptCore.a $(JSC_LIB)/libWTF.a $(wildcard $(JSC_LIB)/libbmalloc.a)
++JSC_FILES_DEBUG := $(JSC_LIB_DEBUG)/libJavaScriptCore.a $(JSC_LIB_DEBUG)/libWTF.a $(wildcard $(JSC_LIB_DEBUG)/libbmalloc.a)
+ 
+ 
+ ENABLE_MIMALLOC ?= 1
+@@ -246,6 +255,12 @@ ifeq ($(OS_NAME),linux)
+ 	_MIMALLOC_LINK = $(BUN_DEPS_OUT_DIR)/$(MIMALLOC_FILE)
+ DEFAULT_LINKER_FLAGS= -pthread -ldl
+ endif
++ifeq ($(OS_NAME),freebsd)
++	JSC_BUILD_STEPS += jsc-build-linux
++	JSC_BUILD_STEPS_DEBUG += jsc-build-linux-debug
++	_MIMALLOC_LINK = $(BUN_DEPS_OUT_DIR)/$(MIMALLOC_FILE)
++DEFAULT_LINKER_FLAGS= -pthread
++endif
+ ifeq ($(OS_NAME),darwin)
+     _MIMALLOC_OBJECT_FILE = 0
+ 	JSC_BUILD_STEPS += jsc-build-mac jsc-copy-headers
+@@ -282,6 +297,10 @@ ifeq ($(OS_NAME),linux)
+ STRIP=$(shell which llvm-strip 2>/dev/null || which llvm-strip-16 2>/dev/null || which strip 2>/dev/null || echo "Missing strip")
+ endif
+ 
++ifeq ($(OS_NAME),freebsd)
++STRIP=$(shell which llvm-strip 2>/dev/null || which llvm-strip-16 2>/dev/null || which strip 2>/dev/null || echo "Missing strip")
++endif
++
+ 
+ HOMEBREW_PREFIX ?= $(BREW_PREFIX_PATH)
+ 
+@@ -365,6 +384,13 @@ ifeq ($(OS_NAME),linux)
+ 	SQLITE_OBJECT = $(realpath $(BUN_DEPS_OUT_DIR))/sqlite3.o
+ endif
+ 
++ifeq ($(OS_NAME),freebsd)
++	INCLUDE_DIRS += $(LINUX_INCLUDE_DIRS)
++	INCLUDE_DIRS += -I/usr/local/include
++	INCLUDE_DIRS += -I$(BUN_DEPS_DIR)/ls-hpack
++	SQLITE_OBJECT = $(realpath $(BUN_DEPS_OUT_DIR))/sqlite3.o
++endif
++
+ ifeq ($(OS_NAME),darwin)
+ MACOS_MIN_FLAG=-mmacos-version-min=$(MIN_MACOS_VERSION)
+ POSIX_PKG_MANAGER=brew
+@@ -388,6 +414,10 @@ LIB_ICU_PATH ?= $(JSC_LIB)
+ ICU_FLAGS += $(LIB_ICU_PATH)/libicuuc.a $(LIB_ICU_PATH)/libicudata.a $(LIB_ICU_PATH)/libicui18n.a
+ endif
+ 
++ifeq ($(OS_NAME),freebsd)
++ICU_FLAGS += -L/usr/local/lib -licuuc -licudata -licui18n
++endif
++
+ ifeq ($(OS_NAME),darwin)
+ ICU_FLAGS += -l icucore \
+ 	$(MACOS_ICU_FILES) \
+@@ -697,12 +727,14 @@ submodule: ## to init or update all submodules
+ 	git submodule update --init --recursive --progress --depth=1 --checkout $(SUBMODULE_NAMES)
+ 
+ .PHONY: build-obj
+-build-obj:
++build-obj: ensure-package-dir
+ 	$(ZIG) build obj -Doptimize=ReleaseFast -Dcpu="$(CPU_TARGET)"
++	cp zig-out/bun-zig.o $(BUN_RELEASE_BIN).o
+ 
+ .PHONY: build-obj-small
+-build-obj-small:
++build-obj-small: ensure-package-dir
+ 	$(ZIG) build obj -Doptimize=ReleaseSmall -Dcpu="$(CPU_TARGET)"
++	cp zig-out/bun-zig.o $(BUN_RELEASE_BIN).o
+ 
+ .PHONY: dev-build-obj-wasm
+ dev-build-obj-wasm:
+@@ -757,8 +789,9 @@ wasm: api mimalloc-wasm build-obj-wasm-small
+ 	@mv /tmp/bun.wasm packages/bun-wasm/bun.wasm
+ 
+ .PHONY: build-obj-safe
+-build-obj-safe:
++build-obj-safe: ensure-package-dir
+ 	$(ZIG) build obj -Doptimize=ReleaseSafe -Dcpu="$(CPU_TARGET)"
++	cp zig-out/bun-zig.o $(BUN_RELEASE_BIN).o
+ 
+ UWS_CC_FLAGS = -pthread  -DLIBUS_USE_OPENSSL=1 -DUWS_HTTPRESPONSE_NO_WRITEMARK=1 -DLIBUS_USE_BORINGSSL=1 -DWITH_BORINGSSL=1 -Wpedantic -Wall -Wextra -Wsign-conversion -Wconversion $(UWS_INCLUDE) -DUWS_WITH_PROXY
+ UWS_CXX_FLAGS = $(UWS_CC_FLAGS) -std=$(CXX_VERSION) -fno-exceptions -fno-rtti
+@@ -1579,6 +1612,14 @@ copy-to-bun-release-dir-dsym:
+ 
+ endif
+ 
++ifeq ($(OS_NAME),freebsd)
++bun-link-lld-release-dsym: bun-release-copy-obj
++	-mv $(BUN_RELEASE_BIN).o $(BUN_DEPLOY_DIR).o
++	-$(STRIP) -s $(BUN_RELEASE_BIN)
++copy-to-bun-release-dir-dsym:
++
++endif
++
+ bun-relink: bun-relink-copy bun-link-lld-release bun-link-lld-release-dsym
+ bun-relink-fast: bun-relink-copy bun-link-lld-release-no-lto
+ 
+@@ -1830,6 +1871,11 @@ sqlite:
+ 	$(CC) $(EMIT_LLVM_FOR_RELEASE) $(CFLAGS) $(INCLUDE_DIRS) -DSQLITE_ENABLE_COLUMN_METADATA= -DSQLITE_MAX_VARIABLE_NUMBER=250000 -DSQLITE_ENABLE_RTREE=1 -DSQLITE_ENABLE_FTS3=1 -DSQLITE_ENABLE_FTS3_PARENTHESIS=1 -DSQLITE_ENABLE_FTS5=1 -DSQLITE_ENABLE_JSON1=1 -DSQLITE_ENABLE_MATH_FUNCTIONS=1 $(SRC_DIR)/sqlite/sqlite3.c -c -o $(SQLITE_OBJECT)
+ endif
+ 
++ifeq ($(OS_NAME),freebsd)
++sqlite:
++	$(CC) $(EMIT_LLVM_FOR_RELEASE) $(CFLAGS) $(INCLUDE_DIRS) -DSQLITE_ENABLE_COLUMN_METADATA= -DSQLITE_MAX_VARIABLE_NUMBER=250000 -DSQLITE_ENABLE_RTREE=1 -DSQLITE_ENABLE_FTS3=1 -DSQLITE_ENABLE_FTS3_PARENTHESIS=1 -DSQLITE_ENABLE_FTS5=1 -DSQLITE_ENABLE_JSON1=1 -DSQLITE_ENABLE_MATH_FUNCTIONS=1 $(SRC_DIR)/sqlite/sqlite3.c -c -o $(SQLITE_OBJECT)
++endif
++
+ picohttp:
+ 	 $(CC) $(CFLAGS) $(OPTIMIZATION_LEVEL) -g -fPIC -c $(BUN_DEPS_DIR)/picohttpparser/picohttpparser.c -I$(BUN_DEPS_DIR) -o $(BUN_DEPS_OUT_DIR)/picohttpparser.o; cd ../../
+ 

@@ -65,7 +65,9 @@ else if (builtin.os.tag.isDarwin())
     DarwinImpl
 else if (builtin.os.tag == .linux)
     LinuxImpl
-else if (builtin.target.isWasm())
+else if (builtin.os.tag == .freebsd)
+    FreeBSDImpl
+else if (builtin.cpu.arch.isWasm())
     WasmImpl
 else
     UnsupportedImpl;
@@ -252,6 +254,19 @@ const LinuxImpl = struct {
             .FAULT => @panic("futex_wake() returned EFAULT unexpectedly"), // pointer became invalid while doing the wake
             else => @panic("Unexpected futex_wake() return code"),
         }
+    }
+};
+
+const FreeBSDImpl = struct {
+    fn wait(ptr: *const atomic.Value(u32), expect: u32, timeout: ?u64) error{Timeout}!void {
+        if (timeout) |delay| {
+            return std.Thread.Futex.timedWait(ptr, expect, delay);
+        }
+        std.Thread.Futex.wait(ptr, expect);
+    }
+
+    fn wake(ptr: *const atomic.Value(u32), max_waiters: u32) void {
+        std.Thread.Futex.wake(ptr, max_waiters);
     }
 };
 

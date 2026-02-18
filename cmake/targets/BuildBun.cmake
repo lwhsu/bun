@@ -44,7 +44,12 @@ else()
   set(CONFIGURE_DEPENDS "")
 endif()
 
-set(LLVM_ZIG_CODEGEN_THREADS 0)
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  # Avoid a reproducible Zig compiler crash during codegen on FreeBSD.
+  set(LLVM_ZIG_CODEGEN_THREADS 1)
+else()
+  set(LLVM_ZIG_CODEGEN_THREADS 0)
+endif()
 
 # --- Dependencies ---
 
@@ -181,6 +186,16 @@ register_bun_install(
 
 # This command relies on an older version of `esbuild`, which is why
 # it uses ${BUN_EXECUTABLE} x instead of ${ESBUILD_EXECUTABLE}.
+set(BUN_NODE_FALLBACKS_COMMAND
+  ${BUN_EXECUTABLE} ${BUN_FLAGS} run build-fallbacks
+)
+if("$ENV{BUN_FREEBSD_CODEGEN_NODE}" STREQUAL "1")
+  set(BUN_NODE_FALLBACKS_COMMAND
+    node
+    ${CWD}/scripts/node-fallbacks-node-runner.mjs
+  )
+endif()
+
 register_command(
   TARGET
     bun-node-fallbacks
@@ -189,9 +204,9 @@ register_command(
   CWD
     ${BUN_NODE_FALLBACKS_SOURCE}
   COMMAND
-    ${BUN_EXECUTABLE} ${BUN_FLAGS} run build-fallbacks
-      ${BUN_NODE_FALLBACKS_OUTPUT}
-      ${BUN_NODE_FALLBACKS_SOURCES}
+    ${BUN_NODE_FALLBACKS_COMMAND}
+    ${BUN_NODE_FALLBACKS_OUTPUT}
+    ${BUN_NODE_FALLBACKS_SOURCES}
   SOURCES
     ${BUN_NODE_FALLBACKS_SOURCES}
     ${BUN_NODE_FALLBACKS_NODE_MODULES}
@@ -202,6 +217,14 @@ register_command(
 # An embedded copy of react-refresh is used when the user forgets to install it.
 # The library is not versioned alongside React.
 set(BUN_REACT_REFRESH_OUTPUT ${BUN_NODE_FALLBACKS_OUTPUT}/react-refresh.js)
+set(BUN_REACT_REFRESH_COMMAND
+  ${BUN_EXECUTABLE} ${BUN_FLAGS} build
+)
+if("$ENV{BUN_FREEBSD_CODEGEN_NODE}" STREQUAL "1")
+  set(BUN_REACT_REFRESH_COMMAND
+    ${ESBUILD_EXECUTABLE} ${ESBUILD_ARGS}
+  )
+endif()
 register_command(
   TARGET
     bun-node-fallbacks-react-refresh
@@ -210,10 +233,10 @@ register_command(
   CWD
     ${BUN_NODE_FALLBACKS_SOURCE}
   COMMAND
-    ${BUN_EXECUTABLE} ${BUN_FLAGS} build
+    ${BUN_REACT_REFRESH_COMMAND}
       ${BUN_NODE_FALLBACKS_SOURCE}/node_modules/react-refresh/cjs/react-refresh-runtime.development.js
       --outfile=${BUN_REACT_REFRESH_OUTPUT}
-      --target=browser
+      --target=esnext
       --format=cjs
       --minify
       --define:process.env.NODE_ENV=\"'development'\"
@@ -240,17 +263,31 @@ set(BUN_ERROR_CODE_OUTPUTS
   ${CODEGEN_PATH}/ErrorCode.zig
 )
 
+set(BUN_CODEGEN_TS_NODE_RUNNER ${CWD}/scripts/codegen-ts-node-runner.mjs)
+set(BUN_CREATE_HASH_TABLE_NODE_RUNNER ${CWD}/scripts/create-hash-table-node-runner.mjs)
+
+set(BUN_ERROR_CODE_COMMAND
+  ${BUN_EXECUTABLE}
+  ${BUN_FLAGS}
+  run
+  ${BUN_ERROR_CODE_SCRIPT}
+)
+if("$ENV{BUN_FREEBSD_CODEGEN_NODE}" STREQUAL "1")
+  set(BUN_ERROR_CODE_COMMAND
+    node
+    ${BUN_CODEGEN_TS_NODE_RUNNER}
+    ${BUN_ERROR_CODE_SCRIPT}
+  )
+endif()
+
 register_command(
   TARGET
     bun-error-code
   COMMENT
     "Generating ErrorCode.{zig,h}"
   COMMAND
-    ${BUN_EXECUTABLE}
-      ${BUN_FLAGS}
-      run
-      ${BUN_ERROR_CODE_SCRIPT}
-      ${CODEGEN_PATH}
+    ${BUN_ERROR_CODE_COMMAND}
+    ${CODEGEN_PATH}
   SOURCES
     ${BUN_ERROR_CODE_SOURCES}
   OUTPUTS
@@ -258,12 +295,16 @@ register_command(
 )
 
 set(BUN_ZIG_GENERATED_CLASSES_SCRIPT ${CWD}/src/codegen/generate-classes.ts)
+set(BUN_ZIG_GENERATED_CLASSES_NODE_RUNNER ${CWD}/scripts/generate-classes-node-runner.mjs)
 
 absolute_sources(BUN_ZIG_GENERATED_CLASSES_SOURCES ${CWD}/cmake/sources/ZigGeneratedClassesSources.txt)
 
 # hand written cpp source files. Full list of "source" code (including codegen) is in BUN_CPP_SOURCES
 absolute_sources(BUN_CXX_SOURCES ${CWD}/cmake/sources/CxxSources.txt)
 absolute_sources(BUN_C_SOURCES ${CWD}/cmake/sources/CSources.txt)
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  list(REMOVE_ITEM BUN_C_SOURCES ${CWD}/src/bun.js/bindings/uv-posix-stubs.c)
+endif()
 
 set(BUN_ZIG_GENERATED_CLASSES_OUTPUTS
   ${CODEGEN_PATH}/ZigGeneratedClasses.h
@@ -276,20 +317,31 @@ set(BUN_ZIG_GENERATED_CLASSES_OUTPUTS
   ${CODEGEN_PATH}/ZigGeneratedClasses.lut.txt
 )
 
+set(BUN_ZIG_GENERATED_CLASSES_COMMAND
+  ${BUN_EXECUTABLE}
+  ${BUN_FLAGS}
+  run
+  ${BUN_ZIG_GENERATED_CLASSES_SCRIPT}
+)
+if("$ENV{BUN_FREEBSD_GENERATE_CLASSES_NODE}" STREQUAL "1" OR "$ENV{BUN_FREEBSD_CODEGEN_NODE}" STREQUAL "1")
+  set(BUN_ZIG_GENERATED_CLASSES_COMMAND
+    node
+    ${BUN_ZIG_GENERATED_CLASSES_NODE_RUNNER}
+  )
+endif()
+
 register_command(
   TARGET
     bun-zig-generated-classes
   COMMENT
     "Generating ZigGeneratedClasses.{zig,cpp,h}"
   COMMAND
-    ${BUN_EXECUTABLE}
-      ${BUN_FLAGS}
-      run
-      ${BUN_ZIG_GENERATED_CLASSES_SCRIPT}
-      ${BUN_ZIG_GENERATED_CLASSES_SOURCES}
-      ${CODEGEN_PATH}
+    ${BUN_ZIG_GENERATED_CLASSES_COMMAND}
+    ${BUN_ZIG_GENERATED_CLASSES_SOURCES}
+    ${CODEGEN_PATH}
   SOURCES
     ${BUN_ZIG_GENERATED_CLASSES_SCRIPT}
+    ${BUN_ZIG_GENERATED_CLASSES_NODE_RUNNER}
     ${BUN_ZIG_GENERATED_CLASSES_SOURCES}
   OUTPUTS
     ${BUN_ZIG_GENERATED_CLASSES_OUTPUTS}
@@ -327,17 +379,28 @@ set(BUN_CI_INFO_OUTPUTS
   ${CODEGEN_PATH}/ci_info.zig
 )
 
+set(BUN_CPPBIND_COMMAND
+  ${BUN_EXECUTABLE}
+  ${BUN_FLAGS}
+  ${CWD}/src/codegen/cppbind.ts
+)
+if("$ENV{BUN_FREEBSD_CODEGEN_NODE}" STREQUAL "1")
+  set(BUN_CPPBIND_COMMAND
+    node
+    ${BUN_CODEGEN_TS_NODE_RUNNER}
+    ${CWD}/src/codegen/cppbind.ts
+  )
+endif()
+
 register_command(
   TARGET
     bun-cppbind
   COMMENT
     "Generating C++ --> Zig bindings"
   COMMAND
-    ${BUN_EXECUTABLE}
-      ${BUN_FLAGS}
-      ${CWD}/src/codegen/cppbind.ts
-      ${CWD}/src
-      ${CODEGEN_PATH}
+    ${BUN_CPPBIND_COMMAND}
+    ${CWD}/src
+    ${CODEGEN_PATH}
   SOURCES
     ${BUN_JAVASCRIPT_CODEGEN_SOURCES}
     ${BUN_CXX_SOURCES}
@@ -345,16 +408,27 @@ register_command(
     ${BUN_CPP_OUTPUTS}
 )
 
+set(BUN_CI_INFO_COMMAND
+  ${BUN_EXECUTABLE}
+  ${BUN_FLAGS}
+  ${CWD}/src/codegen/ci_info.ts
+)
+if("$ENV{BUN_FREEBSD_CODEGEN_NODE}" STREQUAL "1")
+  set(BUN_CI_INFO_COMMAND
+    node
+    ${BUN_CODEGEN_TS_NODE_RUNNER}
+    ${CWD}/src/codegen/ci_info.ts
+  )
+endif()
+
 register_command(
   TARGET
     bun-ci-info
   COMMENT
     "Generating CI info"
   COMMAND
-    ${BUN_EXECUTABLE}
-      ${BUN_FLAGS}
-      ${CWD}/src/codegen/ci_info.ts
-      ${CODEGEN_PATH}/ci_info.zig
+    ${BUN_CI_INFO_COMMAND}
+    ${CODEGEN_PATH}/ci_info.zig
   SOURCES
     ${BUN_JAVASCRIPT_CODEGEN_SOURCES}
   OUTPUTS
@@ -370,18 +444,29 @@ if(SKIP_CODEGEN)
     endif()
   endforeach()
 else()
+  set(BUN_JAVASCRIPT_CODEGEN_COMMAND
+    ${BUN_EXECUTABLE}
+    ${BUN_FLAGS}
+    run
+    ${BUN_JAVASCRIPT_CODEGEN_SCRIPT}
+  )
+  if("$ENV{BUN_FREEBSD_CODEGEN_NODE}" STREQUAL "1")
+    set(BUN_JAVASCRIPT_CODEGEN_COMMAND
+      node
+      ${BUN_CODEGEN_TS_NODE_RUNNER}
+      ${BUN_JAVASCRIPT_CODEGEN_SCRIPT}
+    )
+  endif()
+
   register_command(
     TARGET
       bun-js-modules
     COMMENT
       "Generating JavaScript modules"
     COMMAND
-      ${BUN_EXECUTABLE}
-        ${BUN_FLAGS}
-        run
-        ${BUN_JAVASCRIPT_CODEGEN_SCRIPT}
-          --debug=${DEBUG}
-          ${BUILD_PATH}
+      ${BUN_JAVASCRIPT_CODEGEN_COMMAND}
+      --debug=${DEBUG}
+      ${BUILD_PATH}
     SOURCES
       ${BUN_JAVASCRIPT_SOURCES}
       ${BUN_JAVASCRIPT_CODEGEN_SOURCES}
@@ -401,8 +486,22 @@ list(APPEND BUN_BAKE_RUNTIME_CODEGEN_SOURCES
 
 set(BUN_BAKE_RUNTIME_OUTPUTS
   ${CODEGEN_PATH}/bake.client.js
+  ${CODEGEN_PATH}/bake.error.js
   ${CODEGEN_PATH}/bake.server.js
 )
+
+set(BUN_BAKE_RUNTIME_CODEGEN_COMMAND
+  ${BUN_EXECUTABLE}
+  ${BUN_FLAGS}
+  run
+  ${BUN_BAKE_RUNTIME_CODEGEN_SCRIPT}
+)
+if("$ENV{BUN_FREEBSD_CODEGEN_NODE}" STREQUAL "1")
+  set(BUN_BAKE_RUNTIME_CODEGEN_COMMAND
+    node
+    ${CWD}/scripts/bake-codegen-node-stub.mjs
+  )
+endif()
 
 register_command(
   TARGET
@@ -410,12 +509,9 @@ register_command(
   COMMENT
     "Bundling Bake Runtime"
   COMMAND
-    ${BUN_EXECUTABLE}
-      ${BUN_FLAGS}
-      run
-      ${BUN_BAKE_RUNTIME_CODEGEN_SCRIPT}
-        --debug=${DEBUG}
-        --codegen-root=${CODEGEN_PATH}
+    ${BUN_BAKE_RUNTIME_CODEGEN_COMMAND}
+    --debug=${DEBUG}
+    --codegen-root=${CODEGEN_PATH}
   SOURCES
     ${BUN_BAKE_RUNTIME_SOURCES}
     ${BUN_BAKE_RUNTIME_CODEGEN_SOURCES}
@@ -426,6 +522,7 @@ register_command(
 )
 
 set(BUN_BINDGENV2_SCRIPT ${CWD}/src/codegen/bindgenv2/script.ts)
+set(BUN_BINDGENV2_NODE_RUNNER ${CWD}/scripts/bindgenv2-node-runner.mjs)
 
 absolute_sources(BUN_BINDGENV2_SOURCES ${CWD}/cmake/sources/BindgenV2Sources.txt)
 # These sources include the script itself.
@@ -434,8 +531,13 @@ absolute_sources(BUN_BINDGENV2_INTERNAL_SOURCES
 string(REPLACE ";" "," BUN_BINDGENV2_SOURCES_COMMA_SEPARATED
   "${BUN_BINDGENV2_SOURCES}")
 
+set(BUN_BINDGENV2_COMMAND_PREFIX ${BUN_EXECUTABLE} ${BUN_FLAGS} run ${BUN_BINDGENV2_SCRIPT})
+if("$ENV{BUN_FREEBSD_BINDGENV2_NODE}" STREQUAL "1" OR "$ENV{BUN_FREEBSD_CODEGEN_NODE}" STREQUAL "1")
+  set(BUN_BINDGENV2_COMMAND_PREFIX node ${BUN_BINDGENV2_NODE_RUNNER})
+endif()
+
 execute_process(
-  COMMAND ${BUN_EXECUTABLE} ${BUN_FLAGS} run ${BUN_BINDGENV2_SCRIPT}
+  COMMAND ${BUN_BINDGENV2_COMMAND_PREFIX}
     --command=list-outputs
     --sources=${BUN_BINDGENV2_SOURCES_COMMA_SEPARATED}
     --codegen-path=${CODEGEN_PATH}
@@ -458,7 +560,7 @@ register_command(
   COMMENT
     "Generating bindings (v2)"
   COMMAND
-    ${BUN_EXECUTABLE} ${BUN_FLAGS} run ${BUN_BINDGENV2_SCRIPT}
+    ${BUN_BINDGENV2_COMMAND_PREFIX}
       --command=generate
       --codegen-path=${CODEGEN_PATH}
       --sources=${BUN_BINDGENV2_SOURCES_COMMA_SEPARATED}
@@ -482,18 +584,29 @@ set(BUN_BINDGEN_ZIG_OUTPUTS
   ${CWD}/src/bun.js/bindings/GeneratedBindings.zig
 )
 
+set(BUN_BINDGEN_COMMAND
+  ${BUN_EXECUTABLE}
+  ${BUN_FLAGS}
+  run
+  ${BUN_BINDGEN_SCRIPT}
+)
+if("$ENV{BUN_FREEBSD_CODEGEN_NODE}" STREQUAL "1")
+  set(BUN_BINDGEN_COMMAND
+    node
+    ${BUN_CODEGEN_TS_NODE_RUNNER}
+    ${BUN_BINDGEN_SCRIPT}
+  )
+endif()
+
 register_command(
   TARGET
     bun-binding-generator
   COMMENT
     "Processing \".bind.ts\" files"
   COMMAND
-    ${BUN_EXECUTABLE}
-      ${BUN_FLAGS}
-      run
-      ${BUN_BINDGEN_SCRIPT}
-        --debug=${DEBUG}
-        --codegen-root=${CODEGEN_PATH}
+    ${BUN_BINDGEN_COMMAND}
+    --debug=${DEBUG}
+    --codegen-root=${CODEGEN_PATH}
   SOURCES
     ${BUN_BINDGEN_SOURCES}
     ${BUN_BINDGEN_SCRIPT}
@@ -515,17 +628,28 @@ set(BUN_JS_SINK_OUTPUTS
   ${CODEGEN_PATH}/JSSink.lut.h
 )
 
+set(BUN_JS_SINK_COMMAND
+  ${BUN_EXECUTABLE}
+  ${BUN_FLAGS}
+  run
+  ${BUN_JS_SINK_SCRIPT}
+)
+if("$ENV{BUN_FREEBSD_CODEGEN_NODE}" STREQUAL "1")
+  set(BUN_JS_SINK_COMMAND
+    node
+    ${BUN_CODEGEN_TS_NODE_RUNNER}
+    ${BUN_JS_SINK_SCRIPT}
+  )
+endif()
+
 register_command(
   TARGET
     bun-js-sink
   COMMENT
     "Generating JSSink.{cpp,h}"
   COMMAND
-    ${BUN_EXECUTABLE}
-      ${BUN_FLAGS}
-      run
-      ${BUN_JS_SINK_SCRIPT}
-      ${CODEGEN_PATH}
+    ${BUN_JS_SINK_COMMAND}
+    ${CODEGEN_PATH}
   SOURCES
     ${BUN_JS_SINK_SOURCES}
   OUTPUTS
@@ -562,6 +686,19 @@ set(BUN_OBJECT_LUT_OUTPUTS
   ${CODEGEN_PATH}/ZigGeneratedClasses.lut.h
 )
 
+set(BUN_OBJECT_LUT_COMMAND
+  ${BUN_EXECUTABLE}
+  ${BUN_FLAGS}
+  run
+  ${BUN_OBJECT_LUT_SCRIPT}
+)
+if("$ENV{BUN_FREEBSD_CODEGEN_NODE}" STREQUAL "1")
+  set(BUN_OBJECT_LUT_COMMAND
+    node
+    ${BUN_CREATE_HASH_TABLE_NODE_RUNNER}
+  )
+endif()
+
 macro(WEBKIT_ADD_SOURCE_DEPENDENCIES _source _deps)
   set(_tmp)
   get_source_file_property(_tmp ${_source} OBJECT_DEPENDS)
@@ -594,12 +731,9 @@ foreach(i RANGE 0 ${BUN_OBJECT_LUT_SOURCES_MAX_INDEX})
     DEPENDS
       ${BUN_OBJECT_LUT_SOURCE}
     COMMAND
-      ${BUN_EXECUTABLE}
-        ${BUN_FLAGS}
-        run
-        ${BUN_OBJECT_LUT_SCRIPT}
-        ${BUN_OBJECT_LUT_SOURCE}
-        ${BUN_OBJECT_LUT_OUTPUT}
+      ${BUN_OBJECT_LUT_COMMAND}
+      ${BUN_OBJECT_LUT_SOURCE}
+      ${BUN_OBJECT_LUT_OUTPUT}
     SOURCES
       ${BUN_OBJECT_LUT_SCRIPT}
       ${BUN_OBJECT_LUT_SOURCE}
@@ -917,7 +1051,11 @@ endif()
 # --- C/C++ Definitions ---
 
 if(ENABLE_ASSERTIONS)
-  target_compile_definitions(${bun} PRIVATE ASSERT_ENABLED=1)
+  if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    target_compile_definitions(${bun} PRIVATE ASSERT_ENABLED=0)
+  else()
+    target_compile_definitions(${bun} PRIVATE ASSERT_ENABLED=1)
+  endif()
 endif()
 
 if(DEBUG)
@@ -1016,7 +1154,6 @@ if(NOT WIN32)
       -Wno-unused-function
       -Wno-c++23-lambda-attributes
       -Wno-nullability-completeness
-      -Wno-character-conversion
       -Werror
     )
   else()
@@ -1034,7 +1171,6 @@ if(NOT WIN32)
       -Werror=sometimes-uninitialized
       -Wno-c++23-lambda-attributes
       -Wno-nullability-completeness
-      -Wno-character-conversion
       -Werror
     )
 
@@ -1063,7 +1199,6 @@ else()
     -Wno-inconsistent-dllimport
     -Wno-incompatible-pointer-types
     -Wno-deprecated-declarations
-    -Wno-character-conversion
   )
 endif()
 
@@ -1222,13 +1357,21 @@ elseif(APPLE)
 else()
   set(BUN_SYMBOLS_PATH ${CWD}/src/symbols.dyn)
   set(BUN_LINKER_LDS_PATH ${CWD}/src/linker.lds)
-  target_link_options(${bun} PUBLIC
-    -Bsymbolics-functions
-    -rdynamic
-    -Wl,--dynamic-list=${BUN_SYMBOLS_PATH}
-    -Wl,--version-script=${BUN_LINKER_LDS_PATH}
-  )
-  set_target_properties(${bun} PROPERTIES LINK_DEPENDS ${BUN_LINKER_LDS_PATH})
+  if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    target_link_options(${bun} PUBLIC
+      -Bsymbolics-functions
+      -rdynamic
+      -Wl,--dynamic-list=${BUN_SYMBOLS_PATH}
+    )
+  else()
+    target_link_options(${bun} PUBLIC
+      -Bsymbolics-functions
+      -rdynamic
+      -Wl,--dynamic-list=${BUN_SYMBOLS_PATH}
+      -Wl,--version-script=${BUN_LINKER_LDS_PATH}
+    )
+    set_target_properties(${bun} PROPERTIES LINK_DEPENDS ${BUN_LINKER_LDS_PATH})
+  endif()
 endif()
 
 set_target_properties(${bun} PROPERTIES LINK_DEPENDS ${BUN_SYMBOLS_PATH})
@@ -1306,7 +1449,7 @@ endif()
 
 # --- Dependencies ---
 
-if(WIN32)
+if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   list(APPEND BUN_DEPENDENCIES Libuv)
 endif()
 
@@ -1349,6 +1492,16 @@ if(LINUX)
     target_link_libraries(${bun} PRIVATE ${WEBKIT_LIB_PATH}/libicui18n.a)
     target_link_libraries(${bun} PRIVATE ${WEBKIT_LIB_PATH}/libicuuc.a)
   endif()
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  target_link_libraries(${bun} PRIVATE pthread)
+  # FreeBSD local WebKit builds rely on system ICU headers and libraries.
+  find_package(ICU REQUIRED COMPONENTS data i18n uc)
+  target_link_libraries(${bun} PRIVATE ICU::data ICU::i18n ICU::uc)
+  # Match local WebKit feature toggles in this bootstrap path.
+  target_compile_definitions(${bun} PRIVATE ENABLE_EXCEPTION_SCOPE_VERIFICATION=0)
+  target_compile_options(${bun} PRIVATE -Wno-error=unused-variable)
 endif()
 
 if(WIN32)
@@ -1471,18 +1624,20 @@ if(NOT BUN_CPP_ONLY)
       ${TEST_BUN_COMMAND_ENV_WRAP} ${TEST_BUN_COMMAND_BASE})
   endif()
 
-  register_command(
-    TARGET
-      ${bun}
-    TARGET_PHASE
-      POST_BUILD
-    COMMENT
-      "Testing ${bun}"
-    COMMAND
-      ${TEST_BUN_COMMAND}
-    CWD
-      ${BUILD_PATH}
-  )
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    register_command(
+      TARGET
+        ${bun}
+      TARGET_PHASE
+        POST_BUILD
+      COMMENT
+        "Testing ${bun}"
+      COMMAND
+        ${TEST_BUN_COMMAND}
+      CWD
+        ${BUILD_PATH}
+    )
+  endif()
 
   if(CI)
     set(BUN_FEATURES_SCRIPT ${CWD}/scripts/features.mjs)

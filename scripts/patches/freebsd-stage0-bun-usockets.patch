@@ -1,0 +1,238 @@
+--- a/packages/bun-usockets/src/context.c
++++ b/packages/bun-usockets/src/context.c
+@@ -22,6 +22,7 @@
+ #include <string.h>
+ #ifndef _WIN32
+ #include <arpa/inet.h>
++#include <netinet/in.h>
+ #endif
+ 
+ #define CONCURRENT_CONNECTIONS 4
+--- a/packages/bun-usockets/src/bsd.c
++++ b/packages/bun-usockets/src/bsd.c
+@@ -237,10 +237,21 @@
+     struct msghdr *mh = &((struct mmsghdr *) msgvec)[index].msg_hdr;
+     for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(mh); cmsg != NULL; cmsg = CMSG_NXTHDR(mh, cmsg)) {
+         // ipv6 or ipv4
+-        if (cmsg->cmsg_level == IPPROTO_IP && cmsg->cmsg_type == IP_PKTINFO) {
+-            struct in_pktinfo *pi = (struct in_pktinfo *) CMSG_DATA(cmsg);
+-            memcpy(ip, &pi->ipi_addr, 4);
+-            return 4;
++        if (cmsg->cmsg_level == IPPROTO_IP) {
++#if defined(IP_PKTINFO)
++            if (cmsg->cmsg_type == IP_PKTINFO) {
++                struct in_pktinfo *pi = (struct in_pktinfo *) CMSG_DATA(cmsg);
++                memcpy(ip, &pi->ipi_addr, 4);
++                return 4;
++            }
++#endif
++#if defined(IP_RECVDSTADDR)
++            if (cmsg->cmsg_type == IP_RECVDSTADDR) {
++                struct in_addr *dst = (struct in_addr *) CMSG_DATA(cmsg);
++                memcpy(ip, dst, 4);
++                return 4;
++            }
++#endif
+         }
+ 
+         if (cmsg->cmsg_level == IPPROTO_IPV6 && cmsg->cmsg_type == IPV6_PKTINFO) {
+@@ -838,9 +849,15 @@
+     int enabled = 1;
+     if (setsockopt(listenFd, IPPROTO_IPV6, IPV6_RECVPKTINFO, (void *) &enabled, sizeof(enabled)) == -1) {
+         if (errno == 92) {
++#if defined(IP_PKTINFO)
+             if (setsockopt(listenFd, IPPROTO_IP, IP_PKTINFO, (void *) &enabled, sizeof(enabled)) != 0) {
+                 //printf("Error setting IPv4 pktinfo!\n");
++            }
++#elif defined(IP_RECVDSTADDR)
++            if (setsockopt(listenFd, IPPROTO_IP, IP_RECVDSTADDR, (void *) &enabled, sizeof(enabled)) != 0) {
++                //printf("Error setting IPv4 dstaddr!\n");
+             }
++#endif
+         } else {
+             //printf("Error setting IPv6 pktinfo!\n");
+         }
+--- a/packages/bun-usockets/src/eventing/epoll_kqueue.c
++++ b/packages/bun-usockets/src/eventing/epoll_kqueue.c
+@@ -46,8 +46,12 @@
+ #define SET_READY_POLL(loop, index, poll) loop->ready_polls[index].data.ptr = (void*)poll
+ #else
+ #define GET_READY_POLL(loop, index) (struct us_poll_t *) loop->ready_polls[index].udata
++#if defined(__FreeBSD__)
++#define SET_READY_POLL(loop, index, poll) loop->ready_polls[index].udata = (void*)poll
++#else
+ #define SET_READY_POLL(loop, index, poll) loop->ready_polls[index].udata = (uint64_t)poll
+ #endif
++#endif
+ 
+ /* Loop */
+ void us_loop_free(struct us_loop_t *loop) {
+@@ -594,6 +598,7 @@
+ }
+ #else
+ 
++#if defined(__APPLE__)
+ #define MACHPORT_BUF_LEN 1024
+ 
+ struct us_internal_async *us_internal_create_async(struct us_loop_t *loop, int fallthrough, unsigned int ext_size) {
+@@ -628,7 +633,7 @@
+     // using it for notifications and not for any other purpose.
+     mach_port_limits_t limits = { .mpl_qlimit = 1 };
+     kr = mach_port_set_attributes(self, cb->port, MACH_PORT_LIMITS_INFO, (mach_port_info_t)&limits, MACH_PORT_LIMITS_INFO_COUNT);
+-    
++
+     if (UNLIKELY(kr != KERN_SUCCESS)) {
+         return NULL;
+     }
+@@ -643,7 +648,7 @@
+     struct kevent64_s event;
+     uint64_t ptr = (uint64_t)(void*)internal_cb;
+     EV_SET64(&event, ptr, EVFILT_MACHPORT, EV_DELETE, 0, 0, (uint64_t)(void*)internal_cb, 0,0);
+-    
++
+     int ret;
+     do {
+         ret = kevent64(internal_cb->loop->fd, &event, 1, &event, 1, KEVENT_FLAG_ERROR_EVENTS, NULL);
+@@ -675,7 +680,7 @@
+     event.ext[1] = MACHPORT_BUF_LEN;
+     event.udata = (uint64_t)(void*)internal_cb;
+ 
+-    int ret; 
++    int ret;
+     do {
+         ret = kevent64(internal_cb->loop->fd, &event, 1, &event, 1, KEVENT_FLAG_ERROR_EVENTS, NULL);
+     } while (IS_EINTR(ret));
+@@ -705,12 +710,12 @@
+         0, // Fail instantly if the port is full
+         MACH_PORT_NULL
+     );
+-    
++
+     switch (kr) {
+         case KERN_SUCCESS: {
+             break;
+         }
+-        
++
+         // This means that the send would've blocked because the
+         // queue is full. We assume success because the port is full.
+         case MACH_SEND_TIMED_OUT: {
+@@ -726,8 +731,63 @@
+             break;
+         }
+     }
++}
++#else
++struct us_internal_async *us_internal_create_async(struct us_loop_t *loop, int fallthrough, unsigned int ext_size) {
++    struct us_internal_callback_t *cb = us_calloc(1, sizeof(struct us_internal_callback_t) + ext_size);
++    cb->loop = loop;
++    cb->cb_expects_the_loop = 1;
++    cb->leave_poll_ready = 0;
++
++    cb->p.state.poll_type = POLL_TYPE_POLLING_IN;
++    us_internal_poll_set_type((struct us_poll_t *) cb, POLL_TYPE_CALLBACK);
++
++    if (!fallthrough) {
++        loop->num_polls++;
++    }
++
++    return (struct us_internal_async *) cb;
++}
++
++void us_internal_async_close(struct us_internal_async *a) {
++    struct us_internal_callback_t *internal_cb = (struct us_internal_callback_t *) a;
++    struct kevent64_s event;
++    uint64_t ptr = (uint64_t)(void*)internal_cb;
++    EV_SET64(&event, ptr, EVFILT_USER, EV_DELETE, 0, 0, (uint64_t)(void*)internal_cb, 0, 0);
++    int ret;
++    do {
++        ret = kevent64(internal_cb->loop->fd, &event, 1, &event, 1, KEVENT_FLAG_ERROR_EVENTS, NULL);
++    } while (IS_EINTR(ret));
++
++    us_poll_free((struct us_poll_t *) a, internal_cb->loop);
+ }
++
++void us_internal_async_set(struct us_internal_async *a, void (*cb)(struct us_internal_async *)) {
++    struct us_internal_callback_t *internal_cb = (struct us_internal_callback_t *) a;
++    internal_cb->cb = (void (*)(struct us_internal_callback_t *)) cb;
++
++    struct kevent64_s event;
++    uint64_t ptr = (uint64_t)(void*)internal_cb;
++    EV_SET64(&event, ptr, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, (uint64_t)(void*)internal_cb, 0, 0);
++
++    int ret;
++    do {
++        ret = kevent64(internal_cb->loop->fd, &event, 1, &event, 1, KEVENT_FLAG_ERROR_EVENTS, NULL);
++    } while (IS_EINTR(ret));
++}
++
++void us_internal_async_wakeup(struct us_internal_async *a) {
++    struct us_internal_callback_t *internal_cb = (struct us_internal_callback_t *) a;
++    struct kevent64_s event;
++    uint64_t ptr = (uint64_t)(void*)internal_cb;
++    EV_SET64(&event, ptr, EVFILT_USER, 0, NOTE_TRIGGER, 0, (uint64_t)(void*)internal_cb, 0, 0);
++    int ret;
++    do {
++        ret = kevent64(internal_cb->loop->fd, &event, 1, &event, 1, KEVENT_FLAG_ERROR_EVENTS, NULL);
++    } while (IS_EINTR(ret));
++}
+ #endif
++#endif
+ 
+ int us_socket_get_error(int ssl, struct us_socket_t *s) {
+     int error = 0;
+--- a/packages/bun-usockets/src/internal/eventing/epoll_kqueue.h
++++ b/packages/bun-usockets/src/internal/eventing/epoll_kqueue.h
+@@ -33,8 +33,32 @@
+ #define LIBUS_SOCKET_READABLE 1
+ #define LIBUS_SOCKET_WRITABLE 2
+ 
++#if defined(__FreeBSD__)
++#include <stdint.h>
++#define kevent64_s kevent
++#ifndef KEVENT_FLAG_ERROR_EVENTS
++#define KEVENT_FLAG_ERROR_EVENTS 0
++#endif
++#define EV_SET64(kevp, a, b, c, d, e, f, g, h) \
++    EV_SET((kevp), (a), (b), (c), (d), (e), ((void *)(uintptr_t)(f)))
++static inline int kevent64(int kq, const struct kevent64_s *changelist, int nchanges,
++                           struct kevent64_s *eventlist, int nevents, unsigned int flags,
++                           const struct timespec *timeout) {
++    (void)flags;
++    return kevent(
++        kq,
++        (const struct kevent *)changelist,
++        nchanges,
++        (struct kevent *)eventlist,
++        nevents,
++        timeout);
++}
++#endif
++
++#if defined(__APPLE__)
+ #include <mach/mach.h>
+ #endif
++#endif
+ 
+ struct us_loop_t {
+     alignas(LIBUS_EXT_ALIGNMENT) struct us_internal_loop_data_t data;
+--- a/packages/bun-usockets/src/internal/internal.h
++++ b/packages/bun-usockets/src/internal/internal.h
+@@ -31,7 +31,7 @@
+ #include <stdalign.h>
+ #endif
+ 
+-#if defined(LIBUS_USE_KQUEUE)
++#if defined(LIBUS_USE_KQUEUE) && defined(__APPLE__)
+ #include <mach/mach.h>
+ #endif
+ 
+@@ -214,7 +214,7 @@
+     struct us_udp_socket_t *next;
+ };
+ 
+-#if defined(LIBUS_USE_KQUEUE)
++#if defined(LIBUS_USE_KQUEUE) && defined(__APPLE__)
+ /* Internal callback types are polls just like sockets */
+ struct us_internal_callback_t {
+   alignas(LIBUS_EXT_ALIGNMENT) struct us_poll_t p;
