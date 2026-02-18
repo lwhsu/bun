@@ -649,3 +649,41 @@ Planned immediate next steps once `release-bindings` exits:
 - Runtime smoke checks:
   - `build/freebsd-release-ozig/bun-profile --version` => `1.3.10`
   - `build/freebsd-release-ozig/bun-profile -e 'console.log(1+1)'` => `2`
+
+## 2026-02-19 self-host follow-up: fallback-free configure still blocked
+
+### Goal tested
+
+- Use newly built FreeBSD host bun:
+  - `BUN_EXECUTABLE=/home/lwhsu/killme/bun/build/freebsd-release-ozig/bun-profile`
+- Disable FreeBSD Node fallbacks:
+  - `BUN_FREEBSD_CODEGEN_NODE=OFF`
+  - `BUN_FREEBSD_NPM_INSTALL=OFF`
+  - `BUN_FREEBSD_GENERATE_CLASSES_NODE=OFF`
+  - `BUN_FREEBSD_BINDGENV2_NODE=auto`
+
+### Result
+
+- Configure does not complete in practical time.
+- It stalls in one command:
+  - `bun-profile run src/codegen/bindgenv2/script.ts --command=list-outputs ...`
+- Process state during stall:
+  - single active thread at ~99% CPU for >4 minutes (not `sbwait` deadlock).
+
+### Isolated reproduction
+
+- Direct run of the same command with `timeout 120`:
+  - exit code `124`
+  - elapsed `120s`
+  - stdout/stderr size `0` bytes
+- Node runner equivalent:
+  - exit code `0`
+  - elapsed `0s`
+  - full output includes all expected `Generated*Config.cpp` + zig outputs.
+
+### Current conclusion
+
+- This is a runtime/perf blocker in fallback-free host-bun path for bindgen-v2 list-outputs on FreeBSD.
+- Current practical bootstrap path remains:
+  - keep FreeBSD Node fallback for codegen/bootstrap steps (including bindgen-v2 list/generate),
+  - use produced `bun-profile` as built artifact/runtime binary.
