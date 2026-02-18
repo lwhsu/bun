@@ -420,3 +420,28 @@ Planned immediate next steps once `release-bindings` exits:
 
 - Current repo `/proc/self/fd` usage is mostly Linux-only guarded code (not direct FreeBSD runtime path).
 - For FreeBSD fd->path resolution, active runtime path uses `std.os.getFdPath` fallback logic (FreeBSD branch in `src/sys.zig`), not `/proc/curproc/fd`.
+
+## 2026-02-18 checkpoint reproducibility gate (step 1)
+
+- Added canonical checkpoint verifier script:
+  - `scripts/freebsd-checkpoint-repro.sh`
+- Purpose:
+  - one-command clean configure/build/smoke for current FreeBSD checkpoint
+  - enforce required temporary toggles so results are reproducible:
+    - `BUN_FREEBSD_NPM_INSTALL=1`
+    - `BUN_FREEBSD_BINDGENV2_NODE=1`
+    - `BUN_FREEBSD_CODEGEN_NODE=1`
+- Default behavior:
+  - uses `build/freebsd-bootstrap/stage0/bun` as host bun
+  - configures `build/freebsd-release-ozig`
+  - builds `bun`
+  - validates both stage0 and final bun (`--version`, `-e 'console.log(1+1)'`)
+- Overrides:
+  - `BUN_FREEBSD_REPRO_CLEAN=0` to reuse build directory
+  - `BUN_FREEBSD_REPRO_CONFIGURE_ONLY=1` for configure-only checks
+  - `BUN_FREEBSD_REPRO_TARGET=bun-profile` for profile target
+- Evidence (successful run on current branch):
+  - command: `BUN_FREEBSD_REPRO_CLEAN=0 ./scripts/freebsd-checkpoint-repro.sh`
+  - stage0: `build/freebsd-bootstrap/stage0/bun --version` => `0.0.0`
+  - final: `build/freebsd-release-ozig/bun --version` => `1.3.10`
+  - smoke: `build/freebsd-release-ozig/bun -e 'console.log(1+1)'` => `2`

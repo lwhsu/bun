@@ -108,6 +108,34 @@ cmake -S . -B build/freebsd-release-ozig -G Ninja -DRELEASE=ON -DOS=freebsd -DAR
 cmake --build build/freebsd-release-ozig --target bun -- -j$(sysctl -n hw.ncpu)
 ```
 
+## Checkpoint Repro Gate
+
+Use this as the canonical step to verify the current FreeBSD checkpoint end-to-end:
+
+```bash
+cd /home/lwhsu/killme/bun
+./scripts/freebsd-checkpoint-repro.sh
+```
+
+Default behavior:
+
+- uses `build/freebsd-bootstrap/stage0/bun` as host bun (`-DBUN_EXECUTABLE`)
+- forces current required FreeBSD toggles:
+  - `BUN_FREEBSD_NPM_INSTALL=1`
+  - `BUN_FREEBSD_BINDGENV2_NODE=1`
+  - `BUN_FREEBSD_CODEGEN_NODE=1`
+- reconfigures `build/freebsd-release-ozig`
+- builds `bun`
+- runs stage0 and final binary smoke checks (`--version`, `-e 'console.log(1+1)'`)
+
+Useful overrides:
+
+```bash
+BUN_FREEBSD_REPRO_CLEAN=0 ./scripts/freebsd-checkpoint-repro.sh
+BUN_FREEBSD_REPRO_CONFIGURE_ONLY=1 ./scripts/freebsd-checkpoint-repro.sh
+BUN_FREEBSD_REPRO_TARGET=bun-profile ./scripts/freebsd-checkpoint-repro.sh
+```
+
 ## Validate
 
 ```bash
