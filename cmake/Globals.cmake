@@ -142,6 +142,23 @@ endif()
 optionx(VENDOR_PATH FILEPATH "The path to the vendor directory" DEFAULT ${CWD}/vendor)
 optionx(TMP_PATH FILEPATH "The path to the temporary directory" DEFAULT ${BUILD_PATH}/tmp)
 
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "FreeBSD")
+  set(DEFAULT_BUN_FREEBSD_CODEGEN_NODE ON)
+  set(DEFAULT_BUN_FREEBSD_NPM_INSTALL ON)
+  set(DEFAULT_BUN_FREEBSD_GENERATE_CLASSES_NODE OFF)
+  set(DEFAULT_BUN_FREEBSD_BINDGENV2_NODE 1)
+else()
+  set(DEFAULT_BUN_FREEBSD_CODEGEN_NODE OFF)
+  set(DEFAULT_BUN_FREEBSD_NPM_INSTALL OFF)
+  set(DEFAULT_BUN_FREEBSD_GENERATE_CLASSES_NODE OFF)
+  set(DEFAULT_BUN_FREEBSD_BINDGENV2_NODE auto)
+endif()
+
+optionx(BUN_FREEBSD_CODEGEN_NODE BOOL "Use Node.js runners instead of stage0 bun for codegen steps on FreeBSD" DEFAULT ${DEFAULT_BUN_FREEBSD_CODEGEN_NODE})
+optionx(BUN_FREEBSD_NPM_INSTALL BOOL "Use npm install instead of stage0 bun install for dependency bootstrap on FreeBSD" DEFAULT ${DEFAULT_BUN_FREEBSD_NPM_INSTALL})
+optionx(BUN_FREEBSD_GENERATE_CLASSES_NODE BOOL "Use Node.js runner for generate-classes.ts on FreeBSD" DEFAULT ${DEFAULT_BUN_FREEBSD_GENERATE_CLASSES_NODE})
+optionx(BUN_FREEBSD_BINDGENV2_NODE "auto|0|1" "Runner mode for bindgenv2 on FreeBSD: auto, 0 (stage0 list + node generate), 1 (node for both)" DEFAULT ${DEFAULT_BUN_FREEBSD_BINDGENV2_NODE})
+
 # --- Helper functions ---
 
 # list_filter_out_regex()
@@ -672,7 +689,7 @@ function(register_bun_install)
     message(FATAL_ERROR "register_bun_install: ${NPM_CWD}/package.json does not have dependencies?")
   endif()
 
-  if("$ENV{BUN_FREEBSD_NPM_INSTALL}" STREQUAL "1")
+  if(BUN_FREEBSD_NPM_INSTALL)
     set(BUN_INSTALL_COMMAND
       npm
       install

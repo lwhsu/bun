@@ -550,3 +550,102 @@ Planned immediate next steps once `release-bindings` exits:
   - `Bun.spawnSync(...)` in `src/codegen/generate-jssink.ts` (`posix_spawn` EPERM)
   - `bun install --frozen-lockfile` segfault in stage0
   - `src/codegen/bindgen.ts` failure (`@lezer/cpp` module / bind parse errors under stage0 runtime)
+
+## 2026-02-19 update: deadlock root cause and persistent CMake fix
+
+### Root cause
+
+- The observed "hang" state (all stage0 codegen tasks blocked in `sbwait`, `ninja` idle) was caused by CMake regeneration switching rules back to stage0 execution.
+- This happened when `cmake --build` was invoked without FreeBSD fallback env vars; regenerate rewrote `build.ninja` with stage0 commands for codegen/install.
+- In that mode, stage0 runtime bugs on FreeBSD (segfault in `bun install`, `posix_spawn` EPERM/stdio path issues) lead to blocked or failed subcommands.
+
+### Evidence
+
+- `build/freebsd-release-ozig/build.ninja` (bad state) had stage0 rules like:
+  - `... stage0/bun run src/codegen/bundle-modules.ts ...`
+  - `... stage0/bun run src/codegen/generate-jssink.ts ...`
+  - `... stage0/bun run src/codegen/create-hash-table.ts ...`
+- Runtime process snapshot during hang:
+  - `cmake`/`ninja` idle
+  - many stage0 codegen children in `sbwait` for >1h with 0% CPU.
+
+### Fix implemented
+
+- Added persistent CMake cache knobs in `cmake/Globals.cmake`:
+  - `BUN_FREEBSD_CODEGEN_NODE` (BOOL)
+  - `BUN_FREEBSD_NPM_INSTALL` (BOOL)
+  - `BUN_FREEBSD_GENERATE_CLASSES_NODE` (BOOL)
+  - `BUN_FREEBSD_BINDGENV2_NODE` (`auto|0|1`)
+- FreeBSD host defaults are now safe for cold start:
+  - `BUN_FREEBSD_CODEGEN_NODE=ON`
+  - `BUN_FREEBSD_NPM_INSTALL=ON`
+  - `BUN_FREEBSD_BINDGENV2_NODE=0`
+- Converted CMake conditionals to use cache vars (not direct env checks):
+  - `cmake/targets/BuildBun.cmake`
+  - `cmake/tools/SetupEsbuild.cmake`
+  - `cmake/Globals.cmake` (`register_bun_install`)
+
+### Verification
+
+- Fresh configure in a new build dir now reports:
+  - `Set BUN_FREEBSD_CODEGEN_NODE: ON`
+  - `Set BUN_FREEBSD_NPM_INSTALL: ON`
+  - `Set BUN_FREEBSD_BINDGENV2_NODE: 0`
+- Generated `build.ninja` now contains Node/npm rules by default on FreeBSD:
+  - `node scripts/codegen-ts-node-runner.mjs ... bundle-modules.ts`
+  - `node scripts/codegen-ts-node-runner.mjs ... generate-jssink.ts`
+  - `npm install --no-package-lock --ignore-scripts --no-audit --no-fund`
+- Target verification:
+  - forcing `bun-js-modules` regeneration completed successfully with Node runner.
+
+## 2026-02-19 update: bindgen-v2 output completeness fix + successful full build
+
+### New blocker diagnosed
+
+- After `bun-zig.o` cache cleanup and successful parse/compile, final link failed with missing bindgen symbols:
+  - `bindgenConvertJSToSSLConfig`
+  - `bindgenConvertJSToFakeTimersConfig`
+  - `bindgenConvertJSToSocketConfig`
+  - `bindgenConvertJSToSocketConfigHandlers`
+- Root cause:
+  - `BUN_FREEBSD_BINDGENV2_NODE=0` caused configure-time `list-outputs` to run on stage0.
+  - stage0 returned only `codegen/bindgen_generated.zig` (no `.cpp` outputs), so generated bindgen C++ sources were omitted from the Ninja graph.
+
+### Evidence
+
+- Stage0 list-outputs (absolute sources) returned only:
+  - `/home/lwhsu/killme/bun/build/freebsd-release-ozig/codegen/bindgen_generated.zig`
+- Node runner list-outputs returned full set:
+  - `GeneratedSocketConfigBinaryType.cpp`
+  - `GeneratedSocketConfigHandlers.cpp`
+  - `GeneratedSocketConfig.cpp`
+  - `GeneratedSSLConfig.cpp`
+  - `GeneratedFakeTimersConfig.cpp`
+  - plus corresponding zig outputs.
+- Before fix, `build/freebsd-release-ozig/build.ninja` had `bun-bindgen-v2` output only `codegen/bindgen_generated.zig`.
+- After fix/reconfigure, `build.ninja` includes all bindgen-v2 `.cpp` outputs and compile rules.
+
+### Fix applied
+
+- `cmake/Globals.cmake`
+  - FreeBSD default changed:
+    - `DEFAULT_BUN_FREEBSD_BINDGENV2_NODE: 0 -> 1`
+- `cmake/targets/BuildBun.cmake`
+  - Updated comments on mode `0` to mark it as investigational/historical split mode.
+  - Added FreeBSD configure-time guard:
+    - if bindgen-v2 `list-outputs` yields zero `.cpp` files, CMake now fails fast with actionable message.
+
+### Validation (current checkpoint)
+
+- Fresh configure in new dir (`build/freebsd-bindgen-default-check`) shows:
+  - `BUN_FREEBSD_BINDGENV2_NODE:STRING=1`
+- Fresh generated Ninja includes:
+  - `codegen/GeneratedSocketConfigBinaryType.cpp`
+  - `codegen/GeneratedSocketConfigHandlers.cpp`
+  - `codegen/GeneratedSocketConfig.cpp`
+  - `codegen/GeneratedSSLConfig.cpp`
+  - `codegen/GeneratedFakeTimersConfig.cpp`
+- Full build in `build/freebsd-release-ozig` succeeds.
+- Runtime smoke checks:
+  - `build/freebsd-release-ozig/bun-profile --version` => `1.3.10`
+  - `build/freebsd-release-ozig/bun-profile -e 'console.log(1+1)'` => `2`
