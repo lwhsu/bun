@@ -1266,3 +1266,48 @@ Planned immediate next steps once `release-bindings` exits:
 
 - Host self-host crash remains unresolved and appears tied to FreeBSD JSC/runtime behavior during complex module import/evaluation graphs, not a single script typo/path issue.
 - The documented practical bootstrap route remains valid: Node fallback for codegen/install on FreeBSD while continuing runtime/JSC isolation in parallel.
+
+## 2026-02-19 follow-up: repro #3 minimization and integration
+
+### Objective
+
+- Continue Step 1 crash isolation by shrinking the import-graph repro and integrating it into the canonical host-selfhost repro script.
+
+### Method and result
+
+- Started from the known failing import subset repro and used a ddmin-style ordered reduction (preserving execution model and touching imported bindings).
+- Found a smaller failing sequence (length 4) for the import-graph repro:
+  - `js_classes`
+  - `builtin-parser`
+  - `client-js`
+  - `generate-js2native`
+  - plus `bundle-functions` import/use
+- Updated tracked repro to this minimized set:
+  - `scripts/repro/freebsd-host-import-subset-crash.ts`
+
+### Notes on ordering
+
+- Reduction showed this sequence is smaller than the previous 6-import version.
+- In this ddmin pass, reversing the reduced sequence still failed, and no passing permutation was found within the tested reduced-set permutations.
+- So this is a minimal failing import subset for current testing, but not currently proven to be order-sensitive.
+
+### Canonical repro script update
+
+- Extended:
+  - `scripts/freebsd-host-selfhost-repro.sh`
+- Added repro #3 execution path:
+  - default `BUN_FREEBSD_HOST_THIRD_REPRO=scripts/repro/freebsd-host-import-subset-crash.ts`
+  - captures:
+    - `host-selfhost-import-subset-crash.out/.err`
+    - `host-selfhost-import-subset-crash.core`
+    - `host-selfhost-import-subset-crash.bt`
+
+### Validation
+
+- Re-ran canonical script:
+  - `./scripts/freebsd-host-selfhost-repro.sh`
+- Outcome:
+  - repro #1 fails as expected (`exit=132`)
+  - repro #2 fails as expected (`exit=132`)
+  - repro #3 fails as expected (`exit=132`) with captured core+bt
+- This keeps the crash triage entrypoints reproducible while we continue deeper runtime/JSC isolation.

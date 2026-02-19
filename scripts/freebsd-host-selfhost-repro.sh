@@ -12,6 +12,7 @@ REPRO_BUILD_DIR="${BUN_FREEBSD_HOST_REPRO_BUILD_DIR:-${ROOT_DIR}/build/freebsd-h
 LOG_DIR="${BUN_FREEBSD_HOST_REPRO_LOG_DIR:-${ROOT_DIR}/build/freebsd-bootstrap/logs}"
 EXPECT_FAIL="${BUN_FREEBSD_HOST_REPRO_EXPECT_FAIL:-1}"
 SECOND_REPRO="${BUN_FREEBSD_HOST_SECOND_REPRO:-scripts/repro/freebsd-host-require-bundle-functions.ts}"
+THIRD_REPRO="${BUN_FREEBSD_HOST_THIRD_REPRO:-scripts/repro/freebsd-host-import-subset-crash.ts}"
 
 if [[ "${SECOND_REPRO}" = /* ]]; then
   SECOND_REPRO_PATH="${SECOND_REPRO}"
@@ -23,6 +24,18 @@ if [[ "${SECOND_REPRO}" = /* ]]; then
 else
   SECOND_REPRO_PATH="${ROOT_DIR}/${SECOND_REPRO}"
   SECOND_REPRO_CMD="${SECOND_REPRO}"
+fi
+
+if [[ "${THIRD_REPRO}" = /* ]]; then
+  THIRD_REPRO_PATH="${THIRD_REPRO}"
+  if [[ "${THIRD_REPRO_PATH}" == "${ROOT_DIR}/"* ]]; then
+    THIRD_REPRO_CMD="${THIRD_REPRO_PATH#${ROOT_DIR}/}"
+  else
+    THIRD_REPRO_CMD="${THIRD_REPRO_PATH}"
+  fi
+else
+  THIRD_REPRO_PATH="${ROOT_DIR}/${THIRD_REPRO}"
+  THIRD_REPRO_CMD="${THIRD_REPRO}"
 fi
 
 mkdir -p "${LOG_DIR}" "${REPRO_BUILD_DIR}"
@@ -40,6 +53,10 @@ SECOND_OUT="${LOG_DIR}/host-selfhost-require-bundle-functions.out"
 SECOND_ERR="${LOG_DIR}/host-selfhost-require-bundle-functions.err"
 SECOND_BT="${LOG_DIR}/host-selfhost-require-bundle-functions.bt"
 SECOND_CORE="${LOG_DIR}/host-selfhost-require-bundle-functions.core"
+THIRD_OUT="${LOG_DIR}/host-selfhost-import-subset-crash.out"
+THIRD_ERR="${LOG_DIR}/host-selfhost-import-subset-crash.err"
+THIRD_BT="${LOG_DIR}/host-selfhost-import-subset-crash.bt"
+THIRD_CORE="${LOG_DIR}/host-selfhost-import-subset-crash.core"
 
 echo "[host-selfhost-repro] host bun: ${HOST_BUN}"
 "${HOST_BUN}" --version || true
@@ -105,6 +122,31 @@ else
   echo "[host-selfhost-repro] repro #2 skipped (missing ${SECOND_REPRO_PATH})"
 fi
 
+THIRD_EXIT=0
+if [[ -f "${THIRD_REPRO_PATH}" ]]; then
+  echo "[host-selfhost-repro] repro #3: minimized import-subset crash"
+  rm -f "${ROOT_DIR}/bun-profile.core"
+  set +e
+  "${HOST_BUN}" --no-install run "${THIRD_REPRO_CMD}" >"${THIRD_OUT}" 2>"${THIRD_ERR}"
+  THIRD_EXIT=$?
+  set -e
+  echo "[host-selfhost-repro] repro #3 exit=${THIRD_EXIT}"
+  sed -n '1,120p' "${THIRD_ERR}" || true
+
+  if [[ -f "${ROOT_DIR}/bun-profile.core" ]]; then
+    cp "${ROOT_DIR}/bun-profile.core" "${THIRD_CORE}"
+    echo "[host-selfhost-repro] captured core: ${THIRD_CORE}"
+
+    if command -v lldb >/dev/null 2>&1; then
+      lldb -c "${THIRD_CORE}" -o "bt" -o "thread list" -o "quit" "${HOST_BUN}" >"${THIRD_BT}" 2>&1 || true
+      echo "[host-selfhost-repro] captured backtrace: ${THIRD_BT}"
+      sed -n '1,100p' "${THIRD_BT}" || true
+    fi
+  fi
+else
+  echo "[host-selfhost-repro] repro #3 skipped (missing ${THIRD_REPRO_PATH})"
+fi
+
 echo "[host-selfhost-repro] logs:"
 echo "  ${BUNDLE_OUT}"
 echo "  ${BUNDLE_ERR}"
@@ -122,6 +164,16 @@ if [[ -f "${SECOND_REPRO_PATH}" ]]; then
   fi
   if [[ -f "${SECOND_BT}" ]]; then
     echo "  ${SECOND_BT}"
+  fi
+fi
+if [[ -f "${THIRD_REPRO_PATH}" ]]; then
+  echo "  ${THIRD_OUT}"
+  echo "  ${THIRD_ERR}"
+  if [[ -f "${THIRD_CORE}" ]]; then
+    echo "  ${THIRD_CORE}"
+  fi
+  if [[ -f "${THIRD_BT}" ]]; then
+    echo "  ${THIRD_BT}"
   fi
 fi
 
