@@ -1030,3 +1030,29 @@ Planned immediate next steps once `release-bindings` exits:
 - No safe functional source patch is committed from this isolation pass.
 - Stable/reproducible path remains unchanged:
   - keep FreeBSD Node fallback defaults ON for codegen/install in checkpoint/repro scripts.
+
+## 2026-02-19 follow-up experiment: FreeBSD default JIT-off test
+
+### Hypothesis tested
+
+- Since crash backtraces frequently include Baseline JIT finalize paths, tested whether forcing JIT defaults OFF in `JSCInitialize` on FreeBSD would unblock host codegen execution.
+
+### Experiment
+
+- Temporary source patch (reverted after test):
+  - `src/bun.js/bindings/ZigGlobalObject.cpp`
+  - set `useJIT/useBBQJIT/useConcurrentJIT = false` under `OS(FREEBSD)`.
+- Rebuilt:
+  - `cmake --build build/freebsd-release-ozig --target bun-profile -j $(sysctl -n hw.ncpu)`
+
+### Result
+
+- No improvement for host self-host blockers:
+  - `bun-profile --no-install run src/codegen/bundle-modules.ts ...` still fails (`rc=132`).
+  - reduced repro (`tmp-require-b1-extra.ts`) still fails (`rc=132`).
+- Baseline runtime checks still pass (`--version`, `1+1`).
+
+### Conclusion
+
+- This issue is not resolved by simply changing JIT defaults at startup on FreeBSD.
+- Temporary JIT-default patch was reverted; no functional source change kept from this experiment.
