@@ -687,3 +687,39 @@ Planned immediate next steps once `release-bindings` exits:
 - Current practical bootstrap path remains:
   - keep FreeBSD Node fallback for codegen/bootstrap steps (including bindgen-v2 list/generate),
   - use produced `bun-profile` as built artifact/runtime binary.
+
+## 2026-02-19 clean-build reproducibility fix: SetupLLVM NOTFOUND leakage
+
+### New blocker in clean build dir
+
+- Fresh build in `build/freebsd-bindgen-default-check` failed early at vendor `libdeflate` configure.
+- Failing command had invalid compiler tool args:
+  - `-DCMAKE_C_COMPILER=CMAKE_C_COMPILER-NOTFOUND`
+  - `-DCMAKE_CXX_COMPILER=CMAKE_CXX_COMPILER-NOTFOUND`
+  - similarly for linker/ar/strip/ranlib
+- This was not a source compile error; it was CMake arg propagation failure in external project setup.
+
+### Root cause
+
+- `cmake/tools/SetupLLVM.cmake` `find_llvm_command*` macros appended `-D<tool>=...` to `CMAKE_ARGS` even when versioned lookup did not resolve.
+- On FreeBSD host, strict LLVM version matching can miss and leave `NOTFOUND` values, which then leak into vendor sub-build configure commands.
+
+### Fix applied
+
+- Patched `cmake/tools/SetupLLVM.cmake`:
+  - preserve pre-existing tool value (`CMAKE_C_COMPILER`, etc.) as fallback,
+  - only append `-D<tool>=...` into `CMAKE_ARGS` when final value is non-empty and resolved.
+
+### Validation
+
+- Reconfigure regenerated vendor configure commands with resolved tools, e.g.:
+  - `-DCMAKE_C_COMPILER=/usr/bin/cc`
+  - `-DCMAKE_CXX_COMPILER=/usr/bin/c++`
+  - `-DCMAKE_LINKER=/usr/bin/ld.lld`
+  - `-DCMAKE_AR=/usr/bin/llvm-ar`
+  - `-DCMAKE_STRIP=/usr/bin/llvm-strip`
+  - `-DCMAKE_RANLIB=/usr/bin/llvm-ranlib`
+- Full clean build then succeeded in `build/freebsd-bindgen-default-check`.
+- Runtime smoke checks:
+  - `build/freebsd-bindgen-default-check/bun-profile --version` => `1.3.10`
+  - `build/freebsd-bindgen-default-check/bun-profile -e 'console.log(1+1)'` => `2`
