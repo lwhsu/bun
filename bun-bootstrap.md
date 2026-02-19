@@ -780,3 +780,54 @@ Planned immediate next steps once `release-bindings` exits:
   - `bun install --frozen-lockfile`
 - Practical path remains unchanged for reproducible builds:
   - keep FreeBSD Node fallbacks ON for codegen/install in the full build pipeline.
+
+## 2026-02-19 node-fallback codegen correctness fix (module registry/runtime)
+
+### New issue found
+
+- FreeBSD binaries built through Node codegen fallback (`BUN_FREEBSD_CODEGEN_NODE=ON`) passed basic smoke (`--version`, `1+1`) but failed Node builtin import:
+  - `build/freebsd-release-ozig/bun-profile -e 'import path from "node:path"; ...'`
+  - error: `TypeError ... internal/shared ... SafeArrayIterator ... null or undefined`
+
+### Root cause
+
+- `scripts/codegen-ts-node-runner.mjs` Bun-build compatibility path diverged from Bun semantics in two ways:
+  - hardcoded Linux values (`TARGET_PLATFORM=linux`, `process.platform="linux"`, `process.arch="x64"`)
+  - `bun build ... --outdir` emulation used `esbuild format: "iife"`
+- In `bundle-modules.ts`, output is wrapped as `(function () { ... })` and `$$EXPORT$$(...).$$EXPORT_END$$` is replaced with `return ...`.
+  - with `iife`, bundled code became `(() => { ... $$EXPORT$$... })();`
+  - replacement yielded `(() => { ... return $ })();` inside outer wrapper, so outer wrapper returned `undefined`
+  - this produced broken internal module payloads at runtime.
+
+### Fixes applied
+
+- `scripts/codegen-ts-node-runner.mjs`
+  - use host-aware platform/arch defaults:
+    - `TARGET_PLATFORM: process.env.TARGET_PLATFORM ?? process.platform`
+    - `TARGET_ARCH: process.env.TARGET_ARCH ?? process.arch`
+  - update all `process.platform` / `process.arch` defines to use those values
+  - change outdir build compatibility format from `iife` to `cjs` to preserve top-level `$$EXPORT$$` flow expected by `bundle-modules.ts`
+- `src/js/node/os.ts`
+  - add FreeBSD case for `os.type()`:
+    - `process.platform === "freebsd" ? "FreeBSD" : ...`
+- `cmake/targets/BuildBun.cmake`
+  - add `scripts/codegen-ts-node-runner.mjs` as an explicit source dependency for `bun-js-modules` target so runner changes invalidate codegen outputs automatically.
+
+### Validation
+
+- Regenerated JS modules:
+  - `cmake --build build/freebsd-release-ozig --target bun-js-modules`
+- Rebuilt host binary:
+  - `cmake --build build/freebsd-release-ozig --target bun-profile -j $(sysctl -n hw.ncpu)`
+- Runtime checks now pass:
+  - `build/freebsd-release-ozig/bun-profile -e 'import path from "node:path"; console.log(path.basename("a/b"));'` => `b`
+  - same for `build/freebsd-release-ozig/bun`
+
+### Remaining blocker
+
+- Fallback-free self-host path still crashes when host bun executes TS codegen directly:
+  - `build/freebsd-release-ozig/bun-profile --no-install run src/codegen/generate-node-errors.ts ...`
+  - exits with segfault (`rc=132`)
+- So current practical path remains:
+  - keep Node fallbacks ON for codegen/install;
+  - continue isolating direct host-bun `run <script.ts>` crashes as separate runtime bugs.

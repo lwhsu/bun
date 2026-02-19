@@ -7,6 +7,8 @@ import { inspect } from "node:util";
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const nodeRequire = createRequire(import.meta.url);
+const targetPlatform = process.env.TARGET_PLATFORM ?? process.platform;
+const targetArch = process.env.TARGET_ARCH ?? process.arch;
 
 function fail(message) {
   console.error(`error: ${message}`);
@@ -105,7 +107,9 @@ function bunBuildCompatSync(cmd, cwd) {
       esbuild.buildSync({
         entryPoints: parsed.entryPoints,
         bundle: true,
-        format: "iife",
+        // `bundle-modules.ts` wraps output in its own function and expects top-level
+        // `$$EXPORT$$` markers, so avoid iife wrappers and ESM `export` syntax here.
+        format: "cjs",
         platform: "browser",
         target: parsed.target,
         outdir: parsed.outdir,
@@ -209,8 +213,10 @@ function globScanSync(pattern) {
 }
 
 function createBunCompat(scriptPath) {
+  const bunTargetPlatform = process.env.TARGET_PLATFORM ?? process.platform;
+  const bunTargetArch = process.env.TARGET_ARCH ?? process.arch;
   return {
-    env: { ...process.env, TARGET_PLATFORM: process.env.TARGET_PLATFORM ?? "linux", TARGET_ARCH: process.arch },
+    env: { ...process.env, TARGET_PLATFORM: bunTargetPlatform, TARGET_ARCH: bunTargetArch },
     enableANSIColors: process.stdout.isTTY,
     inspect,
     hash(value) {
@@ -478,8 +484,8 @@ function main() {
       "--platform=node",
       "--format=esm",
       "--target=node20",
-      `--define:process.platform="linux"`,
-      `--define:process.arch="x64"`,
+      `--define:process.platform=${JSON.stringify(targetPlatform)}`,
+      `--define:process.arch=${JSON.stringify(targetArch)}`,
       `--alias:bun:test=${bunTestShim}`,
       `--outfile=${bindgenShim}`,
     ],
@@ -494,8 +500,8 @@ function main() {
       "--format=cjs",
       "--target=node20",
       `--define:Bun=globalThis.Bun`,
-      `--define:process.platform="linux"`,
-      `--define:process.arch="x64"`,
+      `--define:process.platform=${JSON.stringify(targetPlatform)}`,
+      `--define:process.arch=${JSON.stringify(targetArch)}`,
       `--define:import.meta.dir=${JSON.stringify(scriptDir)}`,
       `--define:import.meta.dirname=${JSON.stringify(scriptDir)}`,
       `--define:import.meta.path=${JSON.stringify(path.join(repoRoot, "src/codegen/bindgen-lib.ts"))}`,
@@ -516,8 +522,8 @@ function main() {
         "--format=esm",
         "--target=node20",
         `--define:Bun=globalThis.Bun`,
-        `--define:process.platform="linux"`,
-        `--define:process.arch="x64"`,
+        `--define:process.platform=${JSON.stringify(targetPlatform)}`,
+        `--define:process.arch=${JSON.stringify(targetArch)}`,
         `--define:import.meta.dir=${JSON.stringify(scriptDir)}`,
         `--define:import.meta.dirname=${JSON.stringify(scriptDir)}`,
         `--define:import.meta.path=${JSON.stringify(scriptPath)}`,
@@ -567,8 +573,8 @@ function registerTsRequireExtension(ext, loader) {
       target: "node20",
       define: {
         Bun: "globalThis.Bun",
-        "process.platform": "\\"linux\\"",
-        "process.arch": "\\"x64\\"",
+        "process.platform": ${JSON.stringify(JSON.stringify(targetPlatform))},
+        "process.arch": ${JSON.stringify(JSON.stringify(targetArch))},
         "import.meta.dir": JSON.stringify(fileDir),
         "import.meta.dirname": JSON.stringify(fileDir),
         "import.meta.path": JSON.stringify(filename),
