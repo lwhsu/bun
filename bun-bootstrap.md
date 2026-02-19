@@ -967,3 +967,33 @@ Planned immediate next steps once `release-bindings` exits:
 - FreeBSD build remains reproducible and runnable with the persisted Node fallback path.
 - Remaining self-host blocker is still host-bun stability for direct TS codegen execution (`bun run src/codegen/bundle-modules.ts ...`) and Bun subprocess lifecycle on FreeBSD.
 - Next step remains targeted isolation/fix of this host runtime crash path (likely JSC/runtime interaction), while keeping fallback defaults unchanged for reproducible builds.
+
+## 2026-02-19 checkpoint: reproducibility script default fix
+
+### Issue
+
+- `scripts/freebsd-checkpoint-repro.sh` still hardcoded:
+  - `BUN_FREEBSD_BINDGENV2_NODE=0`
+- With current CMake guardrails, this can fail configure on FreeBSD when stage0 `list-outputs` does not emit required bindgen-v2 `.cpp` outputs.
+
+### Fix
+
+- Updated script defaults to be override-friendly and aligned with current known-good path:
+  - `BUN_FREEBSD_NPM_INSTALL="${BUN_FREEBSD_NPM_INSTALL:-1}"`
+  - `BUN_FREEBSD_BINDGENV2_NODE="${BUN_FREEBSD_BINDGENV2_NODE:-1}"`
+  - `BUN_FREEBSD_CODEGEN_NODE="${BUN_FREEBSD_CODEGEN_NODE:-1}"`
+
+### Validation
+
+- Re-ran:
+  - `BUN_FREEBSD_REPRO_CLEAN=0 ./scripts/freebsd-checkpoint-repro.sh`
+- Result:
+  - configure succeeds with `BUN_FREEBSD_BINDGENV2_NODE: 1`
+  - build succeeds
+  - smoke checks succeed:
+    - final `bun --version` => `1.3.10`
+    - final `bun -e 'console.log(1+1)'` => `2`
+
+### Impact
+
+- Repro script again matches the current stable FreeBSD checkpoint contract and no longer fails due stale bindgen-v2 mode defaults.
