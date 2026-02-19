@@ -723,3 +723,60 @@ Planned immediate next steps once `release-bindings` exits:
 - Runtime smoke checks:
   - `build/freebsd-bindgen-default-check/bun-profile --version` => `1.3.10`
   - `build/freebsd-bindgen-default-check/bun-profile -e 'console.log(1+1)'` => `2`
+
+## 2026-02-19 self-host follow-up: bindgen-v2 runtime hardening + next blocker
+
+### What was changed
+
+- `src/codegen/bindgenv2/internal/*` was made independent from `node:assert` / `node:util`:
+  - added `src/codegen/bindgenv2/internal/runtime.ts` (`invariant`, `inspect`)
+  - updated:
+    - `src/codegen/bindgenv2/internal/base.ts`
+    - `src/codegen/bindgenv2/internal/primitives.ts`
+    - `src/codegen/bindgenv2/internal/string.ts`
+    - `src/codegen/bindgenv2/internal/enumeration.ts`
+    - `src/codegen/bindgenv2/internal/union.ts`
+- `src/codegen/bindgenv2/script.ts` was refactored to:
+  - avoid `import.meta.require(...)` for source loading
+  - use dynamic `import(...)` of source files
+  - use Bun-native file I/O (`Bun.file` / `Bun.write`) and local arg parsing
+- `cmake/sources/BindgenV2InternalSources.txt` now includes `internal/runtime.ts`.
+- `cmake/targets/BuildBun.cmake`:
+  - creates `${CODEGEN_PATH}/bindgen_generated` at configure time
+  - for FreeBSD bindgen-v2 Bun path, uses:
+    - `bun -e "await import(process.argv[1]);" <script.ts> ...`
+    - instead of `bun run <script.ts> ...`
+
+### Validation
+
+- Stage0 list-outputs now returns full bindgen-v2 outputs (15 entries, including `.cpp`):
+  - `build/freebsd-bootstrap/stage0/bun run src/codegen/bindgenv2/script.ts --command=list-outputs ...`
+- Host bun list-outputs with `-e` wrapper also returns full output set:
+  - `build/freebsd-release-ozig/bun-profile --no-install -e 'await import(process.argv[1]);' src/codegen/bindgenv2/script.ts --command=list-outputs ...`
+- Configure with fallback-off + no-install now succeeds:
+  - `build/freebsd-selfhost-off-noinstall-r2`
+  - previously (`r1`) failed at `BuildBun.cmake:553` with bindgen-v2 `execute_process` segfault.
+
+### Current blocker after configure
+
+- Self-host build still fails early when host bun is used for general `run`/`install` steps:
+  - multiple codegen commands of the form:
+    - `bun-profile --no-install run <script.ts> ...`
+  - and install commands:
+    - `bun-profile install --frozen-lockfile`
+  - crash with segfault (`code=260` / `code=267` in Ninja).
+- Example failing targets:
+  - `Generating JavaScript modules` (`bundle-modules.ts`)
+  - `Processing ".bind.ts" files` (`bindgen.ts`)
+  - `Generating ErrorCode.{zig,h}` (`generate-node-errors.ts`)
+  - `Generating ZigGeneratedClasses.{zig,cpp,h}` (`generate-classes.ts`)
+  - `bun-profile install --frozen-lockfile`
+
+### Updated conclusion
+
+- Bindgen-v2-specific configure blocker is addressed.
+- The next dominant blocker is broader host-bun self-host runtime stability on FreeBSD for:
+  - `bun run <script.ts> ...`
+  - `bun install --frozen-lockfile`
+- Practical path remains unchanged for reproducible builds:
+  - keep FreeBSD Node fallbacks ON for codegen/install in the full build pipeline.

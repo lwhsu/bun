@@ -1,4 +1,3 @@
-import util from "node:util";
 import type { NullableType, OptionalType } from "./optional";
 
 /** Default is "compact". */
@@ -125,12 +124,14 @@ export function joinIndented(amount: number, pieces: readonly string[]): string 
 }
 
 export function toQuotedLiteral(value: string): string {
-  return `"${util.inspect(value).slice(1, -1).replaceAll('"', '\\"')}"`;
+  return JSON.stringify(value);
 }
 
 export function toASCIILiteral(value: string): string {
-  if (value[Symbol.iterator]().some(c => c.charCodeAt(0) >= 128)) {
-    throw RangeError(`string must be ASCII: ${util.inspect(value)}`);
+  for (const c of value) {
+    if (c.charCodeAt(0) >= 128) {
+      throw RangeError(`string must be ASCII: ${JSON.stringify(value)}`);
+    }
   }
   return `${toQuotedLiteral(value)}_s`;
 }

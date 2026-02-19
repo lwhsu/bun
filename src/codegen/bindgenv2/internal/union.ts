@@ -1,4 +1,3 @@
-import assert from "node:assert";
 import {
   CodeStyle,
   dedent,
@@ -9,6 +8,7 @@ import {
   Type,
   validateName,
 } from "./base";
+import { invariant } from "./runtime";
 
 export interface NamedAlternatives {
   readonly [name: string]: Type;
@@ -43,7 +43,7 @@ export function union(
   let alternatives: Type[];
 
   function toCpp(value: UnionInstance): string {
-    assert(alternatives.includes(value.type));
+    invariant(alternatives.includes(value.type));
     return `${value.type.idlType}::ImplementationType { ${value.type.toCpp(value.value)} }`;
   }
 
@@ -89,7 +89,7 @@ export function union(
     })();
   }
 
-  assert(maybeNamedAlternatives !== undefined);
+  invariant(maybeNamedAlternatives !== undefined);
   const namedAlternatives: NamedAlternatives = maybeNamedAlternatives;
   const name: string = alternativesOrName;
   validateName(name);

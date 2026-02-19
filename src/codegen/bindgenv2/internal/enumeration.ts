@@ -1,5 +1,3 @@
-import assert from "node:assert";
-import util from "node:util";
 import {
   CodeStyle,
   joinIndented,
@@ -8,6 +6,7 @@ import {
   toASCIILiteral,
   toQuotedLiteral,
 } from "./base";
+import { inspect, invariant } from "./runtime";
 
 abstract class EnumType extends NamedType {}
 
@@ -34,7 +33,7 @@ export function enumeration(
   const valueMap = new Map<string, number>();
   for (const [value, index] of indexedValues) {
     if (valueMap.size === valueMap.set(value, index).size) {
-      throw RangeError(`duplicate enum value: ${util.inspect(value)}`);
+      throw RangeError(`duplicate enum value: ${inspect(value)}`);
     }
   }
 
@@ -70,7 +69,7 @@ export function enumeration(
     toCpp(value: string): string {
       const index = valueMap.get(value);
       if (index == null) {
-        throw RangeError(`not a member of ${name}: ${util.inspect(value)}`);
+        throw RangeError(`not a member of ${name}: ${inspect(value)}`);
       }
       return `::Bun::Bindgen::Generated::${name}::${cppMembers[index]}`;
     }
@@ -82,7 +81,7 @@ export function enumeration(
       const quotedValues = uniqueValues.map(v => `"${v}"`);
       let humanReadableName;
       if (quotedValues.length == 0) {
-        assert(false); // unreachable
+        invariant(false); // unreachable
       } else if (quotedValues.length == 1) {
         humanReadableName = quotedValues[0];
       } else if (quotedValues.length == 2) {

@@ -1,7 +1,14 @@
 #!/usr/bin/env bun
-import * as helpers from "../helpers";
-import { writeSync } from "node:fs";
-import { NamedType, Type } from "./internal/base";
+
+interface NamedTypeLike {
+  name: string;
+  dependencies: unknown[];
+  hasCppSource: boolean;
+  hasZigSource: boolean;
+  cppHeader?: string;
+  cppSource?: string;
+  zigSource?: string;
+}
 
 const USAGE = `\
 Usage: script.ts [options]
@@ -19,39 +26,109 @@ Commands:
 let codegenPath: string;
 let sources: string[];
 
-function writeStdout(text: string): void {
-  writeSync(1, text);
+async function writeStdout(text: string): Promise<void> {
+  await Bun.write(Bun.stdout, text);
 }
 
-function writeStderr(text: string): void {
-  writeSync(2, text);
+async function writeStderr(text: string): Promise<void> {
+  await Bun.write(Bun.stderr, text);
 }
 
-function getNamedExports(): NamedType[] {
-  return sources.flatMap(path => {
-    const exports = import.meta.require(path);
-    return Object.values(exports).filter(v => v instanceof NamedType);
-  });
+async function writeIfNotChanged(filePath: string, contents: string): Promise<void> {
+  const normalized = contents.replaceAll("\r\n", "\n").trimEnd() + "\n";
+  const file = Bun.file(filePath);
+  if (await file.exists()) {
+    const existing = await file.text();
+    if (existing === normalized) return;
+  }
+  await Bun.write(filePath, normalized);
 }
 
-function getNamedDependencies(type: Type, result: Set<NamedType>): void {
-  for (const dependency of type.dependencies) {
-    if (dependency instanceof NamedType) {
+function isNamedTypeLike(value: unknown): value is NamedTypeLike {
+  return (
+    value != null &&
+    typeof value === "object" &&
+    typeof (value as any).name === "string" &&
+    Array.isArray((value as any).dependencies) &&
+    ("cppHeader" in (value as any) || "cppSource" in (value as any) || "zigSource" in (value as any))
+  );
+}
+
+function argParse(keys: string[]): { [key: string]: boolean | string } {
+  const options: { [key: string]: boolean | string } = {};
+  for (const arg of process.argv.slice(2)) {
+    if (!arg.startsWith("--")) {
+      throw new Error("unknown argument: " + arg);
+    }
+    const splitPos = arg.indexOf("=");
+    let name = arg;
+    let value: boolean | string = true;
+    if (splitPos !== -1) {
+      name = arg.slice(0, splitPos);
+      value = arg.slice(splitPos + 1);
+    }
+    options[name.slice(2)] = value;
+  }
+
+  const unknown = new Set(Object.keys(options));
+  for (const key of keys) {
+    unknown.delete(key);
+  }
+  if (unknown.size > 0) {
+    throw new Error("unknown argument: --" + Array.from(unknown).join(", --"));
+  }
+  return options;
+}
+
+function moduleSpecifierFromPath(path: string): string {
+  if (/^[A-Za-z]:[\\/]/.test(path)) {
+    return "file:///" + path.replaceAll("\\", "/");
+  }
+  if (path.startsWith("\\\\")) {
+    return "file://" + path.replaceAll("\\", "/");
+  }
+  return path;
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack ?? error.message;
+  }
+  return String(error);
+}
+
+async function getNamedExports(): Promise<NamedTypeLike[]> {
+  const modules: Record<string, unknown>[] = [];
+  for (const path of sources) {
+    try {
+      modules.push((await import(moduleSpecifierFromPath(path))) as Record<string, unknown>);
+    } catch (error) {
+      throw new Error(`failed to import ${path}: ${toErrorMessage(error)}`);
+    }
+  }
+  return modules.flatMap(exports => Object.values(exports).filter(isNamedTypeLike));
+}
+
+function getNamedDependencies(type: { dependencies?: unknown[] }, result: Set<NamedTypeLike>): void {
+  for (const dependency of type.dependencies ?? []) {
+    if (isNamedTypeLike(dependency)) {
       result.add(dependency);
     }
-    getNamedDependencies(dependency, result);
+    if (dependency != null && typeof dependency === "object" && Array.isArray((dependency as any).dependencies)) {
+      getNamedDependencies(dependency as any, result);
+    }
   }
 }
 
-function cppHeaderPath(type: NamedType): string {
+function cppHeaderPath(type: NamedTypeLike): string {
   return `${codegenPath}/Generated${type.name}.h`;
 }
 
-function cppSourcePath(type: NamedType): string {
+function cppSourcePath(type: NamedTypeLike): string {
   return `${codegenPath}/Generated${type.name}.cpp`;
 }
 
-function zigSourcePath(typeOrNamespace: NamedType | string): string {
+function zigSourcePath(typeOrNamespace: NamedTypeLike | string): string {
   let ns: string;
   if (typeof typeOrNamespace === "string") {
     ns = typeOrNamespace;
@@ -72,38 +149,37 @@ function toZigNamespace(name: string): string {
   return result;
 }
 
-function listOutputs(): void {
+async function listOutputs(): Promise<void> {
   const outputs: string[] = [`${codegenPath}/bindgen_generated.zig`];
-  for (const type of getNamedExports()) {
+  const namedExports = await getNamedExports();
+  for (const type of namedExports) {
     if (type.hasCppSource) outputs.push(cppSourcePath(type));
     if (type.hasZigSource) outputs.push(zigSourcePath(type));
   }
-  writeStdout(outputs.join(";"));
+  await writeStdout(outputs.join(";"));
 }
 
-function generate(): void {
+async function generate(): Promise<void> {
   const names = new Set<string>();
   const zigRoot: string[] = [];
   const zigRootInternal: string[] = [];
 
-  const namedExports = getNamedExports();
+  const namedExports = await getNamedExports();
   {
-    const namedDependencies = new Set<NamedType>();
+    const namedDependencies = new Set<NamedTypeLike>();
     for (const type of namedExports) {
       getNamedDependencies(type, namedDependencies);
     }
     const namedExportsSet = new Set(namedExports);
     for (const type of namedDependencies) {
       if (!namedExportsSet.has(type)) {
-        writeStderr(`error: named type must be exported: ${type.name}\n`);
-        process.exit(1);
+        throw new Error(`named type must be exported: ${type.name}`);
       }
     }
     const namedTypeNames = new Set<string>();
     for (const type of namedExports) {
       if (namedTypeNames.size == namedTypeNames.add(type.name).size) {
-        writeStderr(`error: multiple types with same name: ${type.name}\n`);
-        process.exit(1);
+        throw new Error(`multiple types with same name: ${type.name}`);
       }
     }
   }
@@ -114,18 +190,17 @@ function generate(): void {
     names.add(type.name);
     names.add(zigNamespace);
     if (names.size !== size + 2) {
-      writeStderr(`error: duplicate name: ${type.name}\n`);
-      process.exit(1);
+      throw new Error(`duplicate name: ${type.name}`);
     }
 
     const cppHeader = type.cppHeader;
     const cppSource = type.cppSource;
     const zigSource = type.zigSource;
     if (cppHeader) {
-      helpers.writeIfNotChanged(cppHeaderPath(type), cppHeader);
+      await writeIfNotChanged(cppHeaderPath(type), cppHeader);
     }
     if (cppSource) {
-      helpers.writeIfNotChanged(cppSourcePath(type), cppSource);
+      await writeIfNotChanged(cppSourcePath(type), cppSource);
     }
     if (zigSource) {
       zigRoot.push(
@@ -134,11 +209,11 @@ function generate(): void {
         "",
       );
       zigRootInternal.push(`pub const ${type.name} = ${zigNamespace}.Bindgen${type.name};`);
-      helpers.writeIfNotChanged(zigSourcePath(zigNamespace), zigSource);
+      await writeIfNotChanged(zigSourcePath(zigNamespace), zigSource);
     }
   }
 
-  helpers.writeIfNotChanged(
+  await writeIfNotChanged(
     `${codegenPath}/bindgen_generated.zig`,
     [
       ...zigRoot,
@@ -150,45 +225,44 @@ function generate(): void {
   );
 }
 
-function main(): void {
-  const args = helpers.argParse(["command", "codegen-path", "sources", "help"]);
+async function main(): Promise<void> {
+  const args = argParse(["command", "codegen-path", "sources", "help"]);
   if (Object.keys(args).length === 0) {
-    writeStderr(USAGE);
+    await writeStderr(USAGE);
     process.exit(1);
   }
   const { command, "codegen-path": codegenPathArg, sources: sourcesArg, help } = args;
   if (help != null) {
-    writeStdout(USAGE);
+    await writeStdout(USAGE);
     process.exit(0);
   }
 
   if (typeof codegenPathArg !== "string") {
-    writeStderr("error: missing --codegen-path\n");
-    process.exit(1);
+    throw new Error("missing --codegen-path");
   }
   codegenPath = codegenPathArg;
 
   if (typeof sourcesArg !== "string") {
-    writeStderr("error: missing --sources\n");
-    process.exit(1);
+    throw new Error("missing --sources");
   }
   sources = sourcesArg.split(",").filter(x => x);
 
   switch (command) {
     case "list-outputs":
-      listOutputs();
+      await listOutputs();
       break;
     case "generate":
-      generate();
+      await generate();
       break;
     default:
       if (typeof command === "string") {
-        writeStderr("error: unknown command: " + command + "\n");
-      } else {
-        writeStderr("error: missing --command\n");
+        throw new Error("unknown command: " + command);
       }
-      process.exit(1);
+      throw new Error("missing --command");
   }
 }
 
-main();
+main().catch(async (error: unknown) => {
+  await writeStderr(`error: ${toErrorMessage(error)}\n`);
+  process.exit(1);
+});
