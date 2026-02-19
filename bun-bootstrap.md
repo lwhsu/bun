@@ -1122,3 +1122,48 @@ Planned immediate next steps once `release-bindings` exits:
   - keep fallback path as official practical route,
   - update `bun-bootstrap.md` with exact evidence and remaining blocker,
   - continue FreeBSD runtime/compat work in parallel instead of blocking on this one issue.
+
+## 2026-02-19 resume execution: canonical host-selfhost repro script added
+
+### Baseline re-verified
+
+- Re-ran checkpoint reproducibility gate:
+  - `BUN_FREEBSD_REPRO_CLEAN=0 ./scripts/freebsd-checkpoint-repro.sh`
+- Result:
+  - configure/build/smoke passed again on current branch,
+  - final smoke remained:
+    - `bun --version` => `1.3.10`
+    - `bun -e 'console.log(1+1)'` => `2`
+
+### New reproducible entry point
+
+- Added:
+  - `scripts/freebsd-host-selfhost-repro.sh`
+- Purpose:
+  - canonicalize fallback-off host crash reproduction for `bundle-modules.ts`,
+  - capture stderr/stdout, exit code, core dump, and `lldb` backtrace in one command.
+
+### Script defaults
+
+- Host binary:
+  - `BUN_FREEBSD_HOST_BUN` (default: `build/freebsd-release-ozig/bun-profile`)
+- Repro build dir:
+  - `BUN_FREEBSD_HOST_REPRO_BUILD_DIR` (default: `build/freebsd-host-selfhost-repro`)
+- Log dir:
+  - `BUN_FREEBSD_HOST_REPRO_LOG_DIR` (default: `build/freebsd-bootstrap/logs`)
+- Expected outcome mode:
+  - `BUN_FREEBSD_HOST_REPRO_EXPECT_FAIL=1` (default; inversion supported for future success checks)
+
+### Validation of new script
+
+- Command:
+  - `./scripts/freebsd-host-selfhost-repro.sh`
+- Result:
+  - reproduces host failure (`exit=132`) in:
+    - `bun-profile --no-install run src/codegen/bundle-modules.ts --debug=OFF ...`
+  - captured artifacts:
+    - `build/freebsd-bootstrap/logs/host-selfhost-bundle-modules.out`
+    - `build/freebsd-bootstrap/logs/host-selfhost-bundle-modules.err`
+    - `build/freebsd-bootstrap/logs/host-selfhost-bundle-modules.core`
+    - `build/freebsd-bootstrap/logs/host-selfhost-bundle-modules.bt`
+- Backtrace still aligns with previously observed JSC crash path (`WTF::fastMalloc`, JIT finalize/module eval stack).
