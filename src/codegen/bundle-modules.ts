@@ -245,18 +245,20 @@ for (const entrypoint of bundledEntryPoints) {
   let usesAssert = output.includes("$assert");
   captured =
     captured
-      .replace(/\$\$EXPORT\$\$\((.*)\).\$\$EXPORT_END\$\$;/, "return $1")
+      .replace(/\$\$EXPORT\$\$\((.*)\).\$\$EXPORT_END\$\$;/, "return $1;")
       .replace(/]\s*,\s*__(debug|assert)_end__\)/g, ")")
       .replace(/]\s*,\s*__debug_end__\)/g, ")")
       .replace(/import.meta.require\((.*?)\)/g, (expr, specifier) => {
         throw new Error(`Builtin Bundler: do not use import.meta.require() (in ${file_path}))`);
       })
+      .replace(/module\.exports\s*=/g, "$ = module.exports =")
       .replace(/return \$\nexport /, "return")
       .replace(/__intrinsic__/g, "@")
       .replace(/__no_intrinsic__/g, "") + "\n";
   captured = captured.replace(
     /function\s*\(.*?\)\s*{/,
     '$&"use strict";' +
+      "var module={exports:{}};var exports=module.exports;" +
       (usesDebug
         ? createLogClientJS(
             file_path.replace(".js", ""),

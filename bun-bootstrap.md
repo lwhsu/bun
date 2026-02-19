@@ -907,3 +907,63 @@ Planned immediate next steps once `release-bindings` exits:
 - Remaining host-bun blockers are now concentrated in:
   - module bundling/runtime (`bundle-modules.ts` / `node:assert`)
   - hash-table generation runtime stability (`create-hash-table.ts`).
+
+## 2026-02-19 checkpoint: SIMDUTF provenance recheck + host-bun bundle crash retest
+
+### SIMDUTF status (reconfirmed)
+
+- `vendor/WebKit/Source/WTF/wtf/SIMDUTF.h` is **not** present in this sparse clone layout.
+- This is not the active blocker for current builds because Bun is compiling against packaged WebKit artifacts that already contain the header:
+  - `build/freebsd-bootstrap/bun-webkit/include/wtf/SIMDUTF.h`
+  - `build/freebsd-bootstrap/bun-webkit-legacy/include/wtf/SIMDUTF.h`
+
+### What was tested in this round
+
+1. Re-tested host-bun self-host command for JS module codegen:
+- command:
+  - `build/freebsd-release-ozig/bun-profile --no-install run src/codegen/bundle-modules.ts --debug=OFF build/freebsd-selfhost-off-noinstall-r2`
+- result:
+  - immediate crash (`rc=132`, SIGBUS)
+  - crash report again points to JSC baseline JIT finalize path (`CodeBlock::setupWithUnlinkedBaselineCode`, `BaselineJITPlan::finalize`).
+
+2. Re-tested with JIT options disabled via env:
+- `BUN_JSC_useJIT=false`
+- `BUN_JSC_useBaselineJIT=false`
+- `BUN_JSC_useBBQJIT=false`
+- `BUN_JSC_useDFGJIT=false`
+- `BUN_JSC_useFTLJIT=false`
+- `BUN_JSC_useConcurrentJIT=false`
+- result:
+  - host `bundle-modules.ts` still crashes (`rc=132`).
+
+3. Reconfirmed FreeBSD subprocess instability under host bun (kevent path):
+- `Bun.spawn(...); await proc.exited` can throw `EINVAL: invalid argument, kevent`.
+- `Bun.spawn` stream handling for perl probes remains unreliable.
+
+### Code state adjustments made
+
+- Kept prior compatibility/runtime fixes:
+  - `src/js/internal/fs/streams.ts`
+    - FreeBSD skips descriptor-backed `Bun.file(fd).writer()` fast path for numeric FDs.
+  - `src/codegen/bundle-modules.ts`
+    - node-fallback output-shape compatibility kept:
+      - `$$EXPORT$$` replacement emits `return ...;`
+      - CJS assignment support (`module.exports =` -> `$ = module.exports =`)
+      - injected local CJS shim vars (`module`, `exports`) inside module wrapper.
+
+- Explicitly **did not** keep experimental `create-hash-table.ts` spawn workaround (reverted), because it did not resolve the FreeBSD host runtime issue and risked destabilizing known-good fallback flow.
+
+### Validation in current stable mode (Node fallback enabled)
+
+- `cmake --build build/freebsd-release-ozig --target bun-js-modules -j $(sysctl -n hw.ncpu)` succeeds.
+- `cmake --build build/freebsd-release-ozig --target bun-profile -j $(sysctl -n hw.ncpu)` succeeds.
+- Runtime checks:
+  - `build/freebsd-release-ozig/bun-profile --version` => `1.3.10`
+  - `build/freebsd-release-ozig/bun-profile -e 'console.log(1+1)'` => `2`
+  - `build/freebsd-release-ozig/bun-profile --no-install -e 'import assert from "node:assert"; console.log(typeof assert.ok);'` => `function`
+
+### Current conclusion
+
+- FreeBSD build remains reproducible and runnable with the persisted Node fallback path.
+- Remaining self-host blocker is still host-bun stability for direct TS codegen execution (`bun run src/codegen/bundle-modules.ts ...`) and Bun subprocess lifecycle on FreeBSD.
+- Next step remains targeted isolation/fix of this host runtime crash path (likely JSC/runtime interaction), while keeping fallback defaults unchanged for reproducible builds.
