@@ -16,17 +16,20 @@
 // - We concatenate all the sources into one big string, which then createsa
 // single JSC::SourceProvider and pass start/end positions to each function's
 // JSC::SourceCode. JSC does this, but WebCore does not seem to.
-import assert from "assert";
 import { readdirSync, rmSync } from "fs";
 import path from "path";
 import { sliceSourceCode } from "./builtin-parser";
 import { createAssertClientJS, createLogClientJS } from "./client-js";
 import { getJS2NativeDTS } from "./generate-js2native";
-import { addCPPCharArray, cap, low, writeIfNotChanged } from "./helpers";
+import { addCPPCharArray, cap, low, readUtf8CompatSync, writeIfNotChanged } from "./helpers";
 import { applyGlobalReplacements, define } from "./replacements";
 
 const PARALLEL = false;
 const KEEP_TMP = true;
+
+const assert = (value: unknown, message?: string): asserts value => {
+  if (!value) throw new Error(message ?? "Assertion failed");
+};
 
 if (import.meta.main && process.argv[1]?.includes("bundle-functions")) {
   throw new Error("This script is not meant to be run directly");
@@ -756,10 +759,7 @@ JSBuiltinInternalFunctions::JSBuiltinInternalFunctions(JSC::VM& vm) : m_vm(vm)
     `;
   // Handle builtin names
   {
-    const BunBuiltinNamesHeader = require("fs").readFileSync(
-      path.join(import.meta.dir, "../js/builtins/BunBuiltinNames.h"),
-      "utf8",
-    );
+    const BunBuiltinNamesHeader = readUtf8CompatSync(path.join(import.meta.dir, "../js/builtins/BunBuiltinNames.h"));
     let definedBuiltinNamesStartI = BunBuiltinNamesHeader.indexOf(
       "#define BUN_COMMON_PRIVATE_IDENTIFIERS_EACH_PROPERTY_NAME",
     );

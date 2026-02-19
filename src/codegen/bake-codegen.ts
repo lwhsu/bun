@@ -1,7 +1,10 @@
-import assert from "node:assert";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
-import { argParse, writeIfNotChanged } from "./helpers";
+import { argParse, readUtf8CompatSync, writeIfNotChanged } from "./helpers";
+
+const assert = (value: unknown, message?: string): asserts value => {
+  if (!value) throw new Error(message ?? "Assertion failed");
+};
 
 // arg parsing
 let { "codegen-root": codegenRoot, debug, ...rest } = argParse(["codegen-root", "debug"]);
@@ -41,7 +44,7 @@ function css(file: string, is_development: boolean): string {
 }
 
 async function run() {
-  const devServerZig = readFileSync(join(base_dir, "DevServer.zig"), "utf-8");
+  const devServerZig = readUtf8CompatSync(join(base_dir, "DevServer.zig"));
   writeIfNotChanged(join(base_dir, "generated.ts"), convertZigEnum(devServerZig, ["IncomingMessageId", "MessageId"]));
 
   const results = await Promise.allSettled(

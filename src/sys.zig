@@ -2273,6 +2273,16 @@ pub fn ftruncate(fd: bun.FileDescriptor, size: isize) Maybe(void) {
         return Maybe(void).errnoSysFd(rc, .ftruncate, fd) orelse .success;
     }
 
+    if (comptime Environment.isFreeBSD) {
+        return while (true) {
+            if (Maybe(void).errnoSysFd(std.c.ftruncate(fd.cast(), @intCast(size)), .ftruncate, fd)) |err| {
+                if (err.getErrno() == .INTR) continue;
+                return err;
+            }
+            return .success;
+        };
+    }
+
     return while (true) {
         if (Maybe(void).errnoSysFd(syscall.ftruncate(fd.cast(), size), .ftruncate, fd)) |err| {
             if (err.getErrno() == .INTR) continue;

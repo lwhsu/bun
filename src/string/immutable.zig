@@ -1164,6 +1164,13 @@ pub const AsciiU16Vector = @Vector(ascii_u16_vector_size, u16);
 pub const max_4_ascii: @Vector(4, u8) = @splat(@as(u8, 127));
 
 pub fn firstNonASCII(slice: []const u8) ?u32 {
+    if (comptime !bun.FeatureFlags.use_simdutf) {
+        for (slice, 0..) |c, i| {
+            if (c > 0x7f) return @as(u32, @truncate(i));
+        }
+        return null;
+    }
+
     const result = bun.simdutf.validate.with_errors.ascii(slice);
     if (result.status == .success) {
         return null;

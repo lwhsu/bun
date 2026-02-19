@@ -118,11 +118,32 @@ pub fn toBunStringFromOwnedSlice(input: []u8, encoding: Encoding) bun.String {
             };
 
             if (converted) |utf16| {
+                if (comptime bun.Environment.isFreeBSD) {
+                    defer bun.default_allocator.free(input);
+                    defer bun.default_allocator.free(utf16);
+                    const out, const out_chars = bun.String.createUninitialized(.utf16, utf16.len);
+                    if (out.tag == .Dead) {
+                        return out;
+                    }
+                    @memcpy(out_chars, utf16);
+                    return out;
+                }
+
                 defer bun.default_allocator.free(input);
                 return bun.String.createExternalGloballyAllocated(.utf16, utf16);
             }
 
             // If we get here, it means we can safely assume the string is 100% ASCII characters
+            if (comptime bun.Environment.isFreeBSD) {
+                defer bun.default_allocator.free(input);
+                const out, const out_chars = bun.String.createUninitialized(.latin1, input.len);
+                if (out.tag == .Dead) {
+                    return out;
+                }
+                @memcpy(out_chars, input);
+                return out;
+            }
+
             return bun.String.createExternalGloballyAllocated(.latin1, input);
         },
         .ucs2, .utf16le => {

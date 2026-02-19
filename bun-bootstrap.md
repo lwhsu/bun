@@ -831,3 +831,79 @@ Planned immediate next steps once `release-bindings` exits:
 - So current practical path remains:
   - keep Node fallbacks ON for codegen/install;
   - continue isolating direct host-bun `run <script.ts>` crashes as separate runtime bugs.
+
+## 2026-02-19 self-host follow-up (codegen read-path fix + new blockers)
+
+### What was validated first
+
+- Current reproducible fallback path still builds:
+  - `cmake --build build/freebsd-release-ozig --target bun -j $(sysctl -n hw.ncpu)` succeeds.
+- Runtime smoke still passes for base checks:
+  - `build/freebsd-release-ozig/bun-profile --version` => `1.3.10`
+  - `build/freebsd-release-ozig/bun-profile -e 'console.log(1+1)'` => `2`
+  - `build/freebsd-release-ozig/bun-profile --no-install -e 'import path from "node:path"; ...'` => `b`
+
+### Host-bun read-path failure reproduced
+
+- Repro script (`build/freebsd-release-ozig/tmp-read-test.js`) shows:
+  - `fs.readFileSync(path)` returns zero-length buffer
+  - `fs.readFileSync(path, "utf8")` throws `ENOMEM`
+- Minimal direct repro:
+  - `build/freebsd-release-ozig/bun-profile --no-install run build/freebsd-release-ozig/tmp-read-test.js`
+
+### Mitigation applied (codegen level)
+
+- Added FreeBSD-compatible UTF-8 file reader in `src/codegen/helpers.ts`:
+  - `readUtf8CompatSync()` uses `openSync + readSync + Buffer.concat` on FreeBSD.
+  - non-FreeBSD still uses `fs.readFileSync(file, "utf8")`.
+- Switched codegen readers to this helper in:
+  - `src/codegen/helpers.ts` (`writeIfNotChanged` read-back checks)
+  - `src/codegen/internal-module-registry-scanner.ts`
+  - `src/codegen/bundle-modules.ts`
+  - `src/codegen/bundle-functions.ts`
+  - `src/codegen/bake-codegen.ts`
+
+### Assert import dependency removed from host-bun codegen scripts
+
+- Replaced `node:assert` / `assert` imports with local `assert(...)` helpers in:
+  - `src/codegen/bundle-functions.ts`
+  - `src/codegen/bake-codegen.ts`
+  - `src/codegen/bindgen.ts`
+  - `src/codegen/bindgen-lib-internal.ts`
+
+### Validation results after changes
+
+- Host bun can now run node-errors codegen directly:
+  - `build/freebsd-release-ozig/bun-profile --no-install run src/codegen/generate-node-errors.ts build/freebsd-selfhost-off-noinstall-r2/codegen`
+  - exit `0`.
+- Node-runner fallback path remains good:
+  - `node scripts/codegen-ts-node-runner.mjs src/codegen/bundle-modules.ts --debug=OFF build/freebsd-selfhost-off-noinstall-r2` succeeds.
+  - `node scripts/codegen-ts-node-runner.mjs src/codegen/generate-jssink.ts build/freebsd-selfhost-off-noinstall-r2/codegen` succeeds.
+  - full `cmake --build build/freebsd-release-ozig --target bun ...` still succeeds.
+
+### New dominant host-bun blockers
+
+1. `bundle-modules.ts` via host bun crashes with SIGBUS:
+- command:
+  - `build/freebsd-release-ozig/bun-profile --no-install run src/codegen/bundle-modules.ts --debug=OFF build/freebsd-selfhost-off-noinstall-r2`
+- lldb stop location:
+  - mimalloc free-list path (`page.c`, `_mi_page_thread_free_collect`, SIGBUS).
+
+2. Direct host-bun `create-hash-table.ts` path can stall:
+- observed state:
+  - parent in `sbwait`, child/subprocess spinning at ~99% CPU for minutes.
+- equivalent Node runner invocation finishes quickly.
+
+3. `node:assert` import still broken in host bun runtime:
+- repro:
+  - `build/freebsd-release-ozig/bun-profile --no-install -e 'import assert from "node:assert"; ...'`
+- current error:
+  - `ReferenceError: module is not defined` in `internal:assert/utils`.
+
+### Updated conclusion
+
+- Practical reproducible FreeBSD build remains with Node fallbacks ON for codegen/install.
+- One host-bun blocker (`generate-node-errors.ts`) is now removed via source-level codegen compatibility changes.
+- Remaining host-bun blockers are now concentrated in:
+  - module bundling/runtime (`bundle-modules.ts` / `node:assert`)
+  - hash-table generation runtime stability (`create-hash-table.ts`).

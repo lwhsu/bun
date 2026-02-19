@@ -2,6 +2,26 @@ import { isAscii } from "buffer";
 import fs from "fs";
 import path from "path";
 
+export function readUtf8CompatSync(file: string): string {
+  if (process.platform !== "freebsd") {
+    return fs.readFileSync(file, "utf8");
+  }
+
+  const fd = fs.openSync(file, "r");
+  try {
+    const chunks: Buffer[] = [];
+    while (true) {
+      const chunk = Buffer.allocUnsafe(64 * 1024);
+      const bytesRead = fs.readSync(fd, chunk, 0, chunk.length, null);
+      if (bytesRead === 0) break;
+      chunks.push(chunk.subarray(0, bytesRead));
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 // MSVC has a max of 16k characters per string literal
 // Combining string literals didn't support constexpr apparently
 // so we have to do this the gigantic array way
@@ -78,7 +98,7 @@ export function writeIfNotChanged(file: string, contents: string) {
   contents = contents.replaceAll("\r\n", "\n").trim() + "\n";
 
   try {
-    const oldContents = fs.readFileSync(file, "utf8");
+    const oldContents = readUtf8CompatSync(file);
     if (oldContents === contents) {
       return;
     }
@@ -91,7 +111,7 @@ export function writeIfNotChanged(file: string, contents: string) {
     fs.writeFileSync(file, contents);
   }
 
-  if (fs.readFileSync(file, "utf8") !== contents) {
+  if (readUtf8CompatSync(file) !== contents) {
     throw new Error(`Failed to write file ${file}`);
   }
 }

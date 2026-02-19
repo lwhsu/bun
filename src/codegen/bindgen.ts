@@ -3,7 +3,6 @@
 //
 // Generated bindings are available in `bun.generated.<basename>.*` in Zig,
 // or `Generated::<basename>::*` in C++ from including `Generated<basename>.h`.
-import assert from "node:assert";
 import fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -37,6 +36,10 @@ import {
   type Variant,
 } from "./bindgen-lib-internal";
 import { argParse, readdirRecursiveWithExclusionsAndExtensionsSync, writeIfNotChanged } from "./helpers";
+
+const assert = (value: unknown, message?: string): asserts value => {
+  if (!value) throw new Error(message ?? "Assertion failed");
+};
 
 // arg parsing
 let { "codegen-root": codegenRoot, debug } = argParse(["codegen-root", "debug"]);

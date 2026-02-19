@@ -5077,7 +5077,15 @@ pub const NodeFS = struct {
         // --- Optimization: attempt to read up to 256 KB before calling stat()
         // If we manage to read the entire file, we don't need to call stat() at all.
         // This will make it slightly slower to read e.g. 512 KB files, but usually the OS won't return a full 512 KB in one read anyway.
+        //
+        // FreeBSD: disable this fast-path for now. In release builds on FreeBSD, this
+        // branch can produce a corrupted temporary slice in readFileSync() for small
+        // text files, which surfaces as spurious ENOMEM from UTF-8 transcoding.
         const temporary_read_buffer_before_stat_call = brk: {
+            if (comptime Environment.isFreeBSD) {
+                break :brk "";
+            }
+
             const temporary_read_buffer = temporary_read_buffer: {
                 var temporary_read_buffer: []u8 = &async_stack_buffer;
 
@@ -5277,7 +5285,17 @@ pub const NodeFS = struct {
             }
         }
 
-        buf.items.len = if (comptime string_type == .null_terminated) total + 1 else total;
+        // Success path below returns ownership of `buf.items` to the caller.
+        // Mark success before constructing return values so defer does not free it.
+        did_succeed = true;
+        // Zig 0.13 + FreeBSD release builds can miscompile the comptime ternary
+        // assignment here, leaving `buf.items.len` as 0 even when `total > 0`.
+        // Keep this branch explicit to preserve the runtime length.
+        if (comptime string_type == .null_terminated) {
+            buf.items.len = total + 1;
+        } else {
+            buf.items.len = total;
+        }
         if (total == 0) {
             buf.clearAndFree();
             return switch (args.encoding) {
@@ -5304,17 +5322,39 @@ pub const NodeFS = struct {
             };
         }
 
+        const result_bytes = if (comptime Environment.isFreeBSD and string_type == .default) brk: {
+            // FreeBSD + Zig 0.13 release builds can produce an invalid ArrayList
+            // length metadata here despite a correct `total` count. Copy using
+            // the explicit byte count to make the return path deterministic.
+            const copied = bun.default_allocator.dupe(u8, buf.items.ptr[0..total]) catch return .{
+                .err = Syscall.Error.fromCode(.NOMEM, .read).withPathLike(args.path),
+            };
+            buf.clearAndFree();
+            break :brk copied;
+        } else buf.items;
+
         return switch (args.encoding) {
             .buffer => .{
                 .result = .{
-                    .buffer = Buffer.fromBytes(buf.items, bun.default_allocator, .Uint8Array),
+                    .buffer = Buffer.fromBytes(result_bytes, bun.default_allocator, .Uint8Array),
                 },
             },
             else => brk: {
                 if (comptime string_type == .default) {
+                    if (comptime Environment.isFreeBSD) {
+                        // FreeBSD bootstrap path: avoid returning raw []u8 through this
+                        // union boundary for readFileSync string paths. Convert while the
+                        // owned buffer is still local and return a Bun string directly.
+                        break :brk .{
+                            .result = .{
+                                .transcoded_string = jsc.WebCore.encoding.toBunStringFromOwnedSlice(result_bytes, args.encoding),
+                            },
+                        };
+                    }
+
                     break :brk .{
                         .result = .{
-                            .string = buf.items,
+                            .string = result_bytes,
                         },
                     };
                 } else {

@@ -16,7 +16,7 @@ import jsclasses from "./../bun.js/bindings/js_classes";
 import { sliceSourceCode } from "./builtin-parser";
 import { createAssertClientJS, createLogClientJS } from "./client-js";
 import { getJS2NativeCPP, getJS2NativeZig } from "./generate-js2native";
-import { cap, declareASCIILiteral, writeIfNotChanged } from "./helpers";
+import { cap, declareASCIILiteral, readUtf8CompatSync, writeIfNotChanged } from "./helpers";
 import { createInternalModuleRegistry } from "./internal-module-registry-scanner";
 import { define } from "./replacements";
 
@@ -82,7 +82,7 @@ const bundledEntryPoints: string[] = [];
 for (let i = 0; i < nativeStartIndex; i++) {
   try {
     const file = path.join(BASE, moduleList[i]);
-    let input = fs.readFileSync(file, "utf8");
+    let input = readUtf8CompatSync(file);
 
     if (!/\bexport\s+(?:function|class|const|default|{)/.test(input)) {
       if (input.includes("module.exports")) {
