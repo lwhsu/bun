@@ -11,6 +11,19 @@ HOST_BUN="${BUN_FREEBSD_HOST_BUN:-${ROOT_DIR}/build/freebsd-release-ozig/bun-pro
 REPRO_BUILD_DIR="${BUN_FREEBSD_HOST_REPRO_BUILD_DIR:-${ROOT_DIR}/build/freebsd-host-selfhost-repro}"
 LOG_DIR="${BUN_FREEBSD_HOST_REPRO_LOG_DIR:-${ROOT_DIR}/build/freebsd-bootstrap/logs}"
 EXPECT_FAIL="${BUN_FREEBSD_HOST_REPRO_EXPECT_FAIL:-1}"
+SECOND_REPRO="${BUN_FREEBSD_HOST_SECOND_REPRO:-scripts/repro/freebsd-host-require-bundle-functions.ts}"
+
+if [[ "${SECOND_REPRO}" = /* ]]; then
+  SECOND_REPRO_PATH="${SECOND_REPRO}"
+  if [[ "${SECOND_REPRO_PATH}" == "${ROOT_DIR}/"* ]]; then
+    SECOND_REPRO_CMD="${SECOND_REPRO_PATH#${ROOT_DIR}/}"
+  else
+    SECOND_REPRO_CMD="${SECOND_REPRO_PATH}"
+  fi
+else
+  SECOND_REPRO_PATH="${ROOT_DIR}/${SECOND_REPRO}"
+  SECOND_REPRO_CMD="${SECOND_REPRO}"
+fi
 
 mkdir -p "${LOG_DIR}" "${REPRO_BUILD_DIR}"
 
@@ -23,6 +36,10 @@ BUNDLE_OUT="${LOG_DIR}/host-selfhost-bundle-modules.out"
 BUNDLE_ERR="${LOG_DIR}/host-selfhost-bundle-modules.err"
 BUNDLE_BT="${LOG_DIR}/host-selfhost-bundle-modules.bt"
 BUNDLE_CORE="${LOG_DIR}/host-selfhost-bundle-modules.core"
+SECOND_OUT="${LOG_DIR}/host-selfhost-require-bundle-functions.out"
+SECOND_ERR="${LOG_DIR}/host-selfhost-require-bundle-functions.err"
+SECOND_BT="${LOG_DIR}/host-selfhost-require-bundle-functions.bt"
+SECOND_CORE="${LOG_DIR}/host-selfhost-require-bundle-functions.core"
 
 echo "[host-selfhost-repro] host bun: ${HOST_BUN}"
 "${HOST_BUN}" --version || true
@@ -63,6 +80,31 @@ if [[ -f "${ROOT_DIR}/bun-profile.core" ]]; then
   fi
 fi
 
+SECOND_EXIT=0
+if [[ -f "${SECOND_REPRO_PATH}" ]]; then
+  echo "[host-selfhost-repro] repro #2: minimal bundle-functions load"
+  rm -f "${ROOT_DIR}/bun-profile.core"
+  set +e
+  "${HOST_BUN}" --no-install run "${SECOND_REPRO_CMD}" >"${SECOND_OUT}" 2>"${SECOND_ERR}"
+  SECOND_EXIT=$?
+  set -e
+  echo "[host-selfhost-repro] repro #2 exit=${SECOND_EXIT}"
+  sed -n '1,120p' "${SECOND_ERR}" || true
+
+  if [[ -f "${ROOT_DIR}/bun-profile.core" ]]; then
+    cp "${ROOT_DIR}/bun-profile.core" "${SECOND_CORE}"
+    echo "[host-selfhost-repro] captured core: ${SECOND_CORE}"
+
+    if command -v lldb >/dev/null 2>&1; then
+      lldb -c "${SECOND_CORE}" -o "bt" -o "thread list" -o "quit" "${HOST_BUN}" >"${SECOND_BT}" 2>&1 || true
+      echo "[host-selfhost-repro] captured backtrace: ${SECOND_BT}"
+      sed -n '1,100p' "${SECOND_BT}" || true
+    fi
+  fi
+else
+  echo "[host-selfhost-repro] repro #2 skipped (missing ${SECOND_REPRO_PATH})"
+fi
+
 echo "[host-selfhost-repro] logs:"
 echo "  ${BUNDLE_OUT}"
 echo "  ${BUNDLE_ERR}"
@@ -71,6 +113,16 @@ if [[ -f "${BUNDLE_CORE}" ]]; then
 fi
 if [[ -f "${BUNDLE_BT}" ]]; then
   echo "  ${BUNDLE_BT}"
+fi
+if [[ -f "${SECOND_REPRO_PATH}" ]]; then
+  echo "  ${SECOND_OUT}"
+  echo "  ${SECOND_ERR}"
+  if [[ -f "${SECOND_CORE}" ]]; then
+    echo "  ${SECOND_CORE}"
+  fi
+  if [[ -f "${SECOND_BT}" ]]; then
+    echo "  ${SECOND_BT}"
+  fi
 fi
 
 if [[ "${EXPECT_FAIL}" == "1" ]]; then

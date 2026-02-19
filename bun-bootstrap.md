@@ -1167,3 +1167,31 @@ Planned immediate next steps once `release-bindings` exits:
     - `build/freebsd-bootstrap/logs/host-selfhost-bundle-modules.core`
     - `build/freebsd-bootstrap/logs/host-selfhost-bundle-modules.bt`
 - Backtrace still aligns with previously observed JSC crash path (`WTF::fastMalloc`, JIT finalize/module eval stack).
+
+## 2026-02-19 resume follow-up: tracked minimal repro integrated
+
+### What changed
+
+- Added tracked minimal repro source:
+  - `scripts/repro/freebsd-host-require-bundle-functions.ts`
+- Extended canonical repro runner:
+  - `scripts/freebsd-host-selfhost-repro.sh`
+  - now executes two probes:
+    1. host `bundle-modules.ts` run path
+    2. minimal `bundle-functions` load path via tracked repro script
+
+### Validation
+
+- Re-ran:
+  - `./scripts/freebsd-host-selfhost-repro.sh`
+- Result:
+  - repro #1: fails with `exit=132` (expected), captures core + lldb bt.
+  - repro #2: also fails with `exit=132` (expected), captures separate core + lldb bt.
+
+### Updated crash evidence
+
+- Repro #2 backtrace (minimal script) shows crash in module namespace resolution/growth path:
+  - `JSC::AbstractModuleRecord::getModuleNamespace(...)`
+  - `WTF::Vector<...>::expandCapacity(...)`
+  - `WTF::fastMalloc(...)`
+- This strengthens the conclusion that the blocker is in host module evaluation/namespace handling on FreeBSD runtime, not just the larger `bundle-modules.ts` flow.
