@@ -1056,3 +1056,69 @@ Planned immediate next steps once `release-bindings` exits:
 
 - This issue is not resolved by simply changing JIT defaults at startup on FreeBSD.
 - Temporary JIT-default patch was reverted; no functional source change kept from this experiment.
+
+## Next Resume Plan (checkpoint handoff)
+
+### Objective at resume
+
+- Keep the current reproducible FreeBSD build path green.
+- Continue isolating/removing the host self-host crash so `BUN_FREEBSD_CODEGEN_NODE=OFF` can eventually work.
+
+### Starting state to verify first
+
+1. Confirm branch/clean tree:
+- `git status --short --branch`
+
+2. Confirm baseline binaries:
+- `build/freebsd-bootstrap/stage0/bun --version` (expect `0.0.0`)
+- `build/freebsd-release-ozig/bun-profile --version` (expect `1.3.10`)
+
+3. Confirm reproducible checkpoint path:
+- `BUN_FREEBSD_REPRO_CLEAN=0 ./scripts/freebsd-checkpoint-repro.sh`
+- Expect configure/build/smoke pass with fallback defaults.
+
+### Immediate next steps after baseline check
+
+1. Canonicalize host-crash repro
+- Add a single script (e.g. `scripts/freebsd-host-selfhost-repro.sh`) that:
+  - runs the known crash repro command(s),
+  - captures stdout/stderr,
+  - emits exit code,
+  - captures `lldb bt` if a core exists.
+- Keep this as the one source of truth for self-host crash validation.
+
+2. Remove ad-hoc temp repro clutter
+- Current `build/freebsd-release-ozig/tmp-*.ts` files are exploratory and noisy.
+- Move any still-useful repro snippets into tracked `scripts/` or `scripts/repro/`.
+- Delete disposable generated temp scripts from `build/` after preserving needed ones.
+
+3. Focused crash isolation (time-boxed)
+- Target current crash path from latest core:
+  - `JSC::JSModuleNamespaceObject::finishCreation(...)` via `WTF::fastMalloc`.
+- Add temporary env-gated instrumentation around module load/evaluation path.
+- Identify the last module/specifier resolved before crash.
+- Revert instrumentation once enough evidence is captured.
+
+4. Try two minimal mitigation directions
+- A: avoid triggering namespace-heavy ESM load in host codegen path where feasible.
+- B: reduce cycle/order sensitivity in codegen module load chain (`bundle-functions` context).
+- Validate each change only via the canonical repro script before broader rebuild.
+
+5. Re-test fallback-off self-host in a fresh build directory
+- Use a new dir (avoid stale state from `build/freebsd-selfhost-off-noinstall-r2`).
+- Target settings:
+  - `BUN_FREEBSD_CODEGEN_NODE=OFF`
+  - `BUN_FREEBSD_NPM_INSTALL=OFF`
+  - `BUN_FREEBSD_BINDGENV2_NODE=auto`
+- Success criteria:
+  - host codegen commands no longer crash,
+  - configure succeeds,
+  - `cmake --build ... --target bun-profile` succeeds,
+  - runtime smoke checks pass.
+
+### Stop/decision gate
+
+- If host self-host still crashes after time-boxed mitigation attempts:
+  - keep fallback path as official practical route,
+  - update `bun-bootstrap.md` with exact evidence and remaining blocker,
+  - continue FreeBSD runtime/compat work in parallel instead of blocking on this one issue.
