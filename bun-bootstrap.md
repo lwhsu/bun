@@ -997,3 +997,36 @@ Planned immediate next steps once `release-bindings` exits:
 ### Impact
 
 - Repro script again matches the current stable FreeBSD checkpoint contract and no longer fails due stale bindgen-v2 mode defaults.
+
+## 2026-02-19 checkpoint: host `bundle-modules` crash localization (no functional patch yet)
+
+### Localization result
+
+- Added temporary tracing during investigation (now reverted from source), which showed:
+  - `bundle-modules.ts` reached:
+    - `before require bundle-functions`
+  - then crashed before returning from:
+    - `require("./bundle-functions")`
+- This narrows the host crash to module-load/eval path around `bundle-functions` under this execution context.
+
+### Repro minimization findings
+
+- A minimal script that only does:
+  - set `globalThis.CMAKE_BUILD_ROOT`
+  - `require('../../src/codegen/bundle-functions')`
+  - succeeds.
+- A script that imports multiple codegen modules first, then requires `bundle-functions`, can reliably crash with SIGBUS.
+- Behavior is layout-sensitive:
+  - some near-identical variants (small content/import changes) flip between success and SIGBUS.
+- Both `require(...)` and dynamic `await import(...)` forms can hit the crash once the triggering context is present.
+
+### Interpretation
+
+- This is consistent with a host runtime/JSC memory corruption bug on FreeBSD in module load/eval/JIT path, not a deterministic syntax/runtime error in `bundle-functions.ts` itself.
+- It also explains why fallback-on-Node codegen is currently stable while fallback-off host codegen remains unstable.
+
+### Current actionability
+
+- No safe functional source patch is committed from this isolation pass.
+- Stable/reproducible path remains unchanged:
+  - keep FreeBSD Node fallback defaults ON for codegen/install in checkpoint/repro scripts.
