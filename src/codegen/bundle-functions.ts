@@ -35,14 +35,23 @@ if (import.meta.main && process.argv[1]?.includes("bundle-functions")) {
   throw new Error("This script is not meant to be run directly");
 }
 
-const CMAKE_BUILD_ROOT = globalThis.CMAKE_BUILD_ROOT;
-if (!CMAKE_BUILD_ROOT) {
-  throw new Error("CMAKE_BUILD_ROOT is not defined");
-}
-
 const SRC_DIR = path.join(import.meta.dir, "../js/builtins");
-const CODEGEN_DIR = path.join(CMAKE_BUILD_ROOT, "./codegen");
-const TMP_DIR = path.join(CMAKE_BUILD_ROOT, "./tmp_functions");
+let CMAKE_BUILD_ROOT: string | undefined;
+let CODEGEN_DIR = "";
+let TMP_DIR = "";
+
+function ensureBuildPaths() {
+  if (CMAKE_BUILD_ROOT) return;
+
+  const buildRoot = globalThis.CMAKE_BUILD_ROOT;
+  if (!buildRoot) {
+    throw new Error("CMAKE_BUILD_ROOT is not defined");
+  }
+
+  CMAKE_BUILD_ROOT = String(buildRoot);
+  CODEGEN_DIR = path.join(CMAKE_BUILD_ROOT, "./codegen");
+  TMP_DIR = path.join(CMAKE_BUILD_ROOT, "./tmp_functions");
+}
 
 interface ParsedBuiltin {
   name: string;
@@ -374,6 +383,9 @@ interface BundleBuiltinFunctionsArgs {
 }
 
 export async function bundleBuiltinFunctions({ requireTransformer }: BundleBuiltinFunctionsArgs) {
+  ensureBuildPaths();
+  files.length = 0;
+
   const filesToProcess = readdirSync(SRC_DIR)
     .filter(x => x.endsWith(".ts") && !x.endsWith(".d.ts"))
     .sort();

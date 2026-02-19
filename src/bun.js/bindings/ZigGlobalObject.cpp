@@ -211,6 +211,8 @@
 #include <dlfcn.h>
 #endif
 
+#include <atomic>
+
 #ifdef __APPLE__
 #include <sys/sysctl.h>
 #elif defined(__linux__)
@@ -239,6 +241,56 @@ using JSObject = JSC::JSObject;
 using JSNonFinalObject = JSC::JSNonFinalObject;
 namespace JSCastingHelpers = JSC::JSCastingHelpers;
 // #include <iostream>
+
+#if OS(FREEBSD)
+static bool freeBSDModuleTraceEnabled()
+{
+    static std::atomic<int8_t> enabled { -1 };
+    int8_t value = enabled.load(std::memory_order_acquire);
+    if (value == -1) {
+        const char* env = getenv("BUN_FREEBSD_MODULE_TRACE");
+        value = (env && env[0] != '\0' && env[0] != '0') ? 1 : 0;
+        enabled.store(value, std::memory_order_release);
+    }
+    return value == 1;
+}
+
+static void freeBSDModuleTrace(const char* phase, const WTF::String& key)
+{
+    if (!freeBSDModuleTraceEnabled()) {
+        return;
+    }
+
+    WTF::dataLog("[freebsd-module-trace] ", phase, " key=", key.utf8().data(), "\n");
+}
+
+static void freeBSDModuleTrace(const char* phase, JSC::JSGlobalObject* globalObject, JSC::JSValue key)
+{
+    if (!freeBSDModuleTraceEnabled()) {
+        return;
+    }
+
+    if (key.isString()) {
+        freeBSDModuleTrace(phase, key.toWTFString(globalObject));
+        return;
+    }
+
+    WTF::dataLog("[freebsd-module-trace] ", phase, " key=<non-string>\n");
+}
+#else
+static bool freeBSDModuleTraceEnabled()
+{
+    return false;
+}
+
+static void freeBSDModuleTrace(const char*, const WTF::String&)
+{
+}
+
+static void freeBSDModuleTrace(const char*, JSC::JSGlobalObject*, JSC::JSValue)
+{
+}
+#endif
 
 Structure* createMemoryFootprintStructure(JSC::VM& vm, JSC::JSGlobalObject* globalObject);
 
@@ -3182,6 +3234,9 @@ JSC::Identifier GlobalObject::moduleLoaderResolve(JSGlobalObject* jsGlobalObject
         keyZ = Bun::toStringRef(globalObject, key);
     }
     BunString referrerZ = referrer && !referrer.isUndefinedOrNull() && referrer.isString() ? Bun::toStringRef(globalObject, referrer) : BunStringEmpty;
+    if (freeBSDModuleTraceEnabled()) {
+        freeBSDModuleTrace("resolve:start", keyZ.toWTFString(BunString::ZeroCopy));
+    }
 
     if (globalObject->onLoadPlugins.hasVirtualModules()) {
         if (auto resolvedString = globalObject->onLoadPlugins.resolveVirtualModule(keyZ.toWTFString(), referrerZ.toWTFString())) {
@@ -3198,11 +3253,16 @@ JSC::Identifier GlobalObject::moduleLoaderResolve(JSGlobalObject* jsGlobalObject
 
     if (res.success) {
         if (queryString.len > 0) {
-            return JSC::Identifier::fromString(globalObject->vm(), makeString(res.result.value.toWTFString(BunString::ZeroCopy), Zig::toString(queryString)));
+            auto resolved = makeString(res.result.value.toWTFString(BunString::ZeroCopy), Zig::toString(queryString));
+            freeBSDModuleTrace("resolve:ok", resolved);
+            return JSC::Identifier::fromString(globalObject->vm(), resolved);
         }
 
-        return Identifier::fromString(globalObject->vm(), res.result.value.toWTFString(BunString::ZeroCopy));
+        auto resolved = res.result.value.toWTFString(BunString::ZeroCopy);
+        freeBSDModuleTrace("resolve:ok", resolved);
+        return Identifier::fromString(globalObject->vm(), resolved);
     } else {
+        freeBSDModuleTrace("resolve:err", globalObject, key);
         auto scope = DECLARE_THROW_SCOPE(globalObject->vm());
         throwException(scope, res.result.err, globalObject);
         return globalObject->vm().propertyNames->emptyIdentifier;
@@ -3232,8 +3292,10 @@ JSC::JSInternalPromise* GlobalObject::moduleLoaderImportModule(JSGlobalObject* j
 
     auto moduleName = moduleNameValue->value(globalObject);
     RETURN_IF_EXCEPTION(scope, nullptr);
+    freeBSDModuleTrace("import:start", moduleName);
     if (globalObject->onLoadPlugins.hasVirtualModules()) {
         if (auto resolution = globalObject->onLoadPlugins.resolveVirtualModule(moduleName, sourceOrigin.url().protocolIsFile() ? sourceOrigin.url().fileSystemPath() : String())) {
+            freeBSDModuleTrace("import:virtual", resolution.value());
             resolvedIdentifier = JSC::Identifier::fromString(vm, resolution.value());
 
             auto result = JSC::importModule(globalObject, resolvedIdentifier, JSC::jsUndefined(), parameters, JSC::jsUndefined());
@@ -3297,9 +3359,13 @@ JSC::JSInternalPromise* GlobalObject::moduleLoaderImportModule(JSGlobalObject* j
         }
 
         if (queryString.len == 0) {
-            resolvedIdentifier = JSC::Identifier::fromString(vm, resolved.result.value.toWTFString());
+            auto resolvedString = resolved.result.value.toWTFString();
+            freeBSDModuleTrace("import:resolved", resolvedString);
+            resolvedIdentifier = JSC::Identifier::fromString(vm, resolvedString);
         } else {
-            resolvedIdentifier = JSC::Identifier::fromString(vm, makeString(resolved.result.value.toWTFString(BunString::ZeroCopy), Zig::toString(queryString)));
+            auto resolvedWithQuery = makeString(resolved.result.value.toWTFString(BunString::ZeroCopy), Zig::toString(queryString));
+            freeBSDModuleTrace("import:resolved", resolvedWithQuery);
+            resolvedIdentifier = JSC::Identifier::fromString(vm, resolvedWithQuery);
         }
 
         moduleNameZ.deref();
@@ -3356,6 +3422,7 @@ JSC::JSInternalPromise* GlobalObject::moduleLoaderFetch(JSGlobalObject* globalOb
     auto moduleKeyJS = key.toString(globalObject);
     RETURN_IF_EXCEPTION(scope, {});
     auto moduleKey = moduleKeyJS->value(globalObject);
+    freeBSDModuleTrace("fetch:start", moduleKey);
     if (scope.exception()) [[unlikely]]
         return rejectedInternalPromise(globalObject, scope.exception()->value());
 
@@ -3424,13 +3491,16 @@ JSC::JSValue GlobalObject::moduleLoaderEvaluate(JSGlobalObject* lexicalGlobalObj
     JSValue moduleRecordValue, JSValue scriptFetcher,
     JSValue sentValue, JSValue resumeMode)
 {
+    freeBSDModuleTrace("evaluate:start", lexicalGlobalObject, key);
 
     if (scriptFetcher && scriptFetcher.isObject()) [[unlikely]] {
+        freeBSDModuleTrace("evaluate:script-object", lexicalGlobalObject, key);
         return scriptFetcher;
     }
 
     JSC::JSValue result = moduleLoader->evaluateNonVirtual(lexicalGlobalObject, key, moduleRecordValue,
         scriptFetcher, sentValue, resumeMode);
+    freeBSDModuleTrace("evaluate:done", lexicalGlobalObject, key);
 
     return result;
 }
@@ -3444,16 +3514,19 @@ JSC::JSValue EvalGlobalObject::moduleLoaderEvaluate(JSGlobalObject* lexicalGloba
     JSValue sentValue, JSValue resumeMode)
 {
     Zig::GlobalObject* globalObject = jsCast<Zig::GlobalObject*>(lexicalGlobalObject);
+    freeBSDModuleTrace("eval-evaluate:start", lexicalGlobalObject, key);
 
     if (scriptFetcher && scriptFetcher.isObject()) [[unlikely]] {
         if (Bun__VM__specifierIsEvalEntryPoint(globalObject->bunVM(), JSValue::encode(key))) {
             Bun__VM__setEntryPointEvalResultESM(globalObject->bunVM(), JSValue::encode(scriptFetcher));
         }
+        freeBSDModuleTrace("eval-evaluate:script-object", lexicalGlobalObject, key);
         return scriptFetcher;
     }
 
     JSC::JSValue result = moduleLoader->evaluateNonVirtual(lexicalGlobalObject, key, moduleRecordValue,
         scriptFetcher, sentValue, resumeMode);
+    freeBSDModuleTrace("eval-evaluate:done", lexicalGlobalObject, key);
 
     if (Bun__VM__specifierIsEvalEntryPoint(globalObject->bunVM(), JSValue::encode(key))) {
         Bun__VM__setEntryPointEvalResultESM(globalObject->bunVM(), JSValue::encode(result));

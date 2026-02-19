@@ -1195,3 +1195,74 @@ Planned immediate next steps once `release-bindings` exits:
   - `WTF::Vector<...>::expandCapacity(...)`
   - `WTF::fastMalloc(...)`
 - This strengthens the conclusion that the blocker is in host module evaluation/namespace handling on FreeBSD runtime, not just the larger `bundle-modules.ts` flow.
+
+## 2026-02-19 resume follow-up: deeper host-crash minimization
+
+### Instrumentation and mitigation attempts
+
+- Added env-gated module loader tracing in:
+  - `src/bun.js/bindings/ZigGlobalObject.cpp`
+  - enabled by `BUN_FREEBSD_MODULE_TRACE=1`
+  - traces resolve/fetch/evaluate start/done keys.
+- Attempted ESM namespace-path mitigation:
+  - `src/codegen/bundle-functions.ts`: lazy-init `CMAKE_BUILD_ROOT` via `ensureBuildPaths()`.
+  - `src/codegen/bundle-modules.ts`: switched from runtime `require("./bundle-functions")` to static ESM import.
+- Result:
+  - host crash still reproduces in fallback-off flow (`exit=132`).
+
+### Runtime option check
+
+- Verified JSC option prefix from source:
+  - only `BUN_JSC_*` env is parsed in `JSCInitialize`.
+- Tested:
+  - `BUN_JSC_useJIT=0`
+  - `BUN_JSC_useBBQJIT=0`
+  - `BUN_JSC_useConcurrentJIT=0`
+- Result:
+  - crash still reproduces (`exit=132`), with backtrace moving to module code block creation/finish path (still `WTF::fastMalloc`-adjacent), so not a simple JIT-enable issue.
+
+### New minimization evidence
+
+- Added temporary codegen trace markers in `src/codegen/bundle-modules.ts` via:
+  - `BUN_FREEBSD_CODEGEN_TRACE=1`
+- Observation:
+  - no script-level trace lines print before crash, indicating failure occurs before top-level TS body progresses meaningfully.
+- Built import-only repros and narrowed failing import graph.
+
+### Smallest failing import set found
+
+- Prefix sweep result:
+  - imports up to 7 modules + `bundle-functions` pass.
+  - adding 8th (`generate-js2native`) starts failing.
+- Subset sweep over first 8 modules found minimal failing set (size 6):
+  - `fs/promises`
+  - `node:module`
+  - `src/bun.js/bindings/js_classes`
+  - `src/codegen/builtin-parser`
+  - `src/codegen/client-js`
+  - `src/codegen/generate-js2native`
+  - plus `src/codegen/bundle-functions`
+
+### Tracked repro added
+
+- Added:
+  - `scripts/repro/freebsd-host-import-subset-crash.ts`
+- Repro command:
+  - `build/freebsd-release-ozig/bun-profile --no-install run scripts/repro/freebsd-host-import-subset-crash.ts`
+- Result:
+  - reproducible crash (`exit=132`, core dump) on current branch.
+
+### Practical path re-validated
+
+- Re-ran stable checkpoint path:
+  - `BUN_FREEBSD_REPRO_CLEAN=0 ./scripts/freebsd-checkpoint-repro.sh`
+- Result:
+  - configure/build/smoke still pass with Node fallback defaults.
+  - final smoke:
+    - `bun --version` => `1.3.10`
+    - `bun -e 'console.log(1+1)'` => `2`
+
+### Current conclusion
+
+- Host self-host crash remains unresolved and appears tied to FreeBSD JSC/runtime behavior during complex module import/evaluation graphs, not a single script typo/path issue.
+- The documented practical bootstrap route remains valid: Node fallback for codegen/install on FreeBSD while continuing runtime/JSC isolation in parallel.

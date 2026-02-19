@@ -19,10 +19,16 @@ import { getJS2NativeCPP, getJS2NativeZig } from "./generate-js2native";
 import { cap, declareASCIILiteral, readUtf8CompatSync, writeIfNotChanged } from "./helpers";
 import { createInternalModuleRegistry } from "./internal-module-registry-scanner";
 import { define } from "./replacements";
+import { bundleBuiltinFunctions } from "./bundle-functions";
 
 const BASE = path.join(import.meta.dir, "../js");
 const debug = process.argv[2] === "--debug=ON";
 const CMAKE_BUILD_ROOT = process.argv[3];
+const traceEnabled = process.env.BUN_FREEBSD_CODEGEN_TRACE === "1";
+const trace = (...args: any[]) => {
+  if (!traceEnabled) return;
+  console.error("[freebsd-codegen-trace]", ...args);
+};
 
 const timeString = 'Bundled "src/js" for ' + (debug ? "development" : "production");
 console.time(timeString);
@@ -33,7 +39,7 @@ if (!CMAKE_BUILD_ROOT) {
 }
 
 globalThis.CMAKE_BUILD_ROOT = CMAKE_BUILD_ROOT;
-const bundleBuiltinFunctions = require("./bundle-functions").bundleBuiltinFunctions;
+trace("init", { debug, CMAKE_BUILD_ROOT });
 
 const TMP_DIR = path.join(CMAKE_BUILD_ROOT, "tmp_modules");
 const CODEGEN_DIR = path.join(CMAKE_BUILD_ROOT, "codegen");
@@ -51,8 +57,13 @@ function markVerbose(log: string) {
 
 const mark = silent ? (log: string) => {} : markVerbose;
 
+trace("createInternalModuleRegistry:start", BASE);
 const { moduleList, nativeModuleIds, nativeModuleEnumToId, nativeModuleEnums, requireTransformer, nativeStartIndex } =
   createInternalModuleRegistry(BASE);
+trace("createInternalModuleRegistry:done", {
+  moduleCount: moduleList.length,
+  nativeStartIndex,
+});
 globalThis.requireTransformer = requireTransformer;
 
 // these logs surround a very weird issue where writing files and then bundling sometimes doesn't
@@ -79,8 +90,12 @@ const bunRepoRoot = path.join(CMAKE_BUILD_ROOT, "..", "..");
 
 // Preprocess builtins
 const bundledEntryPoints: string[] = [];
+trace("preprocess:start");
 for (let i = 0; i < nativeStartIndex; i++) {
   try {
+    if (traceEnabled && (i === 0 || i === nativeStartIndex - 1 || (i % 50) === 0)) {
+      trace("preprocess:item", { i, id: moduleList[i] });
+    }
     const file = path.join(BASE, moduleList[i]);
     let input = readUtf8CompatSync(file);
 
@@ -198,6 +213,7 @@ ${processed.result.slice(1).trim()}
 }
 
 mark("Preprocess modules");
+trace("preprocess:done", { bundledEntryPoints: bundledEntryPoints.length });
 
 // directory caching stuff breaks this sometimes. CLI rules
 const config_cli = [
@@ -221,18 +237,21 @@ const config_cli = [
   path.join(TMP_DIR, "modules_out"),
 ];
 verbose("running: ", config_cli);
+trace("bun.build.cli:start", { args: config_cli.length });
 const out = Bun.spawnSync({
   cmd: config_cli,
   cwd: process.cwd(),
   env: process.env,
   stdio: ["pipe", "pipe", "pipe"],
 });
+trace("bun.build.cli:done", { exitCode: out.exitCode });
 if (out.exitCode !== 0) {
   console.error(out.stderr.toString());
   process.exit(out.exitCode);
 }
 
 mark("Bundle modules");
+trace("bundle-modules:postbuild:start");
 
 const outputs = new Map();
 
@@ -279,6 +298,7 @@ for (const entrypoint of bundledEntryPoints) {
 }
 
 mark("Postprocesss modules");
+trace("bundle-modules:postbuild:done", { outputs: outputs.size });
 
 function idToEnumName(id: string) {
   return id
@@ -307,6 +327,7 @@ function idToPublicSpecifierOrEnumName(id: string) {
 await bundleBuiltinFunctions({
   requireTransformer,
 });
+trace("bundle-functions:done");
 
 mark("Bundle Functions");
 
