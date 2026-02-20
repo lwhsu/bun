@@ -2055,3 +2055,26 @@ Test binaries:
 - `cat` + parse(file) but without env expansion markers
 2. Capture per-case pass/fail matrix by binary (`release` / `stepB` / `stepC`) in the log.
 3. If the matrix points to a specific builtin path, diff only the relevant generated module(s) between `build/freebsd-release-ozigfork/js` and `build/freebsd-selfhost-stepB/js` instead of whole-tree diffs.
+
+### Matrix update: cat-path child flow decomposition
+
+Using explicit timeout wrappers (`timeout 20 ...; echo <label>-rc=$?`):
+
+- `repro-nested-cat-only.js` (child: `require("bun:internal-for-testing")` + `Bun.$\`cat <file>\`` + JSON stdout)
+  - `release`: pass, `rc=0`
+  - `stepB`: timeout, `rc=124`
+  - `stepC`: timeout, `rc=124`
+
+- `repro-ini-noenv.js` (same as `repro-ini-env` but file content `hi = plain`, then `parse(ini)`)
+  - `release`: pass, `{"hi":"plain"}`, `rc=0`
+  - `stepB`: timeout, `rc=124`
+  - `stepC`: timeout, `rc=124`
+
+- `repro-ini-env.js` (file content includes env markers + `parse(ini)`)
+  - `release`: pass, `{"hi":"barbaz"}`, `rc=0`
+  - `stepB`: timeout, `rc=124`
+  - `stepC`: timeout, `rc=124`
+
+Inference refinement:
+- env-variable expansion in `parse()` is **not** the primary trigger.
+- self-host failure persists in the `require("bun:internal-for-testing") + Bun.$\`cat ...\`` child flow even before parse semantics matter.
