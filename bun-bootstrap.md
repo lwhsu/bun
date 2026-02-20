@@ -1412,3 +1412,56 @@ Planned immediate next steps once `release-bindings` exits:
 
 - Stage0 binary remains usable for basic execution and `Bun.spawnSync` smoke.
 - Full current-tree build is still blocked by pathological `zig build-obj` duration on Zig 0.15.2 (not a confirmed deadlock, but effectively a throughput blocker).
+
+## 2026-02-20 milestone: successful release bootstrap with forked zig
+
+### What changed
+
+- Built `oven-sh/zig` (commit `c1423ff3fc7064635773a4a4616c5bf986eb00fe`) to `stage3`.
+- Added wrapper:
+  - `build/freebsd-bootstrap/zig-fork-wrapper.sh`
+  - forces `--zig-lib-dir /home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/lib` for compile subcommands.
+- This avoids the parser mismatch seen with system Zig for Bun-specific syntax (`#raw`, `#destroy`, `.#field`).
+
+### Successful build run
+
+- Command:
+  - `BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/freebsd-release-ozigfork`
+  - `BUN_FREEBSD_CMAKE_BUILD_TYPE=Release`
+  - `BUN_FREEBSD_BUILD_TARGET=bun`
+  - `BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/zig-fork-wrapper.sh`
+  - `./scripts/bootstrap-freebsd.sh -DLLVM_ZIG_CODEGEN_THREADS=1`
+- Logs:
+  - `build/freebsd-bootstrap/logs/bootstrap-freebsd-release-forkzig-run-20260220-162829.log`
+  - `build/freebsd-bootstrap/logs/bootstrap-freebsd-release-forkzig-time-20260220-162829.log`
+  - `build/freebsd-bootstrap/logs/bootstrap-freebsd-release-forkzig-diag-20260220-162829.log`
+  - `build/freebsd-bootstrap/logs/bootstrap-freebsd-release-forkzig-summary-20260220-162829.log`
+- Result:
+  - `rc=0`
+  - stage0 path: `build/freebsd-bootstrap/stage0/bun`
+  - final path: `build/freebsd-release-ozigfork/bun`
+
+### Timing evidence
+
+- Full run wall time:
+  - `1041.76 real` (~17m22s)
+- Heavy Zig compile step:
+  - `compile obj bun ReleaseFast x86_64-freebsd success 16m`
+- Peak memory during run:
+  - `9462960 maximum resident set size` (~9.0 GiB)
+
+### Runtime verification
+
+- Stage0:
+  - `build/freebsd-bootstrap/stage0/bun --version` -> `0.0.0`
+  - `build/freebsd-bootstrap/stage0/bun -e "console.log(1+1)"` -> `2`
+- Final Bun:
+  - `build/freebsd-release-ozigfork/bun --version` -> `1.3.10`
+  - `build/freebsd-release-ozigfork/bun -e "console.log(1+1)"` -> `2`
+
+### Updated status
+
+- Cold-start bootstrap and full release build now succeed on this FreeBSD host with:
+  - legacy stage0 path from source
+  - current-tree build using forked Zig wrapper
+- Remaining work is port-hardening and cleanup (remove wrapper hacks where possible, upstreamable FreeBSD conditionals, broader smoke tests).

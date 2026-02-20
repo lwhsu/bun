@@ -87,12 +87,20 @@ macro(find_llvm_command variable command)
     PATHS ${LLVM_PATHS}
     VERSION "${LLVM_VERSION_RANGE}"
   )
-  if(NOT DEFINED ${variable} OR "${${variable}}" STREQUAL "")
+  if(
+    NOT DEFINED ${variable}
+    OR "${${variable}}" STREQUAL ""
+    OR "${${variable}}" MATCHES "-NOTFOUND$"
+  )
     if(NOT "${_fallback_${variable}}" STREQUAL "")
       set(${variable} "${_fallback_${variable}}")
     endif()
   endif()
-  if(DEFINED ${variable} AND NOT "${${variable}}" STREQUAL "")
+  if(
+    DEFINED ${variable}
+    AND NOT "${${variable}}" STREQUAL ""
+    AND NOT "${${variable}}" MATCHES "-NOTFOUND$"
+  )
     list(APPEND CMAKE_ARGS -D${variable}=${${variable}})
   endif()
 endmacro()
@@ -115,12 +123,20 @@ macro(find_llvm_command_no_version variable command)
     COMMAND ${commands}
     PATHS ${LLVM_PATHS}
   )
-  if(NOT DEFINED ${variable} OR "${${variable}}" STREQUAL "")
+  if(
+    NOT DEFINED ${variable}
+    OR "${${variable}}" STREQUAL ""
+    OR "${${variable}}" MATCHES "-NOTFOUND$"
+  )
     if(NOT "${_fallback_${variable}}" STREQUAL "")
       set(${variable} "${_fallback_${variable}}")
     endif()
   endif()
-  if(DEFINED ${variable} AND NOT "${${variable}}" STREQUAL "")
+  if(
+    DEFINED ${variable}
+    AND NOT "${${variable}}" STREQUAL ""
+    AND NOT "${${variable}}" MATCHES "-NOTFOUND$"
+  )
     list(APPEND CMAKE_ARGS -D${variable}=${${variable}})
   endif()
 endmacro()
