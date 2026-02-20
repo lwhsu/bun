@@ -25,6 +25,9 @@ const BASE = path.join(import.meta.dir, "../js");
 const debug = process.argv[2] === "--debug=ON";
 const CMAKE_BUILD_ROOT = process.argv[3];
 const traceEnabled = process.env.BUN_FREEBSD_CODEGEN_TRACE === "1";
+// On FreeBSD, direct self-host codegen uses Bun's bundler path (not the node fallback path).
+// For internal module parity with the node/esbuild runner, force CommonJS bundle output.
+const forceCJSFormat = process.platform === "freebsd" || process.env.BUN_FREEBSD_CODEGEN_FORCE_CJS === "1";
 const trace = (...args: any[]) => {
   if (!traceEnabled) return;
   console.error("[freebsd-codegen-trace]", ...args);
@@ -257,6 +260,7 @@ const config_cli = [
   TMP_DIR,
   "--target",
   "bun",
+  ...(forceCJSFormat ? ["--format", "cjs"] : []),
   ...builtinModules.map(x => ["--external", x]).flat(),
   ...Object.keys(define)
     .map(x => [`--define`, `${x}=${define[x]}`])
@@ -291,7 +295,13 @@ for (const entrypoint of bundledEntryPoints) {
   const file_path = entrypoint.slice(TMP_DIR.length + 1).replace(/\.ts$/, ".js");
   const file = Bun.file(path.join(TMP_DIR, "modules_out", file_path));
   const output = await file.text();
-  let captured = `(function (){${output.replace("// @bun\n", "").trim()}})`;
+  const cjsWrapped = output.includes("// @bun @bun-cjs");
+  const normalizedOutput = cjsWrapped
+    ? output
+        .replace(/^\/\/\s*@bun\s*@bun-cjs\s*\n\(function\s*\([^)]*\)\s*{/, "")
+        .replace(/\}\)\s*$/, "")
+    : output.replace("// @bun\n", "");
+  let captured = `(function (){${normalizedOutput.trim()}})`;
   let usesDebug = output.includes("$debug_log");
   let usesAssert = output.includes("$assert");
   const exportStubPattern = file_path === "internal-for-testing.js" ? /return \$;?\s*\nexport / : /return \$\nexport /;

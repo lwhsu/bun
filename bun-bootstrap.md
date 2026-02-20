@@ -2078,3 +2078,72 @@ Using explicit timeout wrappers (`timeout 20 ...; echo <label>-rc=$?`):
 Inference refinement:
 - env-variable expansion in `parse()` is **not** the primary trigger.
 - self-host failure persists in the `require("bun:internal-for-testing") + Bun.$\`cat ...\`` child flow even before parse semantics matter.
+
+## 2026-02-21 follow-up: FreeBSD shell startup wake workaround unblocks Step B/Step C ini regression
+
+### What changed
+
+1. `src/codegen/bundle-modules.ts`
+- Keep FreeBSD self-host codegen on CJS-format output path (`--format cjs`) for parity with node-runner shapes.
+- Add postprocess unwrapping for Bun's `// @bun @bun-cjs` wrapper so captured modules are executable in InternalModuleRegistry.
+
+2. `src/js/builtins/shell.ts`
+- Add a FreeBSD-only defer in `ShellPromise.#run()`:
+  - `Bun.sleep(0).then(() => interp.run())`
+- Rationale: immediate shell startup on FreeBSD can miss subprocess completion until a timer-driven wake; zero-delay timer reliably avoids the deadlock/hang behavior.
+
+### Root-cause narrowing evidence
+
+Repro matrix (before shell workaround):
+
+- `timeout 12 bun-profile -e 'const t=await Bun.$`cat <file>`.text(); console.log(t.length);'`
+  - release / stepB / stepC: `rc=124` (hang)
+
+- `timeout 12 bun-profile -e 'await Bun.sleep(0); const t=await Bun.$`cat <file>`.text(); console.log(t.length);'`
+  - release / stepB / stepC: prints `18`, `rc=0`
+
+- `require("node:stream")` before `cat` also unblocks in self-host binaries.
+- `queueMicrotask` before `cat` does **not** unblock (still timeout).
+
+Interpretation:
+- The hang is tied to immediate shell process start/wakeup ordering on FreeBSD (event-loop wake edge), not to INI parsing itself.
+- Self-host codegen differences changed timing enough to make this deterministic in Step B/Step C repros.
+
+### Validation after applying workaround
+
+Rebuilt:
+- `cmake --build build/freebsd-selfhost-stepB --target bun-profile -- -j$(sysctl -n hw.ncpu)`
+- `cmake --build build/freebsd-selfhost-stepC --target bun-profile -- -j$(sysctl -n hw.ncpu)`
+
+Step B checks:
+- `timeout 15 build/freebsd-selfhost-stepB/bun-profile -e 'const t=await Bun.$`cat <file>`.text(); console.log(t.length);'`
+  - result: `18`, `rc=0`
+- `timeout 30 build/freebsd-selfhost-stepB/bun-profile build/freebsd-bootstrap/repro-nested-cat-only.js`
+  - result: `{"ini":"hi = ${FOO}${BAR}\n"}`, `rc=0`
+- `timeout 30 build/freebsd-selfhost-stepB/bun-profile build/freebsd-bootstrap/repro-ini-env.js`
+  - result: `{"hi":"barbaz"}`, `rc=0`
+- `timeout 120 build/freebsd-selfhost-stepB/bun-profile test ./test/js/bun/ini/ini.test.ts -t "replaces multiple defined variables"`
+  - result: `1 pass, 0 fail`, `rc=0`
+
+Step C checks:
+- `timeout 15 build/freebsd-selfhost-stepC/bun-profile -e 'const t=await Bun.$`cat <file>`.text(); console.log(t.length);'`
+  - result: `18`, `rc=0`
+- `timeout 30 build/freebsd-selfhost-stepC/bun-profile build/freebsd-bootstrap/repro-nested-cat-only.js`
+  - result: pass, `rc=0`
+- `timeout 30 build/freebsd-selfhost-stepC/bun-profile build/freebsd-bootstrap/repro-ini-env.js`
+  - result: pass, `rc=0`
+- `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/ini/ini.test.ts`
+  - result: `52 pass, 0 fail`, `rc=0`
+- `timeout 120 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/globals.test.js`
+  - result: `20 pass, 0 fail`, `rc=0`
+
+### Updated status
+
+- Step B and Step C self-host codegen path are unblocked for the previously failing INI/cat-child flow.
+- The workaround is intentionally scoped to FreeBSD and documented as temporary pending native event-loop wake fix.
+
+### Next steps
+
+1. Rebuild and rerun a broader Step C reliability sweep (additional Bun+Node test slices) to confirm no regressions from the shell startup defer.
+2. Decide whether FreeBSD default CMake posture can move to self-host codegen (`BUN_FREEBSD_CODEGEN_NODE=0`, `BUN_FREEBSD_BINDGENV2_NODE=0`) with current patch set.
+3. Start replacing the JS-level FreeBSD shell workaround with a native wake-order fix in event-loop/shell subprocess path, then remove the `Bun.sleep(0)` defer.

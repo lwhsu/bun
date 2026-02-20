@@ -171,7 +171,14 @@ export function createBunShellTemplateFunction(createShellInterpreter_, createPa
 
         let interp = createShellInterpreter(this.#resolve, this.#reject, this.#args!);
         this.#args = undefined;
-        interp.run();
+        if (process.platform === "freebsd") {
+          // FreeBSD: immediate shell start can miss subprocess completion until the
+          // next timer-driven wake. Deferring to a zero-delay timer is a temporary
+          // workaround while native wake ordering is fixed.
+          Bun.sleep(0).then(() => interp.run());
+        } else {
+          interp.run();
+        }
       }
     }
 
