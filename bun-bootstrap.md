@@ -2009,3 +2009,49 @@ Planned immediate next steps once `release-bindings` exits:
 - `build/freebsd-selfhost-stepB/bun-profile test ./test/js/bun/ini/ini.test.ts -t "replaces multiple defined variables"`
 - `build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/ini/ini.test.ts`
 4. If still blocked, keep FreeBSD default on node codegen fallback path and continue runtime/OS porting work in parallel while self-host codegen bug is isolated.
+
+## 2026-02-20 follow-up: trigger narrowing for self-host nested child hang
+
+### Additional repro decomposition (post-checkpoint `cce2033761`)
+
+Test binaries:
+- baseline: `build/freebsd-release-ozigfork/bun-profile`
+- self-host: `build/freebsd-selfhost-stepB/bun-profile`, `build/freebsd-selfhost-stepC/bun-profile`
+
+1. Nested child + `Bun.$\`echo hi\`` + `.json()`
+- Repro: `build/freebsd-bootstrap/repro-nested-echo-json.js`
+- Result: **passes on all three binaries** (`release`, `stepB`, `stepC`).
+
+2. Nested child + `require("bun:internal-for-testing")` + `Bun.$\`echo hi\`` + `.json()`
+- Repro: `build/freebsd-bootstrap/repro-nested-require-echo-json.js`
+- Result: **passes on all three binaries**.
+
+3. Nested child + `require("bun:internal-for-testing")` + `parse("hi = \${FOO}\${BAR}")` + `.json()`
+- Repro: `build/freebsd-bootstrap/repro-nested-parse-only.js`
+- Result: **passes on all three binaries**.
+
+4. Nested child from `repro-ini-env.js` pattern
+- Child does:
+  - `require("bun:internal-for-testing")`
+  - `await Bun.$\`cat <absolute-path>\`.text()`
+  - `parse(ini)`
+- Parent does `.json()` over child stdout.
+- Result:
+  - `release`: **passes** (`{"hi":"barbaz"}`)
+  - `stepB` / `stepC`: **hangs until timeout** (`rc=124`)
+
+### Interpretation
+
+- The failure is not a blanket nested-child issue (`echo` path works).
+- The failure is not a blanket `internal-for-testing` issue (require + parse-only works).
+- The failure is associated with the specific `repro-ini-env.js` child flow that includes `Bun.$\`cat ...\`.text()` under self-host codegen outputs.
+- This keeps the blocker anchored to self-host JS module/runtime behavior divergence rather than general process spawning.
+
+### Immediate next isolation targets
+
+1. Build a minimal child snippet matching `repro-ini-env.js` that differs by one operation at a time:
+- `cat` only (no parse)
+- `cat` + parse with hardcoded text
+- `cat` + parse(file) but without env expansion markers
+2. Capture per-case pass/fail matrix by binary (`release` / `stepB` / `stepC`) in the log.
+3. If the matrix points to a specific builtin path, diff only the relevant generated module(s) between `build/freebsd-release-ozigfork/js` and `build/freebsd-selfhost-stepB/js` instead of whole-tree diffs.
