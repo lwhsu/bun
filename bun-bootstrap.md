@@ -1626,3 +1626,34 @@ Planned immediate next steps once `release-bindings` exits:
   - `bun build` no longer hangs in `BundleV2.waitForParse`.
   - `bun test` smoke no longer aborts with SIGFPE.
 - Next phase should move from blocker triage to broader test coverage and cleanup for upstreamable FreeBSD patches.
+
+## 2026-02-20 checkpoint: reproducibility rerun and wider smoke
+
+### Bootstrap reproducibility rerun
+
+- Re-ran end-to-end script with forked Zig directly (no ad-hoc manual wrapper invocation):
+  - `BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/freebsd-release-ozigfork`
+  - `BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd-release/stage3/bin/zig`
+  - `BUN_FREEBSD_CURRENT_ZIG_LIB_DIR=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/lib`
+  - `./scripts/bootstrap-freebsd.sh -DLLVM_ZIG_CODEGEN_THREADS=1`
+- Result:
+  - `[bootstrap] complete`
+  - stage0: `build/freebsd-bootstrap/stage0/bun`
+  - final: `build/freebsd-release-ozigfork/bun`
+  - incremental runtime: `21.60s real`
+
+### Additional validation
+
+- Stage0 runtime:
+  - `build/freebsd-bootstrap/stage0/bun --version` => `0.0.0`
+  - `build/freebsd-bootstrap/stage0/bun -e 'console.log(1+1)'` => `2`
+- Final runtime:
+  - `build/freebsd-release-ozigfork/bun --version` => `1.3.10`
+  - `build/freebsd-release-ozigfork/bun -e 'console.log(1+1)'` => `2`
+- Previously failing status-check paths now pass:
+  - `timeout 120 build/freebsd-release-ozigfork/bun build .../status-check/app.js --outfile .../status-check/out.js` => success
+  - `timeout 120 build/freebsd-release-ozigfork/bun-profile build .../status-check/app.js --outfile .../status-check/out-profile.js` => success
+  - `timeout 120 build/freebsd-release-ozigfork/bun-profile test ./build/freebsd-bootstrap/status-check/smoke.test.ts` => `1 pass, 0 fail`
+- Two additional in-repo test files pass:
+  - `build/freebsd-release-ozigfork/bun test ./test/js/node/buffer-utf16.test.ts`
+  - `build/freebsd-release-ozigfork/bun test ./test/js/bun/namespace-prototype-pollution.test.ts`
