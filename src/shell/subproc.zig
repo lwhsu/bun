@@ -866,16 +866,30 @@ pub const ShellSubprocess = struct {
             .cmd_parent = spawn_args.cmd_parent,
         };
         subprocess.process.setExitHandler(subprocess);
+        freebsdSpawnTrace("shell spawn setup pid={d} lazy={}", .{
+            subprocess.process.pid,
+            spawn_args.lazy,
+        });
 
         if (subprocess.stdin == .pipe) {
             subprocess.stdin.pipe.signal = bun.webcore.streams.Signal.init(&subprocess.stdin);
         }
 
         switch (subprocess.process.watch()) {
-            .result => {},
-            .err => {
+            .result => {
+                freebsdSpawnTrace("shell watch ok pid={d} hasExited={}", .{
+                    subprocess.process.pid,
+                    subprocess.process.hasExited(),
+                });
+            },
+            .err => |err| {
                 notify_caller_process_already_exited.* = true;
                 spawn_args.lazy = false;
+                freebsdSpawnTrace("shell watch err pid={d} errno={s} hasExited={}", .{
+                    subprocess.process.pid,
+                    @tagName(err.getErrno()),
+                    subprocess.process.hasExited(),
+                });
             },
         }
 
@@ -907,6 +921,10 @@ pub const ShellSubprocess = struct {
             }
         }
 
+        if (comptime Environment.isFreeBSD) {
+            subprocess.process.reapIfExitedNoHang();
+        }
+
         should_close_memfd = false;
 
         log("returning", .{});
@@ -920,6 +938,10 @@ pub const ShellSubprocess = struct {
 
     pub fn onProcessExit(this: *@This(), _: *Process, status: bun.spawn.Status, _: *const bun.spawn.Rusage) void {
         log("onProcessExit({x}, {f})", .{ @intFromPtr(this), status });
+        freebsdSpawnTrace("shell onProcessExit pid={d} status={s}", .{
+            this.process.pid,
+            @tagName(status),
+        });
         const exit_code: ?u8 = brk: {
             if (status == .exited) {
                 break :brk status.exited.code;
@@ -1418,3 +1440,13 @@ const FileSink = jsc.WebCore.FileSink;
 
 const sh = bun.shell;
 const Yield = bun.shell.Yield;
+
+inline fn freebsdSpawnTraceEnabled() bool {
+    if (comptime !Environment.isFreeBSD) return false;
+    return bun.getenvZ("BUN_FREEBSD_SPAWN_TRACE") != null;
+}
+
+fn freebsdSpawnTrace(comptime fmt: []const u8, args: anytype) void {
+    if (!freebsdSpawnTraceEnabled()) return;
+    std.debug.print("[freebsd-shell] " ++ fmt ++ "\n", args);
+}

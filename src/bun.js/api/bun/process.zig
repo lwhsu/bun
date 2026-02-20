@@ -242,6 +242,10 @@ pub const Process = struct {
     }
 
     pub fn onExit(this: *Process, status: Status, rusage: *const Rusage) void {
+        freebsdSpawnTrace("process onExit pid={d} status={s}", .{
+            this.pid,
+            @tagName(status),
+        });
         const exit_handler = this.exit_handler;
         this.status = status;
 
@@ -266,6 +270,21 @@ pub const Process = struct {
         if (comptime Environment.isPosix) {
             this.waitPosix(sync_);
         } else if (comptime Environment.isWindows) {}
+    }
+
+    pub fn reapIfExitedNoHang(this: *Process) void {
+        if (comptime !Environment.isPosix) return;
+        if (this.hasExited()) return;
+
+        var rusage = std.mem.zeroes(Rusage);
+        const waitpid_result = PosixSpawn.wait4(this.pid, std.posix.W.NOHANG, &rusage);
+        if (Status.from(this.pid, &waitpid_result)) |status| {
+            freebsdSpawnTrace("process reapIfExitedNoHang pid={d} status={s}", .{
+                this.pid,
+                @tagName(status),
+            });
+            this.onExit(status, &rusage);
+        }
     }
 
     pub fn onWaitPidFromWaiterThread(this: *Process, waitpid_result: *const bun.sys.Maybe(PosixSpawn.WaitPidResult), rusage: *const Rusage) void {
@@ -298,9 +317,14 @@ pub const Process = struct {
         var rusage_result = rusage.*;
 
         const status: Status = Status.from(pid, waitpid_result) orelse brk: {
+            freebsdSpawnTrace("process onWaitPid pid={d} no-status; rewatch", .{pid});
             switch (this.rewatchPosix()) {
                 .result => {},
                 .err => |err_| {
+                    freebsdSpawnTrace("process onWaitPid pid={d} rewatch err errno={s}", .{
+                        pid,
+                        @tagName(err_.getErrno()),
+                    });
                     if (comptime Environment.isMac) {
                         if (err_.getErrno() == .SRCH) {
                             break :brk Status.from(pid, &PosixSpawn.wait4(
@@ -378,10 +402,15 @@ pub const Process = struct {
         )) {
             .result => {
                 this.ref();
+                freebsdSpawnTrace("process watch register ok pid={d}", .{this.pid});
                 return .success;
             },
             .err => |err| {
                 this.poller.fd.disableKeepingProcessAlive(this.event_loop);
+                freebsdSpawnTrace("process watch register err pid={d} errno={s}", .{
+                    this.pid,
+                    @tagName(err.getErrno()),
+                });
 
                 return .{ .err = err };
             },
@@ -2302,3 +2331,13 @@ const SecurityScanSubprocess = bun.install.SecurityScanSubprocess;
 
 const jsc = bun.jsc;
 const Subprocess = jsc.Subprocess;
+
+inline fn freebsdSpawnTraceEnabled() bool {
+    if (comptime !Environment.isFreeBSD) return false;
+    return bun.getenvZ("BUN_FREEBSD_SPAWN_TRACE") != null;
+}
+
+fn freebsdSpawnTrace(comptime fmt: []const u8, args: anytype) void {
+    if (!freebsdSpawnTraceEnabled()) return;
+    std.debug.print("[freebsd-process] " ++ fmt ++ "\n", args);
+}

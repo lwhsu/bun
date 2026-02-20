@@ -2240,3 +2240,215 @@ Outcome:
   - `src/codegen/bundle-modules.ts` (FreeBSD CJS codegen path + cjs wrapper postprocess handling)
   - `src/js/builtins/shell.ts` (FreeBSD shell startup defer workaround)
 - spawn-suite reliability still incomplete; `onExit` high-rate loop and Uint8Array-stdin cases remain active blockers for broad stability.
+
+## 2026-02-21 next execution plan (resume checklist)
+
+### Milestone target
+
+- Move FreeBSD self-host status from "INI path unblocked with workaround" to "spawn/shell reliability-understood and patched enough for broader suite progress".
+- Keep the current FreeBSD `Bun.sleep(0)` shell startup workaround in place until native wake-order fixes are validated.
+- Keep all worktrees and generated logs outside `/tmp` (use `~/tmp/...` or repository-local paths) to avoid reboot cleanup loss.
+
+### Step 1 (highest priority): finish root-cause isolation for async `onExit` loop stall
+
+1. Re-run filtered blocker with bounded timeout and capture fresh artifacts:
+- `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/spawn/spawn.test.ts -t "check exit code from onExit"`
+- save stdout/stderr + `procstat -kk` snapshots into `build/freebsd-bootstrap/logs/`.
+2. Add temporary diagnostic logging in:
+- `src/bun.js/api/bun/js_bun_spawn_bindings.zig` (watch registration, already-exited fast path, exit notification scheduling)
+- `src/shell/subproc.zig` (kevent/readiness, reap, callback dispatch)
+3. Create/refresh a standalone repro script for high-rate async spawn+`onExit` loop (`build/freebsd-bootstrap/repro-spawn-onexit-loop.js`) so iteration count can be reduced/increased quickly.
+4. Verify whether exit callbacks are dropped, delayed indefinitely, or blocked behind event-loop wake ordering.
+
+Acceptance criteria:
+- Repro can be run repeatedly and fails in a deterministic way before fix.
+- We can point to one concrete missing/late signal path (not just "hang observed").
+
+### Step 2: isolate and fix `Uint8Array works as stdin` timeout
+
+1. Re-run only this slice:
+- `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/spawn/spawn.test.ts -t "Uint8Array works as stdin"`
+2. Add a tiny direct repro in `build/freebsd-bootstrap/` that only:
+- spawns child process
+- writes `Uint8Array` to stdin
+- validates close/EOF and completion
+3. Trace data path in spawn stdio handling (write completion + stdin close + child exit delivery) and patch the narrowest failing edge.
+
+Acceptance criteria:
+- Filtered `Uint8Array works as stdin` run passes consistently.
+- Direct repro script passes at least 5 consecutive runs.
+
+### Step 3: re-evaluate `shell-hang.test.ts` under same instrumentation
+
+1. Run full file and then per-test filters to map which cases share the spawn/onExit root cause.
+2. If all six failures collapse to the same wake/reap issue, keep one shared fix path.
+3. If multiple distinct failure classes exist, split into subtracks and log separately in this document.
+
+Acceptance criteria:
+- Each failing case is mapped to a specific class (shared vs distinct), with evidence.
+
+### Step 4: implement native wake-order fix, then remove JS-level workaround
+
+1. After spawn/onExit root cause is fixed in native path, remove FreeBSD-only defer from:
+- `src/js/builtins/shell.ts`
+2. Rebuild Step B and Step C binaries.
+3. Re-run the previously unblocked suites to prevent regressions:
+- `ini.test.ts`, `globals.test.js`, `process-on.test.ts`, `shell/exec.test.ts`
+
+Acceptance criteria:
+- Prior passing suites remain green without reintroducing timeouts.
+- The workaround removal is justified by native-path evidence.
+
+### Step 5: checkpoint verification matrix (required before next major direction change)
+
+Run and log:
+
+1. `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/ini/ini.test.ts`
+2. `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/globals.test.js`
+3. `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/node/process/process-on.test.ts`
+4. `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/shell/exec.test.ts`
+5. `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/shell/shell-hang.test.ts`
+6. `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/spawn/spawn.test.ts`
+
+Exit criteria for this milestone:
+- `spawn.test.ts` and `shell-hang.test.ts` are no longer timeout-dominated, or
+- remaining failures are narrowed to named, reproducible, single-root-cause issues with active patch branches and evidence logged.
+
+### Step 6: documentation and commit discipline
+
+- After each meaningful checkpoint:
+1. append exact commands + `rc=` results to `bun-bootstrap.md`
+2. commit code/doc together with a descriptive message
+3. keep generated heavy logs in `build/freebsd-bootstrap/logs/` (or `~/tmp/...` if too large), and reference paths in the report
+
+## 2026-02-21 follow-up: deterministic `onExit` repro, trace instrumentation, and watcher-path experiments
+
+### New repro + evidence capture
+
+Added:
+- `build/freebsd-bootstrap/repro-spawn-onexit-loop.js`
+- `build/freebsd-bootstrap/repro-spawn-onexit-loop-strongref.js`
+
+Results (Step C binary):
+- `timeout 180 env REPRO_COUNT=1000 REPRO_TIMEOUT_MS=5000 build/freebsd-selfhost-stepC/bun-profile build/freebsd-bootstrap/repro-spawn-onexit-loop.js`
+  - `rc=1` at `iteration=38`, one callback missing (`exitCode1` or `exitCode2` undefined depending on run).
+- strong-ref variant failed the same way:
+  - object lifetime/GC is not the primary cause.
+
+Fresh stall snapshots:
+- `build/freebsd-bootstrap/logs/spawn-onExit-filter2-20260221-040140.procstat.txt`
+- `build/freebsd-bootstrap/logs/repro-onexit-loop-hang-20260221-040912.procstat.txt`
+
+Observed repeatedly:
+- parent process parked in `kqueue/kevent` and many threads in `umtx`
+- a child can remain `<defunct>` under the parent while callback pair is incomplete
+
+### Runtime trace instrumentation added (gated)
+
+Temporary trace hooks were added behind:
+- `BUN_FREEBSD_SPAWN_TRACE=1`
+
+Touched files:
+- `src/bun.js/api/bun/js_bun_spawn_bindings.zig`
+- `src/bun.js/api/bun/subprocess.zig`
+- `src/bun.js/api/bun/process.zig`
+- `src/shell/subproc.zig`
+
+Key traced failing sequence (before watcher fallback experiment):
+- PID is spawned + watched successfully:
+  - `process watch register ok pid=40189`
+  - `spawn watch ok pid=40189 hasExited=false`
+  - `spawn registered pid=40189`
+- sibling PID in same iteration exits cleanly and invokes callback
+- missing PID never emits:
+  - `process onExit pid=...`
+  - `subprocess onProcessExit pid=...`
+  - `subprocess run onExit callback pid=...`
+
+This narrowed the issue to missed exit delivery in the watch path (not callback wiring, not JS GC).
+
+### Attempt 1: immediate no-hang reap after async setup
+
+Added:
+- `Process.reapIfExitedNoHang()` and called it after async spawn setup on FreeBSD.
+
+Outcome:
+- no change; deterministic failure remained near iteration 38.
+- trace showed this fallback did not catch the missing PID case.
+
+### Attempt 2: force waiter-thread path on FreeBSD (experimental)
+
+Experimental changes:
+- `WaiterThread.shouldUseWaiterThread()` returns true on FreeBSD.
+- non-Linux waiter loop uses short sleep polling (`wait4(WNOHANG)` loop) instead of kqueue process watch.
+
+Validation:
+- `REPRO_COUNT=150` passed (`rc=0`, `repro done`).
+- `REPRO_COUNT=200` passed (`rc=0`, `repro done`).
+- large run (`REPRO_COUNT=1000`) no longer fails at iteration 38, but is too slow for current external timeout (`rc=124` at 180s; reached `progress i=100`).
+
+Interpretation:
+- waiter-thread mode appears to improve callback correctness for this repro.
+- however, throughput is insufficient for the existing high-count test shape with current timeout budget.
+
+### Current filtered test status after this round
+
+- `timeout 120 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/spawn/spawn.test.ts -t "check exit code from onExit"`
+  - `rc=124` (no final result within 120s; consistent with slow high-count loop)
+- `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/spawn/spawn.test.ts -t "Uint8Array works as stdin"`
+  - still fails:
+    - `spawnSync > Uint8Array works as stdin`: received length 0, expected 250000
+    - async case timed out at 5000ms
+
+### Immediate next actions
+
+1. Decide whether to keep waiter-thread fallback for FreeBSD as a temporary correctness-first mode, then optimize.
+2. If keeping it:
+- optimize waiter loop wake strategy to improve spawn throughput (current polling is correctness-oriented).
+3. In parallel, continue separate root-cause track for `Uint8Array stdin` path (still failing independently).
+
+## 2026-02-21 throughput check: waiter-thread fallback timing and tradeoff
+
+With waiter-thread mode forced on FreeBSD:
+
+- `timeout 400 env REPRO_COUNT=150 REPRO_TIMEOUT_MS=5000 .../repro-spawn-onexit-loop.js`
+  - `rc=0`, output reached `repro done`
+- `timeout 300 env REPRO_COUNT=200 REPRO_TIMEOUT_MS=5000 .../repro-spawn-onexit-loop.js`
+  - `rc=0`, output reached `repro done`
+
+Measured elapsed on latest build:
+- `REPRO_COUNT=150`: `elapsed=154s`
+- `REPRO_COUNT=200`: `elapsed=205s`
+
+Implications:
+- callback-loss behavior seen at iteration ~38 is no longer reproduced in these medium runs.
+- performance remains too slow for the `count=1000` test shape under short external timeouts:
+  - `timeout 120 ... spawn.test.ts -t "check exit code from onExit"` still `rc=124`
+  - `timeout 180` standalone `REPRO_COUNT=1000` reaches only early progress and times out externally.
+
+Additional note:
+- `Uint8Array works as stdin` remains failing independently:
+  - `spawnSync` gets zero-length output where 250000 expected
+  - async variant times out at 5000ms.
+
+## 2026-02-21 revert checkpoint: discarded forced waiter-thread branch
+
+I tested an experimental branch that forced waiter-thread mode on FreeBSD in `process.zig`.
+
+Observed on that branch:
+- medium `onExit` loop repros (`REPRO_COUNT=150/200`) passed
+- but throughput remained low (~1s/iteration)
+- `spawnSync`/`Uint8Array stdin` behavior became worse (direct repro stalled before finishing sync section)
+
+Because this introduced a broader sync-spawn regression, the forced waiter-thread changes were reverted from source.
+
+Post-revert sanity checks (current source state):
+- `timeout 70 env REPRO_COUNT=100 REPRO_TIMEOUT_MS=5000 .../repro-spawn-onexit-loop.js`
+  - fails again at iteration ~37/38 with one missing callback
+- `timeout 60 .../repro-spawn-uint8-stdin.js`
+  - still times out after printing only startup line
+
+Current conclusion:
+- keep waiter-thread-for-FreeBSD as **discarded experiment** for now
+- continue with targeted fix on the original kqueue/watch path for async `onExit`
+- continue separate root-cause work for `Uint8Array stdin`/`spawnSync` path

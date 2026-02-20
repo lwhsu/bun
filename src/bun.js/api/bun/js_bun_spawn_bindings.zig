@@ -791,6 +791,12 @@ pub fn spawnMaybeSync(
     var send_exit_notification = false;
 
     if (comptime !is_sync) {
+        freebsdSpawnTrace("spawn setup pid={d} is_sync={} lazy={} onExitCb={}", .{
+            subprocess.process.pid,
+            is_sync,
+            lazy,
+            on_exit_callback.isCell(),
+        });
         // This must go before other things happen so that the exit handler is
         // registered before onProcessExit can potentially be called.
         if (timeout) |timeout_val| {
@@ -821,23 +827,47 @@ pub fn spawnMaybeSync(
         }
 
         switch (subprocess.process.watch()) {
-            .result => {},
-            .err => {
+            .result => {
+                freebsdSpawnTrace("spawn watch ok pid={d} hasExited={}", .{
+                    subprocess.process.pid,
+                    subprocess.process.hasExited(),
+                });
+            },
+            .err => |err| {
                 send_exit_notification = true;
                 lazy = false;
+                freebsdSpawnTrace("spawn watch err pid={d} errno={s} hasExited={}", .{
+                    subprocess.process.pid,
+                    @tagName(err.getErrno()),
+                    subprocess.process.hasExited(),
+                });
             },
         }
     }
 
     defer {
         if (send_exit_notification) {
+            freebsdSpawnTrace("spawn deferred notify pid={d} hasExited={} status={s}", .{
+                subprocess.process.pid,
+                subprocess.process.hasExited(),
+                @tagName(subprocess.process.status),
+            });
             if (subprocess.process.hasExited()) {
                 // process has already exited, we called wait4(), but we did not call onProcessExit()
                 subprocess.process.onExit(subprocess.process.status, &std.mem.zeroes(Rusage));
+                freebsdSpawnTrace("spawn deferred onExit pid={d} status={s}", .{
+                    subprocess.process.pid,
+                    @tagName(subprocess.process.status),
+                });
             } else {
                 // process has already exited, but we haven't called wait4() yet
                 // https://cs.github.com/libuv/libuv/blob/b00d1bd225b602570baee82a6152eaa823a84fa6/src/unix/process.c#L1007
                 subprocess.process.wait(is_sync);
+                freebsdSpawnTrace("spawn deferred wait pid={d} hasExited={} status={s}", .{
+                    subprocess.process.pid,
+                    subprocess.process.hasExited(),
+                    @tagName(subprocess.process.status),
+                });
             }
         }
     }
@@ -885,8 +915,21 @@ pub fn spawnMaybeSync(
     }
 
     if (comptime !is_sync) {
+        if (comptime Environment.isFreeBSD) {
+            // FreeBSD can miss a NOTE_EXIT delivery for extremely short-lived children
+            // in the watch-registration race window. Probe with WNOHANG once after full
+            // setup so callbacks are already installed.
+            subprocess.process.reapIfExitedNoHang();
+        }
+
         if (!subprocess.process.hasExited()) {
             jsc_vm.onSubprocessSpawn(subprocess.process);
+            freebsdSpawnTrace("spawn registered pid={d}", .{subprocess.process.pid});
+        } else {
+            freebsdSpawnTrace("spawn already-exited pid={d} status={s}", .{
+                subprocess.process.pid,
+                @tagName(subprocess.process.status),
+            });
         }
         return out;
     }
@@ -1126,3 +1169,13 @@ const Writable = Subprocess.Writable;
 const Process = bun.spawn.Process;
 const Rusage = bun.spawn.Rusage;
 const Stdio = bun.spawn.Stdio;
+
+inline fn freebsdSpawnTraceEnabled() bool {
+    if (comptime !Environment.isFreeBSD) return false;
+    return bun.getenvZ("BUN_FREEBSD_SPAWN_TRACE") != null;
+}
+
+fn freebsdSpawnTrace(comptime fmt: []const u8, args: anytype) void {
+    if (!freebsdSpawnTraceEnabled()) return;
+    std.debug.print("[freebsd-spawn] " ++ fmt ++ "\n", args);
+}

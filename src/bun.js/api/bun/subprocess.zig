@@ -568,6 +568,11 @@ fn consumeOnDisconnectCallback(this_jsvalue: JSValue, globalThis: *jsc.JSGlobalO
 
 pub fn onProcessExit(this: *Subprocess, process: *Process, status: bun.spawn.Status, rusage: *const Rusage) void {
     log("onProcessExit()", .{});
+    freebsdSpawnTrace("subprocess onProcessExit pid={d} status={s} is_sync={}", .{
+        process.pid,
+        @tagName(status),
+        this.flags.is_sync,
+    });
     const this_jsvalue = this.this_value.tryGet() orelse .zero;
     const globalThis = this.globalThis;
     const jsc_vm = globalThis.bunVM();
@@ -648,6 +653,14 @@ pub fn onProcessExit(this: *Subprocess, process: *Process, status: bun.spawn.Sta
 
     if (!is_sync) {
         if (this_jsvalue != .zero) {
+            const had_exited_promise = jsc.Codegen.JSSubprocess.exitedPromiseGetCached(this_jsvalue) != null;
+            const had_on_exit_callback = jsc.Codegen.JSSubprocess.onExitCallbackGetCached(this_jsvalue) != null;
+            freebsdSpawnTrace("subprocess callbacks pid={d} exitedPromise={} onExitCb={}", .{
+                process.pid,
+                had_exited_promise,
+                had_on_exit_callback,
+            });
+
             if (consumeExitedPromise(this_jsvalue, globalThis)) |promise| {
                 loop.enter();
                 defer loop.exit();
@@ -670,6 +683,10 @@ pub fn onProcessExit(this: *Subprocess, process: *Process, status: bun.spawn.Sta
             }
 
             if (consumeOnExitCallback(this_jsvalue, globalThis)) |callback| {
+                freebsdSpawnTrace("subprocess run onExit callback pid={d} status={s}", .{
+                    process.pid,
+                    @tagName(status),
+                });
                 const waitpid_value: JSValue =
                     if (status == .err)
                         (status.err.toJS(globalThis) catch return)
@@ -697,7 +714,17 @@ pub fn onProcessExit(this: *Subprocess, process: *Process, status: bun.spawn.Sta
                     this_value,
                     &args,
                 );
+            } else {
+                freebsdSpawnTrace("subprocess missing onExit callback pid={d} status={s}", .{
+                    process.pid,
+                    @tagName(status),
+                });
             }
+        } else {
+            freebsdSpawnTrace("subprocess has no JS wrapper pid={d} status={s}", .{
+                process.pid,
+                @tagName(status),
+            });
         }
     }
 }
@@ -943,3 +970,13 @@ const Rusage = bun.spawn.Rusage;
 
 const windows = bun.windows;
 const uv = windows.libuv;
+
+inline fn freebsdSpawnTraceEnabled() bool {
+    if (comptime !Environment.isFreeBSD) return false;
+    return bun.getenvZ("BUN_FREEBSD_SPAWN_TRACE") != null;
+}
+
+fn freebsdSpawnTrace(comptime fmt: []const u8, args: anytype) void {
+    if (!freebsdSpawnTraceEnabled()) return;
+    std.debug.print("[freebsd-spawn] " ++ fmt ++ "\n", args);
+}
