@@ -64,7 +64,7 @@ fn toPackedO(number: anytype) std.posix.O {
 pub const Mode = std.posix.mode_t;
 
 pub const O = switch (Environment.os) {
-    .mac => struct {
+    .mac, .freebsd => struct {
         pub const PATH = 0x0000;
         pub const RDONLY = 0x0000;
         pub const WRONLY = 0x0001;
@@ -94,7 +94,7 @@ pub const O = switch (Environment.os) {
 
         pub const toPacked = toPackedO;
     },
-    .linux, .freebsd, .wasm => switch (Environment.isX86) {
+    .linux, .wasm => switch (Environment.isX86) {
         true => struct {
             pub const RDONLY = 0x0000;
             pub const WRONLY = 0x0001;

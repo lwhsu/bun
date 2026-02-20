@@ -1576,3 +1576,53 @@ Planned immediate next steps once `release-bindings` exits:
 - if `bun build` hang resolves but `bun test` SIGFPE remains:
   - keep shipping checkpoint with explicit known blocker,
   - continue allocator/runtime investigation as next focused phase.
+
+## 2026-02-20 runtime unblock milestone: build/test smoke now pass
+
+### Fixes applied in current tree
+
+- `src/async/posix_event_loop.zig`
+  - `FilePoll.onTick` now dispatches FreeBSD kqueue events through `onKQueueEvent(...)`.
+  - FreeBSD EOF-bit check in `fromKQueueEvent` uses literal `0x8000` when `std.c.EV.EOF` is unavailable in Zig libc bindings.
+- `packages/bun-usockets/src/eventing/epoll_kqueue.c`
+  - FreeBSD internal async registration now enables the user event with:
+    - `EV_ADD | EV_ENABLE | EV_CLEAR`
+  - Wake trigger path no longer consumes its own event on submission thread:
+    - `kevent64(..., &event, 1, NULL, 0, NULL)`
+  - Added direct `kevent64` error diagnostics (`perror`) for registration/wakeup paths.
+- `src/sys.zig`
+  - FreeBSD no longer shares Linux `O_*` constants.
+  - `O` switch now uses BSD-style flags for `.freebsd` (grouped with `.mac`) and Linux flags only for `.linux`/`.wasm`.
+- `cmake/Options.cmake`
+  - Removed FreeBSD-only `USE_MIMALLOC_AS_DEFAULT_ALLOCATOR OFF`.
+  - Restored global default:
+    - `set(USE_MIMALLOC_AS_DEFAULT_ALLOCATOR ON)`
+
+### Root-cause evidence captured
+
+- `bun build --outfile` ENOENT failure (before `src/sys.zig` fix):
+  - `truss` showed `openat(..., O_WRONLY|O_ASYNC, ...)` with missing `O_CREAT`, proving wrong flag mapping.
+  - log: `build/freebsd-bootstrap/logs/bun-build-write-enoent.truss`
+- `bun test` crash site (before mimalloc-default restore):
+  - panic signal mapped to mimalloc free path:
+    - `vendor/mimalloc/src/free.c:68` in `_mi_page_ptr_unalign(...)`
+  - LLDB address lookup:
+    - `0x43c95a7` => `mi_free_generic_mt` / `_mi_page_ptr_unalign`
+  - symbolized stack also showed GC/ArrayBuffer free path passing through mimalloc.
+
+### Validation after fixes
+
+- Reconfigure + rebuild completed successfully in `build/freebsd-release-ozigfork`:
+  - heavy Zig obj step: `compile obj bun ReleaseFast x86_64-freebsd success 16m`
+- Runtime smoke now passes:
+  - `build/freebsd-release-ozigfork/bun --version` => `1.3.10`
+  - `build/freebsd-release-ozigfork/bun -e 'console.log(1+1)'` => `2`
+  - `build/freebsd-release-ozigfork/bun build ... --outfile ...` => writes output file successfully
+  - `build/freebsd-release-ozigfork/bun test ./build/freebsd-bootstrap/logs/smoke.test.ts` => `1 pass, 0 fail`
+
+### Updated status
+
+- Previous blockers from section `2026-02-20 runtime checkpoint: native .freebsd switch and blocker re-baseline` are resolved for smoke-level validation:
+  - `bun build` no longer hangs in `BundleV2.waitForParse`.
+  - `bun test` smoke no longer aborts with SIGFPE.
+- Next phase should move from blocker triage to broader test coverage and cleanup for upstreamable FreeBSD patches.

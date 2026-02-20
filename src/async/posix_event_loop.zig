@@ -508,12 +508,12 @@ pub const FilePoll = struct {
             var flags = Flags.Set{};
             if (kqueue_event.filter == std.c.EVFILT.READ) {
                 flags.insert(Flags.readable);
-                if (kqueue_event.flags & std.c.EV.EOF != 0) {
+                if ((if (comptime Environment.isFreeBSD) kqueue_event.flags & 0x8000 else kqueue_event.flags & std.c.EV.EOF) != 0) {
                     flags.insert(Flags.hup);
                 }
             } else if (kqueue_event.filter == std.c.EVFILT.WRITE) {
                 flags.insert(Flags.writable);
-                if (kqueue_event.flags & std.c.EV.EOF != 0) {
+                if ((if (comptime Environment.isFreeBSD) kqueue_event.flags & 0x8000 else kqueue_event.flags & std.c.EV.EOF) != 0) {
                     flags.insert(Flags.hup);
                 }
             } else if (kqueue_event.filter == std.c.EVFILT.PROC) {
@@ -778,7 +778,7 @@ pub const FilePoll = struct {
             return;
         }
 
-        if (comptime Environment.isMac)
+        if (comptime Environment.isMac or Environment.isFreeBSD)
             onKQueueEvent(file_poll, loop, &loop.ready_polls[@as(usize, @intCast(loop.current_ready_poll))])
         else if (comptime Environment.isLinux)
             onEpollEvent(file_poll, loop, &loop.ready_polls[@as(usize, @intCast(loop.current_ready_poll))]);

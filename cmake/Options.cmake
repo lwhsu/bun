@@ -227,10 +227,6 @@ optionx(ENABLE_TINYCC BOOL "Enable TinyCC for FFI JIT compilation" DEFAULT ${DEF
 # This is not an `option` because setting this variable to OFF is experimental
 # and unsupported. This replaces the `use_mimalloc` variable previously in
 # bun.zig, and enables C++ code to also be aware of the option.
-if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
-  set(USE_MIMALLOC_AS_DEFAULT_ALLOCATOR OFF)
-else()
-  set(USE_MIMALLOC_AS_DEFAULT_ALLOCATOR ON)
-endif()
+set(USE_MIMALLOC_AS_DEFAULT_ALLOCATOR ON)
 
 list(APPEND CMAKE_ARGS -DCMAKE_EXPORT_COMPILE_COMMANDS=ON)

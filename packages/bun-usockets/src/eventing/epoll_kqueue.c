@@ -18,6 +18,7 @@
 #include "libusockets.h"
 #include "internal/internal.h"
 #include <stdlib.h>
+#include <stdio.h>
 #include <time.h>
 #if defined(LIBUS_USE_EPOLL) || defined(LIBUS_USE_KQUEUE)
 
@@ -879,12 +880,17 @@ void us_internal_async_set(struct us_internal_async *a, void (*cb)(struct us_int
     struct kevent64_s event;
     struct timespec ts = {0, 0};
     uint64_t ptr = (uint64_t)(void*)internal_cb;
-    EV_SET64(&event, ptr, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, (uint64_t)(void*)internal_cb, 0, 0);
+    EV_SET64(&event, ptr, EVFILT_USER, EV_ADD | EV_ENABLE | EV_CLEAR, 0, 0, (uint64_t)(void*)internal_cb, 0, 0);
 
     int ret;
     do {
         ret = kevent64(internal_cb->loop->fd, &event, 1, &event, 1, KEVENT_FLAG_ERROR_EVENTS, &ts);
     } while (IS_EINTR(ret));
+
+    if (UNLIKELY(ret == -1)) {
+        perror("us_internal_async_set kevent64");
+        abort();
+    }
 }
 
 void us_internal_async_wakeup(struct us_internal_async *a) {
@@ -895,8 +901,15 @@ void us_internal_async_wakeup(struct us_internal_async *a) {
     EV_SET64(&event, ptr, EVFILT_USER, 0, NOTE_TRIGGER, 0, (uint64_t)(void*)internal_cb, 0, 0);
     int ret;
     do {
-        ret = kevent64(internal_cb->loop->fd, &event, 1, &event, 1, KEVENT_FLAG_ERROR_EVENTS, &ts);
+        /* Submit NOTE_TRIGGER only. Do not read an event here, otherwise the wakeup
+         * can be consumed by this thread instead of waking the loop thread. */
+        ret = kevent64(internal_cb->loop->fd, &event, 1, NULL, 0, KEVENT_FLAG_ERROR_EVENTS, &ts);
     } while (IS_EINTR(ret));
+
+    if (UNLIKELY(ret == -1)) {
+        perror("us_internal_async_wakeup kevent64");
+        abort();
+    }
 }
 #endif
 #endif
