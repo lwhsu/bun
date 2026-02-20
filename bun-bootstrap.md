@@ -1722,3 +1722,39 @@ Planned immediate next steps once `release-bindings` exits:
   - `bun test ./build/freebsd-bootstrap/status-check/smoke.test.ts` => `1 pass, 0 fail`
 - `truss` after fix confirms correct file open flags:
   - `openat(..., "/home/.../globals.test.js", O_RDONLY|O_NOCTTY, ...) = fd`
+
+## 2026-02-20 follow-up fix: deterministic YAML stack-overflow behavior across hosts
+
+### Problem observed
+
+- `test/js/bun/yaml/yaml.test.ts` case:
+  - `Bun.YAML > stringify > edge cases > handles stack overflow protection`
+- Under default host limits on this FreeBSD machine, this test could fail because:
+  - default stack size is very large (`ulimit -s` observed as `524288`)
+  - deeply nested input (`1,000,000` depth) did not always trigger overflow via stack-guard timing.
+
+### Temporary verification (diagnostic)
+
+- Running test with reduced stack confirmed expectation is stack-limit sensitive:
+  - `ulimit -s 8192`
+  - targeted test passed
+  - full `yaml.test.ts` passed (`195 pass, 4 todo, 0 fail`).
+
+### Source fix
+
+- Updated `src/bun.js/api/YAMLObject.zig` `Stringifier` with a deterministic logical recursion cap:
+  - `const max_recursion_depth = 65_536`
+  - `recursion_depth` counter tracked in both recursive traversal paths:
+    - `findAnchorsAndAliases(...)`
+    - `stringify(...)`
+  - comment added explaining rationale:
+    - host stack sizes vary significantly (including FreeBSD defaults), so depth-only pathological inputs should still reliably throw stack overflow across platforms.
+
+### Validation after fix (default host limits, no `ulimit`)
+
+- Targeted test:
+  - `build/freebsd-release-ozigfork/bun test ./test/js/bun/yaml/yaml.test.ts -t "handles stack overflow protection"`
+  - result: `1 pass, 0 fail`
+- Full suite:
+  - `build/freebsd-release-ozigfork/bun test ./test/js/bun/yaml/yaml.test.ts`
+  - result: `195 pass, 4 todo, 0 fail`
