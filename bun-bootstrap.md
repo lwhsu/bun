@@ -1494,3 +1494,85 @@ Planned immediate next steps once `release-bindings` exits:
     - `[bootstrap] complete`
 - Incremental rerun timing:
   - `17.56 real` (cached Zig obj step).
+
+## 2026-02-20 runtime checkpoint: native `.freebsd` switch and blocker re-baseline
+
+### Source state
+
+- FreeBSD-native OS switch propagation checkpoint committed:
+  - `619c5ef58d` (`freebsd: checkpoint native OS switch and event-loop compatibility`)
+- Scope:
+  - `src/env.zig` now has explicit `.freebsd` OS enum/mapping.
+  - 18 additional `src/` files updated for compile-time switch coverage and FreeBSD-specific branches.
+
+### Runtime validation rerun (post-checkpoint)
+
+- Baseline binaries:
+  - `build/freebsd-bootstrap/stage0/bun --version` -> `0.0.0`
+  - `build/freebsd-release-ozigfork/bun --version` -> `1.3.10`
+  - `build/freebsd-release-ozigfork/bun -e 'console.log(1+1)'` -> `2`
+- `bun build` smoke still hangs:
+  - command:
+    - `/usr/bin/timeout 120 build/freebsd-release-ozigfork/bun build build/freebsd-bootstrap/status-check/app.js --outfile build/freebsd-bootstrap/status-check/out.js`
+  - result:
+    - `rc=124`, no output file produced.
+  - same behavior with `bun-profile` (`/usr/bin/timeout 90 ...`, `rc=124`).
+- `bun test` still crashes:
+  - command:
+    - `/usr/bin/timeout 120 build/freebsd-release-ozigfork/bun-profile test ./build/freebsd-bootstrap/status-check/smoke.test.ts`
+  - result:
+    - `rc=132`, panic reports floating-point error.
+
+### Captured blocker evidence
+
+1. `bun build` hang stack
+- log:
+  - `build/freebsd-bootstrap/logs/status-hang-profile-build.lldb.log`
+- main thread stack:
+  - `bundler.bundle_v2.BundleV2.waitForParse`
+  - `us_loop_run_bun_tick`
+  - `kevent`
+- worker threads are waiting in threadpool futex waits, consistent with loop/wake progression issue.
+
+2. `bun test` SIGFPE fault site
+- log:
+  - `build/freebsd-bootstrap/logs/status-test-fpe-lldb.log`
+- fault:
+  - `SIGFPE: integer divide by zero`
+  - `vendor/mimalloc/src/free.c:68`
+  - function: `_mi_page_ptr_unalign(...)`
+
+### Additional comparison note
+
+- Older reference build (`build/freebsd-release-ozig`) also reaches the same mimalloc fault site for `bun test`:
+  - `_mi_page_ptr_unalign` at `vendor/mimalloc/src/free.c:68`.
+- So the immediate `bun test` SIGFPE is not newly introduced by the `.freebsd` enum propagation checkpoint.
+
+### Updated roadmap (supersedes earlier resume plan at section "Next Resume Plan")
+
+1. Keep bootstrap reproducibility green
+- retain current successful path (`stage0 + forked zig + current tree release build`) as baseline.
+
+2. Event-loop wake path correction first (for `bun build` hang)
+- replace temporary FreeBSD mapping to `LinuxWaker` with a FreeBSD-native kqueue user-event waker.
+- keep `FilePoll` FreeBSD `kevent` registration/unregistration path and validate wake semantics under bundler load.
+
+3. Re-verify `bun build` smoke after each event-loop change
+- use timed smoke command and capture `lldb` stack if timeout recurs.
+- success criterion: output bundle is generated and command exits `0`.
+
+4. SIGFPE/memory-path triage in parallel
+- keep minimal reproducible `bun test` input (`build/freebsd-bootstrap/status-check/smoke.test.ts`).
+- stop on `SIGFPE` in `lldb` and inspect callers leading to `_mi_page_ptr_unalign`.
+- compare behavior across both `build/freebsd-release-ozig` and `build/freebsd-release-ozigfork` to avoid regressing known-good paths.
+
+5. Integration gate
+- required for next milestone:
+  - `bun --version` and `bun -e` pass,
+  - `bun build` smoke passes,
+  - `bun test` smoke no longer crashes.
+
+6. Decision gate
+- if `bun build` hang resolves but `bun test` SIGFPE remains:
+  - keep shipping checkpoint with explicit known blocker,
+  - continue allocator/runtime investigation as next focused phase.
