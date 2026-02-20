@@ -282,6 +282,13 @@ const out = Bun.spawnSync({
 });
 trace("bun.build.cli:done", { exitCode: out.exitCode });
 if (out.exitCode !== 0) {
+  const stderrText =
+    out.stderr && out.stderr.length > 0
+      ? Buffer.from(out.stderr).toString("utf8").trim()
+      : "";
+  if (stderrText.length > 0) {
+    console.error(stderrText);
+  }
   console.error("bundle-modules.ts: child bun build failed");
   process.exit(out.exitCode ?? 1);
 }

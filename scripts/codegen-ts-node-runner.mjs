@@ -53,6 +53,7 @@ function parseBunBuildCli(cmd) {
   let minifySyntax = false;
   let minify = false;
   let keepNames = false;
+  let format = "cjs";
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -63,6 +64,10 @@ function parseBunBuildCli(cmd) {
     if (arg === "--target") {
       const t = args[++i];
       target = t === "bun" ? "esnext" : t;
+      continue;
+    }
+    if (arg === "--format") {
+      format = args[++i] ?? format;
       continue;
     }
     if (arg === "--external") {
@@ -96,7 +101,7 @@ function parseBunBuildCli(cmd) {
     }
   }
 
-  return { entryPoints, external, define, root, outdir, target, minifySyntax, minify, keepNames };
+  return { entryPoints, external, define, root, outdir, target, minifySyntax, minify, keepNames, format };
 }
 
 function bunBuildCompatSync(cmd, cwd) {
@@ -109,7 +114,7 @@ function bunBuildCompatSync(cmd, cwd) {
         bundle: true,
         // `bundle-modules.ts` wraps output in its own function and expects top-level
         // `$$EXPORT$$` markers, so avoid iife wrappers and ESM `export` syntax here.
-        format: "cjs",
+        format: parsed.format === "esm" ? "esm" : "cjs",
         platform: "browser",
         target: parsed.target,
         outdir: parsed.outdir,

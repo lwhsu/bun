@@ -2452,3 +2452,58 @@ Current conclusion:
 - keep waiter-thread-for-FreeBSD as **discarded experiment** for now
 - continue with targeted fix on the original kqueue/watch path for async `onExit`
 - continue separate root-cause work for `Uint8Array stdin`/`spawnSync` path
+
+## 2026-02-21 resume: codegen unblock + waiter-thread v2
+
+### Build/tooling unblock
+
+- `build/debug` failed at:
+  - `bundle-modules.ts: child bun build failed`
+- Root cause in node fallback runner:
+  - `scripts/codegen-ts-node-runner.mjs` did not parse `--format cjs`
+  - fallback treated `cjs` as an entrypoint and failed with:
+    - `Could not resolve "cjs"`
+- Fixes applied:
+  - `scripts/codegen-ts-node-runner.mjs`
+    - consume `--format` and propagate format to esbuild buildSync path
+  - `src/codegen/bundle-modules.ts`
+    - print child stderr on non-zero exit for diagnostics
+
+### Debug-link mismatch discovered
+
+- `build/debug` link fails with unresolved JSC symbols:
+  - `currentStackPointer`
+  - `JSC::HandleSet::isLiveNode`
+- Observation:
+  - symbols absent in `build/freebsd-bootstrap/bun-webkit/lib/*.a`
+  - this is consistent with headers/libs config mismatch in debug build vs current prebuilt WebKit archive set.
+- For runtime triage, switched back to `build/freebsd-selfhost-stepC` (ReleaseFast) binaries.
+
+### Waiter-thread v2 experiment (reintroduced with FreeBSD-specific loop)
+
+Applied in `src/bun.js/api/bun/process.zig`:
+- default `should_use_waiter_thread = Environment.isFreeBSD`
+- non-Linux waiter loop:
+  - FreeBSD now uses short sleep polling (`wait4(WNOHANG)` loop + `std.Thread.sleep(1ms)`)
+  - generic non-Linux `sigwait` fallback now adds `SIGCHLD` to mask before waiting
+
+### Validation after waiter-thread v2
+
+- `repro-spawn-onexit-loop.js`
+  - `REPRO_COUNT=40` -> pass (`repro done`)
+  - `REPRO_COUNT=100` -> pass, measured wall time:
+    - `real 103.74`
+- Prior deterministic missing-callback pattern (`iteration ~37/38`) not reproduced in these passing runs.
+- Throughput is still slower than desired for high-count stress loops.
+
+- `repro-spawn-uint8-stdin.js`
+  - still hangs (external timeout)
+  - parent/child inspection during stall:
+    - child command: `bun-profile -e process.stdin.pipe(process.stdout)`
+    - child stdin socket showed queued data (`65536`) while process remained sleeping
+  - this remains a separate sync duplex/backpressure issue (not solved by waiter-thread change).
+
+### Next
+
+1. keep correctness-first FreeBSD waiter-thread path for async/onExit while optimizing throughput
+2. continue dedicated root-cause work for sync stdin deadlock (`spawnSync` + large stdin/stdout echo)

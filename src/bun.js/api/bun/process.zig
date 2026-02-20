@@ -956,7 +956,9 @@ const WaiterThreadPosix = struct {
         }
     }
 
-    var should_use_waiter_thread = false;
+    // FreeBSD's EVFILT_PROC/NOTE_EXIT path can miss short-lived child exits in
+    // high-churn spawn workloads. Default to waiter-thread polling there.
+    var should_use_waiter_thread = Environment.isFreeBSD;
 
     const stack_size = 512 * 1024;
     pub var instance: WaiterThread = .{};
@@ -1022,8 +1024,13 @@ const WaiterThreadPosix = struct {
                 }
 
                 _ = std.posix.poll(&polls, std.math.maxInt(i32)) catch 0;
+            } else if (comptime Environment.isFreeBSD) {
+                // Keep polling waitpid(WNOHANG) at a short interval. This avoids
+                // reliance on SIGCHLD routing to a specific thread.
+                std.Thread.sleep(1 * std.time.ns_per_ms);
             } else {
                 var mask = std.posix.sigemptyset();
+                _ = std.c.sigaddset(&mask, std.posix.SIG.CHLD);
                 var signal: c_int = std.posix.SIG.CHLD;
                 const rc = std.c.sigwait(&mask, &signal);
                 _ = rc;
