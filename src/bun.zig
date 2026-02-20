@@ -3142,6 +3142,17 @@ pub fn getRoughTickCount(comptime mock_mode: timespec.MockMode) timespec {
         };
     }
 
+    if (comptime Environment.isFreeBSD) {
+        var spec = timespec{
+            .nsec = 0,
+            .sec = 0,
+        };
+        const updated = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch return spec;
+        spec.sec = @intCast(updated.sec);
+        spec.nsec = @intCast(updated.nsec);
+        return spec;
+    }
+
     return .epoch;
 }
 

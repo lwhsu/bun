@@ -1824,3 +1824,84 @@ Planned immediate next steps once `release-bindings` exits:
 
 5. After step 2 is fixed
 - rerun configure/build with reduced fallback settings incrementally (`BUN_FREEBSD_BINDGENV2_NODE=0`, then `BUN_FREEBSD_CODEGEN_NODE=0`) and revalidate.
+
+## 2026-02-21 self-host unblock closure and fallback reduction completion
+
+### Root cause closure for host self-host hang
+
+- The host self-host hang was narrowed to `await Bun.sleep(1)` in `src/codegen/bundle-functions.ts` (trace instrumentation showed it stalled before `sleep:done`).
+- Minimal runtime repro confirmed timer failure:
+  - `build/freebsd-release-ozigfork/bun-profile -e 'await Bun.sleep(1); console.log("slept")'` hung before fix.
+- Root cause in core time source:
+  - `src/bun.zig:getRoughTickCount()` had no FreeBSD branch and fell back to `.epoch`.
+  - That prevented monotonic time progression for timer-driven promises on FreeBSD.
+- Fix applied:
+  - Add `Environment.isFreeBSD` branch in `src/bun.zig` using `clock_gettime(CLOCK_MONOTONIC)`.
+- Validation after fix:
+  - `build/freebsd-release-ozigfork/bun-profile -e 'await Bun.sleep(1); console.log("slept")'` => `slept`
+  - `timeout 120 build/freebsd-release-ozigfork/bun-profile --no-install run src/codegen/bundle-modules.ts --debug=OFF <out>` => `rc=0`
+
+### Incremental fallback reduction results
+
+1. Step A (`BUN_FREEBSD_BINDGENV2_NODE=0`, `BUN_FREEBSD_CODEGEN_NODE=1`)
+- Configure/build graph generated successfully.
+- Manual bindgen-v2 list outputs via host bun returned complete outputs:
+  - `5` `.cpp` + `10` `.zig` paths.
+
+2. Step B (`BUN_FREEBSD_BINDGENV2_NODE=0`, `BUN_FREEBSD_CODEGEN_NODE=0`, `BUN_FREEBSD_NPM_INSTALL=1`)
+- First attempt hit a new blocker in `bun-node-fallbacks-react-refresh`:
+  - command used `bun-profile build ... --target=esnext`
+  - failure: `error: InvalidTarget while parsing argument '--target'`
+- Patch applied in `cmake/targets/BuildBun.cmake`:
+  - on FreeBSD, use `${ESBUILD_EXECUTABLE}` for `react-refresh` generation in this path.
+- Re-ran Step B with fork Zig shim (`build/freebsd-bootstrap/shim-bin-ozig/zig`) and build succeeded.
+
+3. Step C (`BUN_FREEBSD_BINDGENV2_NODE=0`, `BUN_FREEBSD_CODEGEN_NODE=0`, `BUN_FREEBSD_NPM_INSTALL=0`)
+- Full `bun-profile` build succeeded in `build/freebsd-selfhost-stepC`.
+- Runtime/codegen validation passed:
+  - `build/freebsd-selfhost-stepC/bun-profile --version` => `1.3.10`
+  - `build/freebsd-selfhost-stepC/bun-profile -e 'console.log(1+1)'` => `2`
+  - `build/freebsd-selfhost-stepC/bun-profile -e 'await Bun.sleep(1); console.log("slept")'` => `slept`
+  - `timeout 120 build/freebsd-selfhost-stepC/bun-profile --no-install run src/codegen/bundle-modules.ts --debug=OFF <out>` => `rc=0`
+
+### Build graph evidence (Step C)
+
+- `build/freebsd-selfhost-stepC/CMakeCache.txt`:
+  - `BUN_FREEBSD_BINDGENV2_NODE:STRING=0`
+  - `BUN_FREEBSD_CODEGEN_NODE:BOOL=0`
+  - `BUN_FREEBSD_GENERATE_CLASSES_NODE:BOOL=0`
+  - `BUN_FREEBSD_NPM_INSTALL:BOOL=0`
+  - `ZIG_EXECUTABLE:FILEPATH=/home/lwhsu/killme/bun/build/freebsd-bootstrap/shim-bin-ozig/zig`
+- `build/freebsd-selfhost-stepC/build.ninja` command patterns:
+  - `bun-profile install --frozen-lockfile` (root, `packages/bun-error`, `src/node-fallbacks`)
+  - `bun-profile run ... bundle-modules.ts`
+  - `bun-profile run ... generate-jssink.ts`
+  - `bun-profile run ... create-hash-table.ts`
+  - `bun-profile run build-fallbacks`
+  - no `node ... codegen-ts-node-runner.mjs` / `bindgenv2-node-runner.mjs` / `node-fallbacks-node-runner.mjs` commands
+
+### Cleanup/confirmation
+
+- The earlier experimental `kevent64` shim edits in `packages/bun-usockets/src/internal/eventing/epoll_kqueue.h` were reverted.
+- Rebuilt `build/freebsd-release-ozigfork/bun-profile` after revert (including long Zig object phase), then revalidated:
+  - `--version`, `-e 'console.log(1+1)'`, `-e 'await Bun.sleep(1); console.log("slept")'` all pass.
+  - `bundle-modules.ts` self-host run still exits with `rc=0`.
+- Conclusion: the `epoll_kqueue.h` shim tweak is not required for the timer/self-host unblock.
+
+### Additional observation
+
+- `bindgenv2` now succeeds with direct `bun run` as well as `-e 'await import(...)'`:
+  - both commands returned `rc=0` and full output lists in current host-bun path.
+- Current CMake FreeBSD `-e import(...)` bindgen-v2 prefix remains conservative compatibility glue; it can be revisited in a cleanup pass.
+
+### Updated next steps
+
+1. Keep the two effective code changes as current checkpoint:
+- `src/bun.zig` FreeBSD monotonic tick source.
+- `cmake/targets/BuildBun.cmake` FreeBSD react-refresh esbuild path.
+
+2. Run broader reliability/test matrix with Step C binary (`build/freebsd-selfhost-stepC/bun-profile`) to flush remaining runtime gaps.
+
+3. Cleanup pass candidates after reliability is stable:
+- evaluate removing FreeBSD bindgen-v2 `-e import(...)` workaround.
+- decide whether Step C (`NPM_INSTALL=0`, `CODEGEN_NODE=0`, `BINDGENV2_NODE=0`) is ready to become default FreeBSD configure posture.

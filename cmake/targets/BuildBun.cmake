@@ -226,6 +226,13 @@ if(BUN_FREEBSD_CODEGEN_NODE)
   set(BUN_REACT_REFRESH_COMMAND
     ${ESBUILD_EXECUTABLE} ${ESBUILD_ARGS}
   )
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "FreeBSD")
+  # FreeBSD self-host currently uses bun-profile as BUN_EXECUTABLE; its bundler target
+  # parser rejects esbuild-style target values like "esnext" used by this command.
+  # Use esbuild directly for react-refresh generation on FreeBSD.
+  set(BUN_REACT_REFRESH_COMMAND
+    ${ESBUILD_EXECUTABLE} ${ESBUILD_ARGS}
+  )
 endif()
 register_command(
   TARGET
