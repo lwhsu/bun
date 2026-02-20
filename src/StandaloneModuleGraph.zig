@@ -1408,12 +1408,6 @@ pub const StandaloneModuleGraph = struct {
 
         switch (Environment.os) {
             .linux => {
-                if (comptime Environment.isFreeBSD) {
-                    const self_exe_path = try bun.selfExePath();
-                    const file = try std.fs.openFileAbsoluteZ(self_exe_path.ptr, .{});
-                    return .fromStdFile(file);
-                }
-
                 if (std.fs.openFileAbsoluteZ("/proc/self/exe", .{})) |easymode| {
                     return .fromStdFile(easymode);
                 } else |_| {
@@ -1433,7 +1427,7 @@ pub const StandaloneModuleGraph = struct {
                     return error.FileNotFound;
                 }
             },
-            .mac => {
+            .freebsd, .mac => {
                 // Use of MAX_PATH_BYTES here is valid as the resulting path is immediately
                 // opened with no modification.
                 const self_exe_path = try bun.selfExePath();

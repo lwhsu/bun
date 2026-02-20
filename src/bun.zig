@@ -1923,6 +1923,7 @@ pub const Stat = if (Environment.isWindows) windows.libuv.uv_stat_t else std.pos
 pub const StatFS = switch (Environment.os) {
     .mac => bun.c.struct_statfs,
     .linux => bun.c.struct_statfs,
+    .freebsd => bun.c.struct_statfs,
     else => windows.libuv.uv_statfs_t,
 };
 

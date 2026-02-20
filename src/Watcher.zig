@@ -141,8 +141,8 @@ pub const max_eviction_count = 8096;
 // this file instead of the platform-specific file.
 // ideally, the constants above can be inlined
 const Platform = switch (Environment.os) {
-    .linux => if (Environment.isFreeBSD) @import("./watcher/KEventWatcher.zig") else @import("./watcher/INotifyWatcher.zig"),
-    .mac => @import("./watcher/KEventWatcher.zig"),
+    .linux => @import("./watcher/INotifyWatcher.zig"),
+    .freebsd, .mac => @import("./watcher/KEventWatcher.zig"),
     .windows => WindowsWatcher,
     .wasm => @compileError("Unsupported platform"),
 };

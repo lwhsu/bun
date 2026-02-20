@@ -38,6 +38,7 @@ pub const Version = struct {
     pub const platform_label = switch (Environment.os) {
         .mac => "darwin",
         .linux => "linux",
+        .freebsd => "freebsd",
         .windows => "windows",
         .wasm => @compileError("Unsupported OS for Bun Upgrade"),
     };

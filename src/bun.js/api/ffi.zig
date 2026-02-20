@@ -1030,6 +1030,7 @@ pub const FFI = struct {
                 name_slice.slice(),
                 switch (Environment.os) {
                     .linux => "so",
+                    .freebsd => "so",
                     .mac => "dylib",
                     .windows => "dll",
                     .wasm => @compileError("TODO"),

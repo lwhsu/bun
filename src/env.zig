@@ -69,6 +69,7 @@ pub inline fn onlyMac() void {
 pub const OperatingSystem = enum {
     mac,
     linux,
+    freebsd,
     windows,
     // wAsM is nOt aN oPeRaTiNg SyStEm
     wasm,
@@ -88,6 +89,8 @@ pub const OperatingSystem = enum {
         .{ "Linux", .linux },
         .{ "linux-gnu", .linux },
         .{ "gnu/linux", .linux },
+        .{ "freebsd", .freebsd },
+        .{ "FreeBSD", .freebsd },
         .{ "wasm", .wasm },
     });
 
@@ -96,6 +99,7 @@ pub const OperatingSystem = enum {
         return switch (self) {
             .mac => "macOS",
             .linux => "Linux",
+            .freebsd => "FreeBSD",
             .windows => "Windows",
             .wasm => "WASM",
         };
@@ -106,6 +110,7 @@ pub const OperatingSystem = enum {
         return switch (self) {
             .mac => "darwin",
             .linux => "linux",
+            .freebsd => "freebsd",
             .windows => "win32",
             .wasm => "wasm",
         };
@@ -115,6 +120,7 @@ pub const OperatingSystem = enum {
         return switch (self) {
             .mac => .macos,
             .linux => .linux,
+            .freebsd => .freebsd,
             .windows => .windows,
             .wasm => unreachable,
         };
@@ -125,6 +131,7 @@ pub const OperatingSystem = enum {
         return switch (self) {
             .mac => "darwin",
             .linux => "linux",
+            .freebsd => "freebsd",
             .windows => "windows",
             .wasm => "wasm",
         };
@@ -136,7 +143,7 @@ pub const os: OperatingSystem = if (isMac)
 else if (isLinux)
     .linux
 else if (isFreeBSD)
-    .linux
+    .freebsd
 else if (isWindows)
     .windows
 else if (isWasm)

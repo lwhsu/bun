@@ -127,7 +127,7 @@ pub fn NewIterator(comptime use_windows_ospath: bool) type {
                 }
             }
         },
-        .linux => struct {
+        .linux, .freebsd => struct {
             dir: FD,
             // The if guard is solely there to prevent compile errors from missing `linux.dirent64`
             // definition when compiling for other OSes. It doesn't do anything when compiling for Linux.
@@ -459,7 +459,7 @@ pub fn NewWrappedIterator(comptime path_type: PathType) type {
                         .end_index = 0,
                         .buf = undefined,
                     },
-                    .linux => IteratorType{
+                    .linux, .freebsd => IteratorType{
                         .dir = dir,
                         .index = 0,
                         .end_index = 0,

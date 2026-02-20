@@ -36,6 +36,7 @@ const CPUTimes = struct {
 pub fn cpus(global: *jsc.JSGlobalObject) bun.JSError!jsc.JSValue {
     const cpusImpl = switch (Environment.os) {
         .linux => cpusImplLinux,
+        .freebsd => cpusImplLinux,
         .mac => cpusImplDarwin,
         .windows => cpusImplWindows,
         .wasm => @compileError("Unsupported OS"),
@@ -457,7 +458,7 @@ pub fn loadavg(global: *jsc.JSGlobalObject) bun.JSError!jsc.JSValue {
 }
 
 pub const networkInterfaces = switch (Environment.os) {
-    .linux, .mac => networkInterfacesPosix,
+    .linux, .freebsd, .mac => networkInterfacesPosix,
     .windows => networkInterfacesWindows,
     .wasm => @compileError("Unsupported OS"),
 };
