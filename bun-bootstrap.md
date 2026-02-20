@@ -2182,3 +2182,61 @@ Executed on `build/freebsd-selfhost-stepC/bun-profile` after applying:
 1. Run focused sub-slices of `spawn.test.ts` to identify first hanging case (filter by test name).
 2. Re-run `shell-hang.test.ts` with per-fixture direct invocations to capture which fixture behavior changed vs baseline.
 3. Capture `procstat -kk` / LLDB stack for the hanging `spawn.test.ts` process before timeout, then map wait point into `src/shell/subproc.zig` or event-loop wake path.
+
+## 2026-02-21 spawn triage follow-up: narrowed failing patterns and discarded async watchOrReap experiment
+
+### Filtered-case narrowing on Step C (`build/freebsd-selfhost-stepC/bun-profile`)
+
+1. `-t "as an array"`
+- result: pass (`3 pass, 0 fail`)
+
+2. `-t "Uint8Array works as stdin"`
+- result: fail/timeouts with dangling processes
+  - `gcTick > spawnSync > Uint8Array works as stdin` timed out (stdout length mismatch before timeout)
+  - `gcTick > spawn > Uint8Array works as stdin` timed out
+
+3. `-t "check exit code from onExit"`
+- consistently stalled with no per-test progress output and timed out under external timeout wrappers.
+
+### Stack + process evidence for `check exit code from onExit` stall
+
+Captured while stalled:
+- logs:
+  - `build/freebsd-bootstrap/logs/spawn-onExit-filter.out`
+  - `build/freebsd-bootstrap/logs/spawn-onExit-filter.err`
+  - `build/freebsd-bootstrap/logs/spawn-onExit-filter.procstat.txt`
+  - `build/freebsd-bootstrap/logs/spawn-onExit-longrun.procstat.txt`
+
+Observed state:
+- parent `bun-profile test ... -t "check exit code from onExit"` sleeping in `kevent`
+- worker threads mostly parked in `umtx`
+- child `bun-profile -e process.exit(0/1)` seen as zombie (`<defunct>`) under parent in one capture
+- indicates exit/reap callback delivery is still unreliable in this high-frequency async spawn loop.
+
+### Control repro check
+
+Minimal single-case async spawn with `stdin/stdout/stderr: "ignore"` + `onExit` callback still passes:
+- `build/freebsd-bootstrap/repro-spawn-onexit-ignore.js`
+- release / stepB / stepC: prints `onExit 0`, exits `rc=0`
+
+Interpretation:
+- broad `onExit` callback path under rapid loop load is the failing shape, not single isolated async spawn.
+
+### Experimental code attempt and outcome
+
+Attempted (not kept):
+- `src/bun.js/api/bun/js_bun_spawn_bindings.zig`
+  - switched async spawn setup from `process.watch()` to `process.watchOrReap()`
+  - set `send_exit_notification` when `watchOrReap()` reported already-exited
+
+Outcome:
+- rebuilt Step C and reran `-t "check exit code from onExit"`
+- still timed out (`rc=124`)
+- experiment reverted from source (no net code change kept).
+
+### Current status after this triage step
+
+- Kept patches remain:
+  - `src/codegen/bundle-modules.ts` (FreeBSD CJS codegen path + cjs wrapper postprocess handling)
+  - `src/js/builtins/shell.ts` (FreeBSD shell startup defer workaround)
+- spawn-suite reliability still incomplete; `onExit` high-rate loop and Uint8Array-stdin cases remain active blockers for broad stability.
