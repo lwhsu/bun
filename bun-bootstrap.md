@@ -1905,3 +1905,51 @@ Planned immediate next steps once `release-bindings` exits:
 3. Cleanup pass candidates after reliability is stable:
 - evaluate removing FreeBSD bindgen-v2 `-e import(...)` workaround.
 - decide whether Step C (`NPM_INSTALL=0`, `CODEGEN_NODE=0`, `BINDGENV2_NODE=0`) is ready to become default FreeBSD configure posture.
+
+## 2026-02-20 follow-up: Step C regression triage and next execution path
+
+### New findings after Step C reliability sweep
+
+- Step C binary (`build/freebsd-selfhost-stepC/bun-profile`) failed targeted tests that pass on the release checkpoint binary:
+  - `test/js/bun/globals.test.js`
+  - `test/js/bun/ini/ini.test.ts`
+- The `ini` failure was concrete and reproducible with:
+  - `Unexpected keyword 'export' in bun:internal-for-testing`
+- Root cause was in generated module post-processing:
+  - `src/codegen/bundle-modules.ts` only removed `export` stubs when output matched `return $\nexport ...`.
+  - On this path, emitted output was `return $;\nexport ...` (semicolon variant), so ESM export syntax leaked into `js/internal-for-testing.js`.
+
+### Fixes prepared in working tree (pending code checkpoint commit)
+
+1. `src/codegen/bundle-modules.ts`
+- broadened export-stub strip regex to accept both `return $` and `return $;`:
+  - from: `/return \$\nexport /`
+  - to: `/return \$;?\s*\nexport /`
+
+2. `cmake/targets/BuildBun.cmake`
+- added a FreeBSD-specific fallback for `BUN_NODE_FALLBACKS_COMMAND` to use:
+  - `node scripts/node-fallbacks-node-runner.mjs`
+- reason: `bun-profile run build-fallbacks` can hang on FreeBSD in self-host Step C (idle in `kevent`, no output).
+
+3. `src/node-fallbacks/build-fallbacks.ts`
+- tested a FreeBSD sequential-build variant (instead of `Promise.all`) as a potential mitigation.
+- result: did not reliably resolve the hang by itself.
+- this change is experimental and should be either dropped or replaced after confirming CMake-level runner fallback behavior.
+
+### Current blocker status
+
+- Confirmed intermittent/long-run blocker in Step C path:
+  - `bun-profile run build-fallbacks` may hang without progress.
+- LLDB/procstat observations on hang runs:
+  - process is alive, not busy-looping, often sleeping in event-loop wait/`kevent`.
+  - no meaningful stdout/stderr progress during hang window.
+
+### Next execution steps (active)
+
+1. Keep docs + evidence up to date (this section).
+2. Rebuild Step C with current CMake FreeBSD node-fallbacks runner exception.
+3. Re-run targeted tests (`globals`, `ini`) on rebuilt Step C binary.
+4. Decide final shape of node-fallbacks handling:
+- if CMake-level runner exception is sufficient, revert experimental `src/node-fallbacks/build-fallbacks.ts` edits.
+- keep the smallest patch set that is stable and reproducible.
+5. If tests pass and build is stable, create a code checkpoint commit and continue broader test matrix.
