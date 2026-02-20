@@ -1684,3 +1684,41 @@ Planned immediate next steps once `release-bindings` exits:
 - Host currently has no `bun` executable in PATH outside this build tree:
   - `env: bun: No such file or directory`
 - Therefore, this failing YAML case is recorded as a next triage item, not yet classified as FreeBSD-port-specific regression vs existing upstream behavior.
+
+## 2026-02-20 follow-up fix: dedicated FreeBSD `O_*` constants in `src/sys.zig`
+
+### New regression found during wider tests
+
+- `fs.readFileSync()` on absolute file paths returned `ENOTDIR`.
+- This caused test failures in:
+  - `test/js/node/process/process-on.test.ts` (`2 fail`)
+
+### Syscall evidence
+
+- `truss` for absolute-path read (before fix) showed:
+  - `openat(..., "/home/.../globals.test.js", O_RDONLY|O_DIRECTORY, ...) => ENOTDIR`
+- This proved `O_DIRECTORY` was being set when opening regular files.
+
+### Root cause
+
+- FreeBSD had been grouped with macOS in `src/sys.zig` `O` constants.
+- Key macOS constant values differ on FreeBSD (notably `O_NOCTTY`, `O_CLOEXEC`, `O_DIRECTORY`, `O_DSYNC`).
+- Result: regular file opens carried incorrect flags.
+
+### Fix
+
+- Split `src/sys.zig` `O` switch into a dedicated `.freebsd` table with real FreeBSD values.
+- Kept unsupported macOS-only flags as `0` in FreeBSD branch (`SYMLINK`, `EVTONLY`, etc.).
+
+### Validation after fix
+
+- Absolute-path file read now works:
+  - `build/freebsd-release-ozigfork/bun -e 'fs.readFileSync(\"/home/.../process-on-fixture.ts\")'` => success (`len 584`)
+- `process-on` suite now passes:
+  - `build/freebsd-release-ozigfork/bun test ./test/js/node/process/process-on.test.ts`
+  - result: `3 pass, 0 fail`
+- Prior smoke checks remain green:
+  - `bun build ...status-check/app.js --outfile .../out.js` => success
+  - `bun test ./build/freebsd-bootstrap/status-check/smoke.test.ts` => `1 pass, 0 fail`
+- `truss` after fix confirms correct file open flags:
+  - `openat(..., "/home/.../globals.test.js", O_RDONLY|O_NOCTTY, ...) = fd`

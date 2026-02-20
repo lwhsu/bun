@@ -64,7 +64,7 @@ fn toPackedO(number: anytype) std.posix.O {
 pub const Mode = std.posix.mode_t;
 
 pub const O = switch (Environment.os) {
-    .mac, .freebsd => struct {
+    .mac => struct {
         pub const PATH = 0x0000;
         pub const RDONLY = 0x0000;
         pub const WRONLY = 0x0001;
@@ -91,6 +91,39 @@ pub const O = switch (Environment.os) {
         pub const NOCTTY = 131072;
         pub const POPUP = 2147483648;
         pub const SYNC = 128;
+
+        pub const toPacked = toPackedO;
+    },
+    .freebsd => struct {
+        pub const PATH = 0x00400000;
+        pub const RDONLY = 0x0000;
+        pub const WRONLY = 0x0001;
+        pub const RDWR = 0x0002;
+        pub const NONBLOCK = 0x0004;
+        pub const APPEND = 0x0008;
+        pub const CREAT = 0x0200;
+        pub const TRUNC = 0x0400;
+        pub const EXCL = 0x0800;
+        pub const SHLOCK = 0x0010;
+        pub const EXLOCK = 0x0020;
+        pub const NOFOLLOW = 0x0100;
+        pub const SYMLINK = 0x0000;
+        pub const EVTONLY = 0x0000;
+        pub const CLOEXEC = 0x00100000;
+        pub const ACCMODE = 0x0003;
+        pub const ALERT = 0x0000;
+        pub const ASYNC = 0x0040;
+        pub const DIRECTORY = 0x00020000;
+        pub const DP_GETRAWENCRYPTED = 0x0000;
+        pub const DP_GETRAWUNENCRYPTED = 0x0000;
+        pub const DSYNC = 0x01000000;
+        pub const FSYNC = SYNC;
+        pub const NOCTTY = 0x00008000;
+        pub const POPUP = 0x0000;
+        pub const SYNC = 0x0080;
+        pub const DIRECT = 0x00010000;
+        pub const TMPFILE = 0x0000;
+        pub const NDELAY = NONBLOCK;
 
         pub const toPacked = toPackedO;
     },
