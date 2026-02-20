@@ -1758,3 +1758,69 @@ Planned immediate next steps once `release-bindings` exits:
 - Full suite:
   - `build/freebsd-release-ozigfork/bun test ./test/js/bun/yaml/yaml.test.ts`
   - result: `195 pass, 4 todo, 0 fail`
+
+## 2026-02-20 status recheck: roadmap adjustment after full health sweep
+
+### What was re-verified now
+
+- Git/worktree state:
+  - branch: `claude/freebsd-bootstrap-checkpoint-20260218`
+  - head: `2af109f5f9dc5f31e17c32663af46731320bbe0c`
+  - working tree: clean.
+- Artifacts still valid:
+  - `build/freebsd-bootstrap/stage0/bun --version` => `0.0.0`
+  - `build/freebsd-release-ozigfork/bun --version` => `1.3.10`
+- Runtime/build/test matrix rerun:
+  - `bun -e 'console.log(1+1)'` => `2`
+  - `bun build build/freebsd-bootstrap/status-check/app.js --outfile build/freebsd-bootstrap/status-check/out-latest.js` => success
+  - `bun test ./test/js/node/process/process-on.test.ts` => `3 pass, 0 fail`
+  - `bun test ./test/js/bun/globals.test.js` => `20 pass, 0 fail`
+  - `bun test ./test/js/bun/yaml/yaml.test.ts` => `195 pass, 4 todo, 0 fail`
+  - matrix log: `build/freebsd-bootstrap/logs/status-matrix-20260220-latest.log`
+
+### Intermittent signal check (`ini.test.ts`)
+
+- One earlier run timed out at 240s while idle in `kevent`.
+- Immediate rerun passed in ~36s.
+- Repeated loop (3 runs) passed consistently:
+  - `build/freebsd-bootstrap/logs/ini-rerun-1.log`
+  - `build/freebsd-bootstrap/logs/ini-rerun-2.log`
+  - `build/freebsd-bootstrap/logs/ini-rerun-3.log`
+- Current classification: non-reproducible/intermittent; keep watching but not a confirmed current blocker.
+
+### Confirmed remaining blocker (still active)
+
+- Host self-host codegen path still hangs when running:
+  - `bun --no-install run src/codegen/bundle-modules.ts --debug=OFF <out-dir>`
+- Behavior:
+  - module bundling output completes (`Bundle modules`, `Postprocesss modules`)
+  - process does not exit and remains sleeping in `kevent` until external kill/timeout.
+- Reproduced on both binaries:
+  - `build/freebsd-release-ozigfork/bun` (manual repro + LLDB attach)
+    - trace log: `build/freebsd-bootstrap/logs/host-selfhost-bundle-modules-hang.lldb`
+  - `build/freebsd-release-ozigfork/bun-profile`
+    - timeout repro: `rc=124`
+    - logs:
+      - `build/freebsd-bootstrap/logs/host-selfhost-bundle-modules-profile.out`
+      - `build/freebsd-bootstrap/logs/host-selfhost-bundle-modules-profile.err`
+
+### Roadmap adjustment (current)
+
+1. Keep current bootstrap path as stable baseline
+- `scripts/bootstrap-freebsd.sh` + stage0 + release build remain the reproducible checkpoint.
+
+2. Prioritize host self-host exit-hang diagnosis
+- focus on `bun run src/codegen/bundle-modules.ts` post-completion hang on FreeBSD.
+- collect symbolized backtrace from `bun-profile` at hang point and map to event-loop/task-drain exit path.
+
+3. Keep Node fallback toggles enabled until blocker is fixed
+- `BUN_FREEBSD_CODEGEN_NODE=1`
+- `BUN_FREEBSD_NPM_INSTALL=1`
+- `BUN_FREEBSD_BINDGENV2_NODE=1`
+- Do not attempt fallback-off as default until step 2 is resolved.
+
+4. Continue reliability gate in parallel
+- keep a small repeated test loop (including `ini.test.ts`) to detect recurrence of intermittent hangs.
+
+5. After step 2 is fixed
+- rerun configure/build with reduced fallback settings incrementally (`BUN_FREEBSD_BINDGENV2_NODE=0`, then `BUN_FREEBSD_CODEGEN_NODE=0`) and revalidate.
