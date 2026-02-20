@@ -2147,3 +2147,38 @@ Step C checks:
 1. Rebuild and rerun a broader Step C reliability sweep (additional Bun+Node test slices) to confirm no regressions from the shell startup defer.
 2. Decide whether FreeBSD default CMake posture can move to self-host codegen (`BUN_FREEBSD_CODEGEN_NODE=0`, `BUN_FREEBSD_BINDGENV2_NODE=0`) with current patch set.
 3. Start replacing the JS-level FreeBSD shell workaround with a native wake-order fix in event-loop/shell subprocess path, then remove the `Bun.sleep(0)` defer.
+
+## 2026-02-21 post-fix sweep: shell/spawn reliability check after FreeBSD shell defer workaround
+
+### Scope
+
+Executed on `build/freebsd-selfhost-stepC/bun-profile` after applying:
+- FreeBSD CJS codegen path + cjs-wrapper postprocess unwrapping
+- FreeBSD shell startup defer (`Bun.sleep(0)` before `interp.run()`)
+
+### Results
+
+1. Passed
+- `timeout 180 build/freebsd-selfhost-stepC/bun-profile test ./test/js/node/process/process-on.test.ts`
+  - result: `3 pass, 0 fail`, `rc=0`
+- `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/shell/exec.test.ts`
+  - result: `19 pass, 0 fail`, `rc=0`
+
+2. Still failing / unstable
+- `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/shell/shell-hang.test.ts`
+  - result: `0 pass, 6 fail`, each case timed out at `700ms`, `rc=1`
+- `timeout 300 build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/spawn/spawn.test.ts`
+  - produced only early output (`gcTick > spawnSync > as an array`) then no progress
+  - timeout killed run at 300s: `rc=124`
+
+### Interpretation
+
+- The immediate `cat` deadlock that blocked `ini.test.ts` is resolved by the current workaround.
+- Broader shell/spawn suites still show timeouts on FreeBSD and need separate triage.
+- Current status should be treated as: **targeted unblock achieved**, but **not yet broad shell/spawn stability-complete**.
+
+### Next triage steps
+
+1. Run focused sub-slices of `spawn.test.ts` to identify first hanging case (filter by test name).
+2. Re-run `shell-hang.test.ts` with per-fixture direct invocations to capture which fixture behavior changed vs baseline.
+3. Capture `procstat -kk` / LLDB stack for the hanging `spawn.test.ts` process before timeout, then map wait point into `src/shell/subproc.zig` or event-loop wake path.
