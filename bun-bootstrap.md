@@ -1657,3 +1657,30 @@ Planned immediate next steps once `release-bindings` exits:
 - Two additional in-repo test files pass:
   - `build/freebsd-release-ozigfork/bun test ./test/js/node/buffer-utf16.test.ts`
   - `build/freebsd-release-ozigfork/bun test ./test/js/bun/namespace-prototype-pollution.test.ts`
+
+## 2026-02-20 additional test sweep (post-unblock)
+
+### Passed files
+
+- `build/freebsd-release-ozigfork/bun test ./test/js/bun/globals.test.js`
+  - result: `20 pass, 0 fail`
+- `build/freebsd-release-ozigfork/bun test ./test/js/bun/ini/ini.test.ts`
+  - result: `52 pass, 0 fail`
+
+### Current failing case
+
+- `build/freebsd-release-ozigfork/bun test ./test/js/bun/yaml/yaml.test.ts`
+  - summary: `194 pass, 4 todo, 1 fail`
+  - failing case:
+    - `Bun.YAML > stringify > edge cases > handles stack overflow protection`
+  - failure mode:
+    - expected throw substring `"Maximum call stack size exceeded"`
+    - function did not throw (returned YAML string for deeply nested object)
+
+### Baseline comparison note
+
+- Attempted to compare this case against system Bun using:
+  - `USE_SYSTEM_BUN=1 bun test ...`
+- Host currently has no `bun` executable in PATH outside this build tree:
+  - `env: bun: No such file or directory`
+- Therefore, this failing YAML case is recorded as a next triage item, not yet classified as FreeBSD-port-specific regression vs existing upstream behavior.
