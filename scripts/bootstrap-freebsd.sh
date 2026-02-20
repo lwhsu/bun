@@ -37,6 +37,7 @@ if [[ -z "${FINAL_TARGET}" ]]; then
   fi
 fi
 CURRENT_ZIG="${BUN_FREEBSD_CURRENT_ZIG:-zig}"
+CURRENT_ZIG_LIB_DIR="${BUN_FREEBSD_CURRENT_ZIG_LIB_DIR:-}"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -439,6 +440,24 @@ if [[ -z "${CURRENT_ZIG_BIN}" ]]; then
   exit 1
 fi
 
+resolve_current_zig_lib_dir() {
+  local zig_bin="$1"
+  local inferred
+
+  if [[ -n "${CURRENT_ZIG_LIB_DIR}" ]]; then
+    echo "${CURRENT_ZIG_LIB_DIR}"
+    return 0
+  fi
+
+  inferred="$(cd "$(dirname "${zig_bin}")/../../.." && pwd)/lib"
+  if [[ -f "${inferred}/std/std.zig" ]]; then
+    echo "${inferred}"
+    return 0
+  fi
+
+  echo ""
+}
+
 user_supplied_current_webkit_path() {
   for arg in "$@"; do
     case "${arg}" in
@@ -580,6 +599,37 @@ fi
 
 echo "[bootstrap] stage0 ready: ${STAGE0_BIN}"
 "${STAGE0_BIN}" --version
+
+CURRENT_ZIG_LIB_DIR="$(resolve_current_zig_lib_dir "${CURRENT_ZIG_BIN}")"
+if [[ -n "${CURRENT_ZIG_LIB_DIR}" ]]; then
+  if [[ ! -f "${CURRENT_ZIG_LIB_DIR}/std/std.zig" ]]; then
+    echo "error: invalid current zig lib dir: ${CURRENT_ZIG_LIB_DIR}" >&2
+    exit 1
+  fi
+  CURRENT_ZIG_WRAPPER="${SHIM_BIN_DIR}/zig-current"
+  cat >"${CURRENT_ZIG_WRAPPER}" <<EOF2
+#!/usr/bin/env sh
+set -eu
+zig_bin="${CURRENT_ZIG_BIN}"
+zig_lib="${CURRENT_ZIG_LIB_DIR}"
+cmd="\${1:-}"
+if [ -z "\${cmd}" ]; then
+  exec "\${zig_bin}"
+fi
+shift
+case "\${cmd}" in
+  build|build-exe|build-lib|build-obj|test|test-obj|run)
+    exec "\${zig_bin}" "\${cmd}" --zig-lib-dir "\${zig_lib}" "\$@"
+    ;;
+  *)
+    exec "\${zig_bin}" "\${cmd}" "\$@"
+    ;;
+esac
+EOF2
+  chmod 0755 "${CURRENT_ZIG_WRAPPER}"
+  CURRENT_ZIG_BIN="${CURRENT_ZIG_WRAPPER}"
+  echo "[bootstrap] current zig wrapper enabled with --zig-lib-dir=${CURRENT_ZIG_LIB_DIR}"
+fi
 
 if ! user_supplied_current_webkit_path "$@"; then
   ensure_webkit_source_checkout "${CURRENT_WEBKIT_SOURCE}" "${CURRENT_WEBKIT_COMMIT}" "current"

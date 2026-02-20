@@ -1465,3 +1465,32 @@ Planned immediate next steps once `release-bindings` exits:
   - legacy stage0 path from source
   - current-tree build using forked Zig wrapper
 - Remaining work is port-hardening and cleanup (remove wrapper hacks where possible, upstreamable FreeBSD conditionals, broader smoke tests).
+
+## 2026-02-20 follow-up: bootstrap script now supports forked zig lib dir directly
+
+### Problem
+
+- The successful run used an ad-hoc wrapper script under `build/` to inject:
+  - `--zig-lib-dir /home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/lib`
+- That wrapper was not part of repo-tracked bootstrap flow.
+
+### Change
+
+- Updated `scripts/bootstrap-freebsd.sh`:
+  - added `BUN_FREEBSD_CURRENT_ZIG_LIB_DIR` support
+  - if set (or inferred from `.../stage3/bin/zig`), script generates `build/freebsd-bootstrap/shim-bin/zig-current` and uses it as `ZIG_EXECUTABLE` for CMake.
+  - wrapper applies `--zig-lib-dir` for compile/test/run subcommands.
+
+### Verification
+
+- Re-ran bootstrap using direct forked zig binary (no manual wrapper):
+  - `BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd-release/stage3/bin/zig`
+  - `BUN_FREEBSD_CURRENT_ZIG_LIB_DIR=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/lib`
+  - `./scripts/bootstrap-freebsd.sh -DLLVM_ZIG_CODEGEN_THREADS=1`
+- Evidence in log:
+  - `build/freebsd-bootstrap/logs/bootstrap-freebsd-release-directfork-run-20260220-165007.log`
+  - contains:
+    - `[bootstrap] current zig wrapper enabled with --zig-lib-dir=.../oven-zig/lib`
+    - `[bootstrap] complete`
+- Incremental rerun timing:
+  - `17.56 real` (cached Zig obj step).
