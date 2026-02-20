@@ -1953,3 +1953,59 @@ Planned immediate next steps once `release-bindings` exits:
 - if CMake-level runner exception is sufficient, revert experimental `src/node-fallbacks/build-fallbacks.ts` edits.
 - keep the smallest patch set that is stable and reproducible.
 5. If tests pass and build is stable, create a code checkpoint commit and continue broader test matrix.
+
+## 2026-02-20 follow-up: Step B/Step C self-host codegen regression isolation
+
+### Checkpoint actions executed
+
+1. Rebuilt Step C and reran targeted tests
+- `build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/globals.test.js` passes.
+- `build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/ini/ini.test.ts` no longer throws `Unexpected keyword 'export'`, but fails with repeated 5s timeouts in env-var cases.
+
+2. Rebuilt Step B with current self-host codegen path
+- Step B moved from the old parse error (`Unexpected keyword 'export'`) to the same timeout failure pattern as Step C after rebuild.
+- This isolates the new blocker away from `BUN_FREEBSD_NPM_INSTALL`; Step B (`NPM_INSTALL=1`) and Step C (`NPM_INSTALL=0`) both show it.
+
+3. Added deterministic repro script and validated behavior split
+- Repro file: `build/freebsd-bootstrap/repro-ini-env.js`
+- Release baseline (`build/freebsd-release-ozigfork/bun-profile`) result:
+  - prints parsed JSON and exits `rc=0`.
+- Self-host binaries (`build/freebsd-selfhost-stepB/bun-profile`, `build/freebsd-selfhost-stepC/bun-profile`) result:
+  - prints child code banner, then hangs until timeout (`rc=124`).
+
+### Stack/behavior evidence (self-host hang)
+
+- Parent and child bun processes are both alive, sleeping in `kevent`, with no spawned `cat` subprocess visible in child during hang.
+- LLDB backtrace on hanging child (Step B) shows main thread blocked at:
+  - `event_loop.waitForPromise`
+  - `us_loop_run_bun_tick`
+  - `kevent64`/`kevent`
+- This matches previous hang signatures in self-host codegen investigations.
+
+### Experiment attempted and reverted
+
+- Hypothesis: align self-host module output shape with node-runner path.
+- Change attempted in `src/codegen/bundle-modules.ts`:
+  - add `--format cjs` to the internal `bun build` CLI invocation.
+- Result:
+  - timeout hang disappeared, but runtime semantics regressed:
+    - `require("bun:internal-for-testing")` became undefined in child eval repro.
+    - filtered ini test run hit a Bun crash (segmentation fault) in this configuration.
+- Decision:
+  - reverted `--format cjs` experiment.
+
+### Current status
+
+- Active blocker remains: self-host JavaScript module codegen path (`BUN_FREEBSD_CODEGEN_NODE=0`) produces runtime behavior divergence vs node-codegen baseline.
+- Current narrow fixes retained in working tree:
+  - `src/codegen/bundle-modules.ts`: targeted export-stub semicolon compatibility for `internal-for-testing.js`.
+  - `cmake/targets/BuildBun.cmake`: FreeBSD node-fallbacks command exception + react-refresh esbuild path.
+
+### Next steps (updated)
+
+1. Identify the minimal module/output delta that causes nested `Bun.$ ... .json()` child hang under self-host codegen.
+2. Keep repro-driven loop with `build/freebsd-bootstrap/repro-ini-env.js` as primary gate.
+3. Once self-host parity is restored, rerun:
+- `build/freebsd-selfhost-stepB/bun-profile test ./test/js/bun/ini/ini.test.ts -t "replaces multiple defined variables"`
+- `build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/ini/ini.test.ts`
+4. If still blocked, keep FreeBSD default on node codegen fallback path and continue runtime/OS porting work in parallel while self-host codegen bug is isolated.

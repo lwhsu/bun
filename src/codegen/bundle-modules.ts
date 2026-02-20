@@ -294,6 +294,7 @@ for (const entrypoint of bundledEntryPoints) {
   let captured = `(function (){${output.replace("// @bun\n", "").trim()}})`;
   let usesDebug = output.includes("$debug_log");
   let usesAssert = output.includes("$assert");
+  const exportStubPattern = file_path === "internal-for-testing.js" ? /return \$;?\s*\nexport / : /return \$\nexport /;
   captured =
     captured
       .replace(/\$\$EXPORT\$\$\((.*)\).\$\$EXPORT_END\$\$;/, "return $1;")
@@ -303,7 +304,8 @@ for (const entrypoint of bundledEntryPoints) {
         throw new Error(`Builtin Bundler: do not use import.meta.require() (in ${file_path}))`);
       })
       .replace(/module\.exports\s*=/g, "$ = module.exports =")
-      .replace(/return \$\nexport /, "return")
+      // Keep the historical rewrite for all modules. internal-for-testing may emit a semicolon variant.
+      .replace(exportStubPattern, "return")
       .replace(/__intrinsic__/g, "@")
       .replace(/__no_intrinsic__/g, "") + "\n";
   captured = captured.replace(

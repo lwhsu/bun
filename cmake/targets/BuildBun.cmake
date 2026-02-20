@@ -196,6 +196,13 @@ if(BUN_FREEBSD_CODEGEN_NODE)
     node
     ${CWD}/scripts/node-fallbacks-node-runner.mjs
   )
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "FreeBSD")
+  # FreeBSD host-bun self-host path can hang in `run build-fallbacks` (no output, idle in kevent).
+  # Keep this one generator on the Node runner while other codegen paths remain self-hosted.
+  set(BUN_NODE_FALLBACKS_COMMAND
+    node
+    ${CWD}/scripts/node-fallbacks-node-runner.mjs
+  )
 endif()
 
 register_command(
