@@ -1,0 +1,29 @@
+--- a/src/bun.js/api/bun/process.zig
++++ b/src/bun.js/api/bun/process.zig
+@@ -1207,7 +1207,14 @@ pub fn spawnProcessPosix(
+     var attr = try PosixSpawn.Attr.init();
+     defer attr.deinit();
+ 
+-    var flags: i32 = bun.C.POSIX_SPAWN_SETSIGDEF | bun.C.POSIX_SPAWN_SETSIGMASK;
++    const POSIX_SPAWN_SETSIGDEF = if (comptime Environment.isFreeBSD) 0x10 else bun.C.POSIX_SPAWN_SETSIGDEF;
++    const POSIX_SPAWN_SETSIGMASK = if (comptime Environment.isFreeBSD) 0x20 else bun.C.POSIX_SPAWN_SETSIGMASK;
++    const POSIX_SPAWN_SETSID = if (comptime Environment.isFreeBSD)
++        0
++    else
++        bun.C.POSIX_SPAWN_SETSID;
++
++    var flags: i32 = POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK;
+ 
+     if (comptime Environment.isMac) {
+         flags |= bun.C.POSIX_SPAWN_CLOEXEC_DEFAULT;
+@@ -1221,8 +1228,8 @@ pub fn spawnProcessPosix(
+         }
+     }
+ 
+-    if (options.detached) {
+-        flags |= bun.C.POSIX_SPAWN_SETSID;
++    if (options.detached and POSIX_SPAWN_SETSID != 0) {
++        flags |= POSIX_SPAWN_SETSID;
+     }
+ 
+     if (options.cwd.len > 0) {

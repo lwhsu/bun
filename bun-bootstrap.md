@@ -1311,3 +1311,104 @@ Planned immediate next steps once `release-bindings` exits:
   - repro #2 fails as expected (`exit=132`)
   - repro #3 fails as expected (`exit=132`) with captured core+bt
 - This keeps the crash triage entrypoints reproducible while we continue deeper runtime/JSC isolation.
+
+## 2026-02-20 stage0 `posix_spawn` EPERM root-cause isolation
+
+### What was reproduced
+
+- Stage0 runtime (`build/freebsd-bootstrap/stage0/bun`, `0.0.0`) still fails on subprocess spawn:
+  - repro:
+    - `build/freebsd-bootstrap/stage0/bun --no-install -e 'Bun.spawnSync({cmd:["/usr/bin/true"],stdio:["ignore","ignore","ignore"]})'`
+  - result:
+    - `EPERM: Operation not permitted`
+    - `syscall: "posix_spawn"`
+
+### Syscall-level evidence
+
+- `truss` capture:
+  - `build/freebsd-bootstrap/logs/stage0-spawn-node.truss`
+- failing child path:
+  - parent performs `rfork(RFSPAWN)`
+  - child immediately hits:
+    - `sched_setscheduler(0,0,{0}) = EPERM`
+  - child exits `127`, surfaced as `posix_spawn` failure in Bun.
+
+### Root cause found in legacy source
+
+- In legacy tree:
+  - `build/freebsd-bootstrap/legacy-worktree/src/env.zig`
+    - maps FreeBSD host OS into `Environment.os = .linux`
+  - `build/freebsd-bootstrap/legacy-worktree/src/c.zig`
+    - imports Linux C constants for this path
+  - `build/freebsd-bootstrap/legacy-worktree/src/bun.js/api/bun/process.zig`
+    - builds spawn flags from `bun.C.POSIX_SPAWN_SETSIGDEF|SETSIGMASK`
+- On FreeBSD libc, actual flag values differ from Linux:
+  - measured via local C probe:
+    - `POSIX_SPAWN_SETSIGDEF=0x10`
+    - `POSIX_SPAWN_SETSIGMASK=0x20`
+    - `POSIX_SPAWN_SETSCHEDPARAM=0x04`
+    - `POSIX_SPAWN_SETSCHEDULER=0x08`
+- Therefore legacy Linux-style `0x04|0x08` is interpreted by FreeBSD as scheduler flags, causing `sched_setscheduler(...)=EPERM`.
+
+### Patch applied (legacy worktree)
+
+- File patched:
+  - `build/freebsd-bootstrap/legacy-worktree/src/bun.js/api/bun/process.zig`
+- Change:
+  - FreeBSD-specific `posix_spawn` signal flag constants (`0x10/0x20`) used instead of Linux-derived values.
+  - `SETSID` application guarded so unsupported/incorrect value is not forced on FreeBSD.
+- Bootstrap automation updated to carry this fix:
+  - `scripts/patches/freebsd-stage0-spawn-flags.patch`
+  - `scripts/bootstrap-freebsd.sh` now applies this patch to the legacy worktree during cold-start setup.
+
+### Rebuild status after patch
+
+- `gmake -j20 build-obj` in legacy worktree completed and produced updated `bun.o`.
+- Relink attempts (`bun-link-lld-release`) are currently blocked by legacy WebKit/archive mismatch in this worktree state (large unresolved JSC/simdutf symbol sets), so patched stage0 binary was not re-emitted yet from this path.
+
+### Runtime shim experiment (diagnostic only)
+
+- A temporary `LD_PRELOAD` shim was used to remap spawn flags at runtime (`0x04/0x08 -> 0x10/0x20`) for stage0.
+- This removes the immediate `EPERM` condition but exposes additional stage0 runtime instability (hang/crash after spawn), confirming `EPERM` was one concrete blocker but not the only one.
+
+### Current conclusion
+
+- The stage0 `posix_spawn` `EPERM` root cause is identified with syscall and source-level evidence.
+- A source patch exists in legacy worktree, but final validation requires relinking stage0 in a fully ABI-matched legacy build context.
+
+## 2026-02-20 rerun check: long `zig build-obj` is not a deadlock
+
+### What was checked
+
+- Verified no stale build processes remained after the interrupted run:
+  - `ps -axo ... | rg 'bootstrap-freebsd.sh|ninja bun|zig build-obj'` returned no active prior run.
+- Re-ran:
+  - `BUN_FREEBSD_BUILD_DIR=... BUN_FREEBSD_CMAKE_BUILD_TYPE=Release BUN_FREEBSD_BUILD_TARGET=bun ./scripts/bootstrap-freebsd.sh`
+- Observed process tree during `[0/2] Building src/*.zig ...`:
+  - `ninja` thread(s) sleeping in `select` (expected supervisor behavior)
+  - one active `zig build-obj` worker at ~99% CPU
+  - many parked threads in `_umtx_op` waits (`procstat -kk`) while one worker thread runs
+
+### Conclusion from rerun
+
+- The previous "hang" signature from `procstat -kk` is not a hard deadlock by itself.
+- On this host, the compile enters a pathological long-runtime regime (tens of minutes) while remaining CPU-active.
+
+### Additional experiment
+
+- Made `LLVM_ZIG_CODEGEN_THREADS` overrideable in `cmake/targets/BuildBun.cmake`.
+- Re-ran with:
+  - `./scripts/bootstrap-freebsd.sh -DLLVM_ZIG_CODEGEN_THREADS=0`
+- Result:
+  - same long-runtime behavior; no meaningful improvement.
+
+### Zig version cross-check
+
+- Switched to Zig 0.14.0 and reran once:
+  - fails quickly with `build.zig` API incompatibilities (`std.array_list` missing, format string mismatch).
+- Restored Zig 0.15.2 after the test.
+
+### Current status
+
+- Stage0 binary remains usable for basic execution and `Bun.spawnSync` smoke.
+- Full current-tree build is still blocked by pathological `zig build-obj` duration on Zig 0.15.2 (not a confirmed deadlock, but effectively a throughput blocker).

@@ -44,11 +44,13 @@ else()
   set(CONFIGURE_DEPENDS "")
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
-  # Avoid a reproducible Zig compiler crash during codegen on FreeBSD.
-  set(LLVM_ZIG_CODEGEN_THREADS 1)
-else()
-  set(LLVM_ZIG_CODEGEN_THREADS 0)
+if(NOT DEFINED LLVM_ZIG_CODEGEN_THREADS)
+  if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    # Default to single-threaded codegen on FreeBSD; callers can override.
+    set(LLVM_ZIG_CODEGEN_THREADS 1)
+  else()
+    set(LLVM_ZIG_CODEGEN_THREADS 0)
+  endif()
 endif()
 
 # --- Dependencies ---

@@ -1,0 +1,16 @@
+--- a/src/bun.js/api/bun/process.zig
++++ b/src/bun.js/api/bun/process.zig
+@@ -297,6 +297,13 @@ pub const Process = struct {
+             return .{ .result = true };
+         }
+ 
++        // FreeBSD stage0 currently builds through the legacy Linux event-loop path.
++        // For synchronous subprocesses, bypass watcher registration and block in wait4().
++        if (comptime Environment.isFreeBSD) {
++            this.wait(true);
++            return .{ .result = this.hasExited() };
++        }
++
+         switch (this.watch()) {
+             .err => |err| {
+                 if (comptime Environment.isPosix) {

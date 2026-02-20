@@ -781,7 +781,12 @@ pub fn mkdir(file_path: [:0]const u8, flags: mode_t) Maybe(void) {
     return switch (Environment.os) {
         .mac => Maybe(void).errnoSysP(syscall.mkdir(file_path, flags), .mkdir, file_path) orelse .success,
 
-        .linux => Maybe(void).errnoSysP(syscall.mkdir(file_path, flags), .mkdir, file_path) orelse .success,
+        .linux => {
+            if (comptime Environment.isFreeBSD) {
+                return Maybe(void).errnoSysP(c.mkdir(file_path, flags), .mkdir, file_path) orelse .success;
+            }
+            return Maybe(void).errnoSysP(syscall.mkdir(file_path, flags), .mkdir, file_path) orelse .success;
+        },
 
         .windows => {
             const wbuf = bun.w_path_buffer_pool.get();
@@ -809,6 +814,15 @@ pub fn mkdirA(file_path: []const u8, flags: mode_t) Maybe(void) {
 
     if (comptime Environment.isLinux) {
         return Maybe(void).errnoSysP(linux.mkdir(&(std.posix.toPosixPath(file_path) catch return Maybe(void){
+            .err = .{
+                .errno = @intFromEnum(E.NOMEM),
+                .syscall = .open,
+            },
+        }), flags), .mkdir, file_path) orelse .success;
+    }
+
+    if (comptime Environment.isFreeBSD) {
+        return Maybe(void).errnoSysP(c.mkdir(&(std.posix.toPosixPath(file_path) catch return Maybe(void){
             .err = .{
                 .errno = @intFromEnum(E.NOMEM),
                 .syscall = .open,

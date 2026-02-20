@@ -266,6 +266,27 @@ patch_legacy_worktree_for_freebsd() {
     apply_patch_if_needed "${env_zig_patch}" "FreeBSD legacy env.zig compatibility patch"
   fi
 
+  local process_zig_file="${LEGACY_WORKTREE}/src/bun.js/api/bun/process.zig"
+  local spawn_flags_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-spawn-flags.patch"
+  if [[ -f "${process_zig_file}" ]] && grep -q "var flags: i32 = bun.C.POSIX_SPAWN_SETSIGDEF | bun.C.POSIX_SPAWN_SETSIGMASK;" "${process_zig_file}"; then
+    if [[ ! -f "${spawn_flags_patch}" ]]; then
+      echo "error: missing patch file: ${spawn_flags_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${spawn_flags_patch}" "FreeBSD legacy posix_spawn flag compatibility patch"
+  fi
+
+  local sync_watch_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-sync-watch.patch"
+  if [[ -f "${process_zig_file}" ]] \
+    && grep -q "pub fn watchOrReap(this: \\*Process) JSC.Maybe(bool)" "${process_zig_file}" \
+    && ! grep -q "FreeBSD stage0 currently builds through the legacy Linux event-loop path." "${process_zig_file}"; then
+    if [[ ! -f "${sync_watch_patch}" ]]; then
+      echo "error: missing patch file: ${sync_watch_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${sync_watch_patch}" "FreeBSD legacy sync subprocess wait compatibility patch"
+  fi
+
   local prim_file="${LEGACY_WORKTREE}/src/deps/mimalloc/src/prim/unix/prim.c"
   if [[ -f "${prim_file}" ]] && grep -q 'try_alignment, hint);' "${prim_file}"; then
     # FreeBSD/MAP_ALIGNED path in this historical tree logs `hint` before declaration.

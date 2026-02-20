@@ -9,9 +9,9 @@
 // supported macros that aren't json value -> json value. Otherwise, I'd use a real JS parser/ast
 // library, instead of RegExp hacks.
 import fs from "fs";
-import { mkdir, writeFile } from "fs/promises";
 import { builtinModules } from "node:module";
 import path from "path";
+import { spawnSync } from "node:child_process";
 import jsclasses from "./../bun.js/bindings/js_classes";
 import { sliceSourceCode } from "./builtin-parser";
 import { createAssertClientJS, createLogClientJS } from "./client-js";
@@ -71,6 +71,38 @@ globalThis.requireTransformer = requireTransformer;
 // that is also the reason for using `retry` when theoretically writing a file the first time
 // should actually write the file.
 const verbose = Bun.env.VERBOSE ? console.log : () => {};
+const isFreeBSD = process.platform === "freebsd";
+
+function ensureDirSync(dirPath: string) {
+  fs.mkdirSync(dirPath, { recursive: true });
+  if (fs.existsSync(dirPath)) return;
+  if (isFreeBSD) {
+    const fallback = spawnSync("/bin/mkdir", ["-p", dirPath], {
+      stdio: ["ignore", "ignore", "pipe"],
+      encoding: "utf8",
+    });
+    if (fallback.status === 0 && fs.existsSync(dirPath)) return;
+    throw new Error(`mkdir fallback failed for ${dirPath}: ${fallback.stderr || fallback.error || "unknown error"}`);
+  }
+  throw new Error(`directory did not exist after mkdir: ${dirPath}`);
+}
+
+function writeFileCompatSync(filePath: string, contents: string) {
+  try {
+    fs.writeFileSync(filePath, contents);
+    return;
+  } catch (err) {
+    if (!isFreeBSD) throw err;
+    const fallback = spawnSync("/usr/bin/tee", [filePath], {
+      input: contents,
+      stdio: ["pipe", "ignore", "pipe"],
+      encoding: "utf8",
+    });
+    if (fallback.status === 0) return;
+    throw new Error(`write fallback failed for ${filePath}: ${fallback.stderr || fallback.error || "unknown error"}`);
+  }
+}
+
 async function retry(n, fn) {
   var err;
   while (n > 0) {
@@ -179,7 +211,7 @@ ${processed.result.slice(1).trim()}
     }
     const outputPath = path.join(TMP_DIR, moduleList[i].slice(0, -3) + ".ts");
 
-    await mkdir(path.dirname(outputPath), { recursive: true });
+    ensureDirSync(path.dirname(outputPath));
     if (!fs.existsSync(path.dirname(outputPath))) {
       verbose("directory did not exist after mkdir twice:", path.dirname(outputPath));
     }
@@ -187,7 +219,7 @@ ${processed.result.slice(1).trim()}
     fileToTranspile = "// @ts-nocheck\n" + fileToTranspile;
 
     try {
-      await writeFile(outputPath, fileToTranspile);
+      writeFileCompatSync(outputPath, fileToTranspile);
       if (!fs.existsSync(outputPath)) {
         verbose("file did not exist after write:", outputPath);
         throw new Error("file did not exist after write: " + outputPath);
@@ -195,8 +227,8 @@ ${processed.result.slice(1).trim()}
       verbose("wrote to", outputPath, "successfully");
     } catch {
       await retry(3, async () => {
-        await mkdir(path.dirname(outputPath), { recursive: true });
-        await writeFile(outputPath, fileToTranspile);
+        ensureDirSync(path.dirname(outputPath));
+        writeFileCompatSync(outputPath, fileToTranspile);
         if (!fs.existsSync(outputPath)) {
           verbose("file did not exist after write:", outputPath);
           throw new Error("file did not exist after write: " + outputPath);
@@ -242,12 +274,12 @@ const out = Bun.spawnSync({
   cmd: config_cli,
   cwd: process.cwd(),
   env: process.env,
-  stdio: ["pipe", "pipe", "pipe"],
+  stdio: ["ignore", "inherit", "inherit"],
 });
 trace("bun.build.cli:done", { exitCode: out.exitCode });
 if (out.exitCode !== 0) {
-  console.error(out.stderr.toString());
-  process.exit(out.exitCode);
+  console.error("bundle-modules.ts: child bun build failed");
+  process.exit(out.exitCode ?? 1);
 }
 
 mark("Bundle modules");
