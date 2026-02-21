@@ -37,17 +37,30 @@
 #include <stdint.h>
 #define kevent64_s kevent
 #ifndef KEVENT_FLAG_ERROR_EVENTS
-#define KEVENT_FLAG_ERROR_EVENTS 0
+#define KEVENT_FLAG_ERROR_EVENTS 0x1u
 #endif
 #ifndef KEVENT_FLAG_IMMEDIATE
-#define KEVENT_FLAG_IMMEDIATE 0
+#define KEVENT_FLAG_IMMEDIATE 0x2u
 #endif
 #define EV_SET64(kevp, a, b, c, d, e, f, g, h) \
     EV_SET((kevp), (a), (b), (c), (d), (e), ((void *)(uintptr_t)(f)))
 static inline int kevent64(int kq, const struct kevent64_s *changelist, int nchanges,
                            struct kevent64_s *eventlist, int nevents, unsigned int flags,
                            const struct timespec *timeout) {
-    (void)flags;
+    /* On Darwin, KEVENT_FLAG_ERROR_EVENTS restricts returned events to
+     * changelist errors. FreeBSD kevent(2) has no global equivalent and can
+     * otherwise consume unrelated ready events here (which starves the main
+     * dispatch loop). For these registration paths, we only need syscall
+     * success/failure, so avoid harvesting eventlist entries entirely. */
+    if (flags & KEVENT_FLAG_ERROR_EVENTS) {
+        return kevent(
+            kq,
+            (const struct kevent *)changelist,
+            nchanges,
+            NULL,
+            0,
+            timeout);
+    }
     return kevent(
         kq,
         (const struct kevent *)changelist,

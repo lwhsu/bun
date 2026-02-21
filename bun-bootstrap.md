@@ -2541,3 +2541,64 @@ Applied in `src/bun.js/api/bun/process.zig`:
 
 1. keep this checkpoint committed for traceability
 2. investigate the sync path in `Subprocess`/`Readable`/`Writable` event handling and blocking edges (stdin writer vs stdout reader progress guarantees)
+
+## 2026-02-21 checkpoint: FreeBSD stdin deadlock root cause fixed (kqueue changelist side-drain)
+
+### Root cause
+
+The FreeBSD `kevent64` compatibility path in `bun-usockets` was draining unrelated ready events during changelist-only registration calls.
+
+- In `packages/bun-usockets/src/internal/eventing/epoll_kqueue.h`, FreeBSD had:
+  - `KEVENT_FLAG_ERROR_EVENTS` defined as `0`
+  - `kevent64(...)` shim forwarding changelist calls with nonzero `eventlist/nevents`
+- In `packages/bun-usockets/src/eventing/epoll_kqueue.c`, many registration paths call `kevent64(..., KEVENT_FLAG_ERROR_EVENTS, ...)` expecting Darwin semantics (error-only receipts).
+- On FreeBSD this effectively became plain `kevent(...)`, which could return and consume unrelated readiness events (e.g. stdin `EVFILT_READ`) before the main dispatch loop saw them.
+
+Observed evidence in trace:
+- stdin read event appeared as the return event of a timer `EV_ADD|EV_ONESHOT` call, then stdin consumer never read.
+
+### Fix
+
+Updated `packages/bun-usockets/src/internal/eventing/epoll_kqueue.h`:
+
+1. FreeBSD sentinel flags are now nonzero:
+- `KEVENT_FLAG_ERROR_EVENTS = 0x1u`
+- `KEVENT_FLAG_IMMEDIATE = 0x2u`
+
+2. `kevent64(...)` FreeBSD shim now special-cases `KEVENT_FLAG_ERROR_EVENTS`:
+- performs changelist syscall with `eventlist = NULL`, `nevents = 0`
+- prevents side-draining unrelated ready events from the queue
+
+### Validation (post-fix)
+
+Direct runtime repros now pass:
+
+- `printf 'abc' | ./build/freebsd-selfhost-stepC/bun-profile -e 'const r=Bun.stdin.stream().getReader(); ...'`
+  - output:
+    - `READ false abc`
+    - `READ2 true 0`
+
+- `printf 'abc' | ./build/freebsd-selfhost-stepC/bun-profile -e 'process.stdin.pipe(process.stdout)'`
+  - output: `abc`
+
+Spawn repros now pass:
+
+- `REPRO_COUNT=40 ./build/freebsd-selfhost-stepC/bun-profile build/freebsd-bootstrap/repro-spawn-onexit-loop.js`
+  - `repro done`
+- `REPRO_COUNT=100 ./build/freebsd-selfhost-stepC/bun-profile build/freebsd-bootstrap/repro-spawn-onexit-loop.js`
+  - `repro done`
+- `./build/freebsd-selfhost-stepC/bun-profile build/freebsd-bootstrap/repro-spawn-uint8-stdin.js`
+  - sync length 250000 and async file length 250000, `repro ... done`
+
+Targeted tests now pass:
+
+- `timeout 300 ./build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/spawn/spawn.test.ts -t "Uint8Array works as stdin"`
+  - 2 pass, 0 fail
+- `timeout 300 ./build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/spawn/spawn.test.ts -t "check exit code from onExit"`
+  - 1 pass, 0 fail
+
+### Next
+
+1. Keep this as a checkpoint commit.
+2. Run a broader FreeBSD spawn subset to catch regressions around kqueue/timer interactions.
+3. Continue stage0/bootstrap flow using this corrected runtime baseline.
