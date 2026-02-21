@@ -2602,3 +2602,45 @@ Targeted tests now pass:
 1. Keep this as a checkpoint commit.
 2. Run a broader FreeBSD spawn subset to catch regressions around kqueue/timer interactions.
 3. Continue stage0/bootstrap flow using this corrected runtime baseline.
+
+## 2026-02-21 checkpoint: ReadableStream stdin truncation follow-up validated
+
+### Change under test
+
+- `src/js/builtins/ReadableStreamInternals.ts`
+  - removed an early `streamState === $streamClosed` fast-path in `readStreamIntoSink()`
+  - rationale: avoid ending sink before all already-queued chunks are drained via `reader.read()`
+
+Checkpoint commit:
+- `a03cfa68bf`
+
+### Build/verification
+
+- `cmake --build build/freebsd-selfhost-stepC --target bun -- -j$(sysctl -n hw.ncpu)`
+  - result: up to date, `bun-profile` mtime newer than source edit
+
+### Validation results
+
+- `timeout 900 ./build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
+  - **20 pass, 1 todo, 0 fail**
+  - notably includes:
+    - `ReadableStream with very large chunked data` -> pass
+
+- `timeout 600 ./build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/spawn/spawn.test.ts -t "Uint8Array works as stdin"`
+  - **2 pass, 0 fail**
+
+- `timeout 600 ./build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/spawn/spawn.test.ts -t "check exit code from onExit"`
+  - **1 pass, 0 fail**
+
+- `timeout 1200 ./build/freebsd-selfhost-stepC/bun-profile test ./test/js/bun/spawn/spawn.test.ts`
+  - **108 pass, 5 skip, 0 fail**
+  - runtime ~53s
+
+### Next
+
+1. Keep this checkpoint committed.
+2. Resume stage0/bootstrap path on top of this runtime baseline:
+   - rebuild/verify legacy worktree entrypoint
+   - generate `stage0-freebsd-x64/bun`
+   - use generated stage0 to drive full build path
+3. Keep running focused spawn regressions after each bootstrap patch touching eventing/process I/O.
