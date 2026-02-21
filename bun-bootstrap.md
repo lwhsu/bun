@@ -3001,3 +3001,38 @@ build/freebsd-selfhost-stepD/bun -e 'import fs from "node:fs"; console.log(typeo
   - behavior: sustained ~99% CPU; RSS grew to ~7.9 GB before completion
 - Conclusion:
   - this phase is compute-heavy and can look stalled; treat as normal unless CPU drops to idle or process exits with error/OOM.
+
+## 2026-02-22 checkpoint: idempotence rerun passed (Phase C gate)
+
+### Rerun command
+
+```bash
+cd /home/lwhsu/killme/bun
+export BUN_FREEBSD_ALLOW_DOWNLOADS=1
+export BUN_FREEBSD_BOOTSTRAP_DIR=/home/lwhsu/killme/bun/build/freebsd-bootstrap
+export BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/freebsd-selfhost-stepD
+export BUN_FREEBSD_CMAKE_BUILD_TYPE=Release
+export BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd-release/stage3/bin/zig
+./scripts/bootstrap-freebsd.sh
+```
+
+### Rerun outcome
+
+- Script exited 0 and reused cached artifacts.
+- Zig step reported cached object build:
+  - `obj cached`
+  - `compile obj bun ReleaseFast x86_64-freebsd cached 16ms`
+- No manual cleanup or patch reapply was needed.
+
+### Post-rerun verification
+
+```bash
+build/freebsd-bootstrap/stage0/bun --version
+# 0.0.0
+build/freebsd-bootstrap/stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'
+# function
+build/freebsd-selfhost-stepD/bun --version
+# 1.3.10
+build/freebsd-selfhost-stepD/bun -e 'console.log(1+1)'
+# 2
+```

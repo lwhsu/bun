@@ -243,7 +243,7 @@ Exit criteria:
 
 Goal: make cold-start script robust and deterministic on FreeBSD.
 
-Status: **In progress** (major milestone reached: canonical dirs end-to-end rerun succeeded on 2026-02-22).
+Status: **In progress** (major milestone reached: canonical dirs now pass two consecutive runs on 2026-02-22; zig-variant rerun still pending).
 
 How to do it:
 
@@ -294,6 +294,15 @@ Exit criteria:
    - `-DBUN_FREEBSD_BINDGENV2_NODE=0`
    - `-DBUN_FREEBSD_CODEGEN_NODE=0`
    - `-DBUN_FREEBSD_NPM_INSTALL=0`
+
+2026-02-22 milestone evidence:
+
+1. Run #1 completed with rebuilt final binary in `build/freebsd-selfhost-stepD/bun`.
+2. Run #2 completed immediately after and reported:
+   - `obj cached`
+   - `compile obj bun ReleaseFast x86_64-freebsd cached 16ms`
+3. Stage0 and final runtime smoke checks passed after run #2, including:
+   - `stage0 bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'` -> `function`.
 
 ### Phase D: Runtime and Platform Parity
 
