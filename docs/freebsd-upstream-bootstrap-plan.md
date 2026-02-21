@@ -83,6 +83,8 @@ This section documents the current cold-start dependency chain implemented by `s
 
 1. Script creates/uses detached legacy worktree at `${BUN_FREEBSD_BOOTSTRAP_DIR}/legacy-worktree`.
 2. Script applies FreeBSD compatibility patches from `scripts/patches/freebsd-stage0-*.patch`.
+   - includes a legacy-only `StreamInternals.ts` compatibility hunk removing class-field declarations in `Denqueue`.
+   - rationale: avoid legacy codegen emitting `__publicField` references that can fail at stage0 runtime.
 3. Script runs Node-based legacy codegen helper:
    - `scripts/bootstrap-freebsd-generate-legacy-codegen.mjs`
 4. Script builds stage0 in legacy tree via `gmake` targets:
@@ -110,6 +112,9 @@ Behavior:
 1. If an existing stage0 binary fails any check, bootstrap forcibly rebuilds stage0.
 2. During forced rebuild, bootstrap removes stale legacy generated code outputs before regenerating codegen artifacts.
 3. If post-build stage0 still fails runtime validation, bootstrap exits non-zero.
+4. Known fixed regression signature (now covered by patch + runtime gate):
+   - `ReferenceError: Can't find variable: __publicField`
+   - stack path: `new Denqueue` -> `node:stream` -> `node:fs`
 
 ### How stage0 is used afterwards
 
@@ -258,6 +263,7 @@ How to verify:
 2. Stage0 path is deterministic:
    - `${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun`
 3. Final binary exists at `${BUN_FREEBSD_BUILD_DIR}/bun`.
+4. Stage0 runtime gate includes `import fs from "node:fs"` and must print `function` for `typeof fs.readFile`.
 4. Stage0 runtime gate passes:
    - `${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'`
 

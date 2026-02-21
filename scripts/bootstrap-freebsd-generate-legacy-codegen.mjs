@@ -519,9 +519,11 @@ function generateZigGeneratedClasses(legacyRoot, codegenDir) {
 }
 
 function generateLegacyWebCoreJSBuiltins(legacyRoot, codegenDir) {
-  const required = ["WebCoreJSBuiltins.h", "WebCoreJSBuiltins.cpp", "BunBuiltinNames+extras.h"];
-  if (required.every(file => fs.existsSync(path.join(codegenDir, file)))) {
-    return;
+  // Always regenerate these files via bundle-functions.
+  // bundle-modules can also emit similarly named files, but stage0 runtime
+  // expects the bundle-functions variant.
+  for (const stale of ["WebCoreJSBuiltins.h", "WebCoreJSBuiltins.cpp", "BunBuiltinNames+extras.h"]) {
+    fs.rmSync(path.join(codegenDir, stale), { force: true });
   }
 
   const esbuildBin = path.join(legacyRoot, "node_modules/.bin/esbuild");
