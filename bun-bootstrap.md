@@ -3108,3 +3108,26 @@ cd /home/lwhsu/killme/bun/packages/bun-error
 
 - Remaining no-fallback blocker is now narrowed to stage0 install runtime behavior, with a concrete crash site (`File.toSource` path).
 - This is separate from the previously fixed bindgen-v2 list-outputs command-path issue.
+
+## 2026-02-22 experiment: `File.toSourceAt` path-forwarding is not the crash trigger
+
+### Experiment
+
+- In legacy stage0 worktree (`build/freebsd-bootstrap/legacy-worktree/src/sys.zig`), tested a temporary variant of `File.toSourceAt` that ignores caller path forwarding and always uses a fixed source path label.
+- Rebuilt stage0 (`gmake build-obj`, `gmake bun-link-lld-release JSC_BASE_DIR=.../bun-webkit-legacy`) and reran:
+  - `packages/bun-error`: `stage0 bun install --frozen-lockfile`
+
+### Result
+
+- Crash persists with same signature (`Segmentation fault at address 0x0`).
+- New core backtrace still lands in `src.sys.File.toSourceAt` during workspace-name processing:
+  - `Package.processWorkspaceName`
+  - `Package.processWorkspaceNamesArray`
+- Evidence:
+  - `build/freebsd-bootstrap/logs/stage0-install-bun-error-fixedpath.err`
+  - `build/freebsd-bootstrap/logs/stage0-install-bun-error-fixedpath-lldb.txt`
+
+### Conclusion
+
+- `toSourceAt` path-string forwarding is not sufficient to explain/fix this crash.
+- Next debugging should focus deeper in `readFrom`/file-read result handling or a Zig 0.13 ReleaseFast miscompile in this code path.
