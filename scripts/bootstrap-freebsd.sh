@@ -469,6 +469,36 @@ user_supplied_current_webkit_path() {
   return 1
 }
 
+ensure_current_zig_cache_fingerprint() {
+  local zig_bin="$1"
+  local cache_root="${BUILD_DIR}/cache/zig"
+  local stamp="${cache_root}/compiler-fingerprint.txt"
+  local stamp_new="${stamp}.new"
+  local zig_realpath
+  local zig_version
+  local zig_sha
+
+  mkdir -p "${cache_root}"
+  zig_realpath="$(realpath "${zig_bin}" 2>/dev/null || echo "${zig_bin}")"
+  zig_version="$("${zig_bin}" version 2>/dev/null || echo unknown)"
+  zig_sha="$(sha256 -q "${zig_bin}" 2>/dev/null || echo unavailable)"
+
+  cat >"${stamp_new}" <<EOF2
+zig_cmd=${CURRENT_ZIG}
+zig_bin=${zig_bin}
+zig_realpath=${zig_realpath}
+zig_version=${zig_version}
+zig_sha256=${zig_sha}
+EOF2
+
+  if [[ -f "${stamp}" ]] && ! cmp -s "${stamp}" "${stamp_new}"; then
+    echo "[bootstrap] zig compiler fingerprint changed; resetting ${cache_root}/{local,global}"
+    rm -rf "${cache_root}/local" "${cache_root}/global"
+  fi
+
+  mv "${stamp_new}" "${stamp}"
+}
+
 ensure_freebsd_webkit_package() {
   local package_dir="$1"
   local expected_commit="$2"
@@ -630,6 +660,8 @@ EOF2
   CURRENT_ZIG_BIN="${CURRENT_ZIG_WRAPPER}"
   echo "[bootstrap] current zig wrapper enabled with --zig-lib-dir=${CURRENT_ZIG_LIB_DIR}"
 fi
+
+ensure_current_zig_cache_fingerprint "${CURRENT_ZIG_BIN}"
 
 if ! user_supplied_current_webkit_path "$@"; then
   ensure_webkit_source_checkout "${CURRENT_WEBKIT_SOURCE}" "${CURRENT_WEBKIT_COMMIT}" "current"
