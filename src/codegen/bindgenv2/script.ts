@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+import { writeSync } from "node:fs";
+
 interface NamedTypeLike {
   name: string;
   dependencies: unknown[];
@@ -27,11 +29,11 @@ let codegenPath: string;
 let sources: string[];
 
 async function writeStdout(text: string): Promise<void> {
-  await Bun.write(Bun.stdout, text);
+  writeSync(1, text);
 }
 
 async function writeStderr(text: string): Promise<void> {
-  await Bun.write(Bun.stderr, text);
+  writeSync(2, text);
 }
 
 async function writeIfNotChanged(filePath: string, contents: string): Promise<void> {

@@ -68,6 +68,17 @@ Why Phase C:
 2. The phase objective is deterministic bootstrap without FreeBSD-only fallback behavior.
 3. Until Phase C exits cleanly, leaving fallback-enabled defaults reduces bootstrap breakage risk.
 
+Current status at 2026-02-22:
+
+1. `BUN_FREEBSD_BINDGENV2_NODE=0` is now working again in split mode when:
+   - `BUN_FREEBSD_CODEGEN_NODE=1`
+   - `BUN_FREEBSD_NPM_INSTALL=1`
+2. Verified by building target `bun-bindgen-v2` in a fresh build directory.
+3. Full no-fallback (`BUN_FREEBSD_BINDGENV2_NODE=0`, `BUN_FREEBSD_CODEGEN_NODE=0`, `BUN_FREEBSD_NPM_INSTALL=0`) is still blocked by stage0 runtime issues:
+   - `bun install --frozen-lockfile` segfault
+   - `bundle-modules.ts` segfault under stage0
+   - `bindgen.ts` functional mismatch under stage0
+
 ## 2.2 Current Stage0 Build Design (How It Works Today)
 
 This section documents the current cold-start dependency chain implemented by `scripts/bootstrap-freebsd.sh`.

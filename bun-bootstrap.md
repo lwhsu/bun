@@ -3036,3 +3036,43 @@ build/freebsd-selfhost-stepD/bun --version
 build/freebsd-selfhost-stepD/bun -e 'console.log(1+1)'
 # 2
 ```
+
+## 2026-02-22 checkpoint: bindgen-v2 stage0 path re-enabled (split mode)
+
+### Problem found
+
+- `BUN_FREEBSD_BINDGENV2_NODE=0` configure path was still broken in current tree because:
+  - `cmake/targets/BuildBun.cmake` used FreeBSD-specific `-e 'await import(process.argv[1]);'` wrapper for bindgen-v2.
+  - On stage0 (`0.0.0`), `process.argv[1]` is `[eval]`, so the wrapper did not execute `src/codegen/bindgenv2/script.ts`.
+  - Result: bindgen list-outputs returned empty and configure failed with zero `.cpp` outputs.
+
+### Fixes applied
+
+1. `cmake/targets/BuildBun.cmake`
+   - removed FreeBSD-only bindgen-v2 `-e import(...)` wrapper.
+   - bindgen-v2 bun command prefix now uses normal:
+     - `${BUN_EXECUTABLE} ... run ${BUN_BINDGENV2_SCRIPT}`
+2. `src/codegen/bindgenv2/script.ts`
+   - switched stdout/stderr writes to `node:fs` `writeSync(1/2, ...)` for stage0-safe deterministic output.
+3. `src/codegen/helpers.ts`
+   - hardened `writeIfNotChanged()`:
+     - create parent dir before write
+     - retry on `ENOENT` after `mkdir -p`
+
+### Validation evidence
+
+- Split mode now works again:
+  - configure/build with:
+    - `-DBUN_FREEBSD_BINDGENV2_NODE=0`
+    - `-DBUN_FREEBSD_CODEGEN_NODE=1`
+    - `-DBUN_FREEBSD_NPM_INSTALL=1`
+  - `cmake --build ... --target bun-bindgen-v2` succeeds.
+- Canonical bootstrap path still passes after fixes:
+  - `./scripts/bootstrap-freebsd.sh` succeeded in `build/freebsd-bootstrap` + `build/freebsd-selfhost-stepD`.
+  - runtime checks still pass for stage0 and final bun.
+
+### Remaining blockers for full no-fallback (`...=0` all)
+
+- `stage0 bun install --frozen-lockfile` still segfaults.
+- stage0 execution of `src/codegen/bundle-modules.ts` still segfaults in no-fallback mode.
+- stage0 execution of `src/codegen/bindgen.ts` still hits functional mismatch (`DevServer.bind.ts` export validation path).

@@ -104,11 +104,17 @@ export function writeIfNotChanged(file: string, contents: string) {
     }
   } catch (e) {}
 
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true });
   try {
     fs.writeFileSync(file, contents);
-  } catch (error) {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, contents);
+  } catch (error: any) {
+    if (error?.code === "ENOENT") {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(file, contents);
+    } else {
+      throw error;
+    }
   }
 
   if (readUtf8CompatSync(file) !== contents) {

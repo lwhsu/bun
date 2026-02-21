@@ -552,17 +552,6 @@ string(REPLACE ";" "," BUN_BINDGENV2_SOURCES_COMMA_SEPARATED
 file(MAKE_DIRECTORY ${CODEGEN_PATH}/bindgen_generated)
 
 set(BUN_BINDGENV2_BUN_COMMAND_PREFIX ${BUN_EXECUTABLE} ${BUN_FLAGS} run ${BUN_BINDGENV2_SCRIPT})
-if(CMAKE_HOST_SYSTEM_NAME STREQUAL "FreeBSD")
-  # FreeBSD host bun can fail in the `run <script.ts>` path during self-host experiments.
-  # Importing the script via `-e` avoids that path while preserving script argv handling.
-  set(BUN_BINDGENV2_BUN_COMMAND_PREFIX
-    ${BUN_EXECUTABLE}
-    ${BUN_FLAGS}
-    -e
-    "await import(process.argv[1]);"
-    ${BUN_BINDGENV2_SCRIPT}
-  )
-endif()
 
 set(BUN_BINDGENV2_LIST_COMMAND_PREFIX ${BUN_BINDGENV2_BUN_COMMAND_PREFIX})
 set(BUN_BINDGENV2_GENERATE_COMMAND_PREFIX ${BUN_BINDGENV2_BUN_COMMAND_PREFIX})
