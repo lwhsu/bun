@@ -2725,3 +2725,87 @@ Checkpoint commit:
 - Final stepD bun passes focused spawn regression:
   - `timeout 600 build/freebsd-selfhost-stepD/bun test test/js/bun/spawn/spawn.test.ts -t "Uint8Array works as stdin"`
   - result: `2 pass, 0 fail`
+
+## 2026-02-21 checkpoint: current-tree bootstrap rerun succeeded (date-prefixed build dir)
+
+### Command used
+
+- `BUN_FREEBSD_BOOTSTRAP_DIR=/home/lwhsu/killme/bun/build/freebsd-bootstrap`
+- `BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/20260221-1946-current-from-stage0`
+- `BUN_FREEBSD_CMAKE_BUILD_TYPE=Release`
+- `BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd-release/stage3/bin/zig`
+- `./scripts/bootstrap-freebsd.sh`
+
+### Observed behavior
+
+- `zig build-obj` stayed in `LLVM Emit Object` for a long single-object phase before finishing.
+- This was validated as active work (CPU time and RSS increasing), not a deadlock.
+- `Build Summary` eventually reported success for the object step, then CMake linked final binary.
+
+### Result
+
+- Bootstrap script completed with:
+  - `stage0: /home/lwhsu/killme/bun/build/freebsd-bootstrap/stage0/bun`
+  - `final : /home/lwhsu/killme/bun/build/20260221-1946-current-from-stage0/bun`
+
+### Runtime checks
+
+- Stage0:
+  - `build/freebsd-bootstrap/stage0/bun --version` => `0.0.0`
+  - `build/freebsd-bootstrap/stage0/bun -e 'console.log(1+1)'` => `2`
+  - `build/freebsd-bootstrap/stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'` => `function`
+- Final:
+  - `build/20260221-1946-current-from-stage0/bun --version` => `1.3.10`
+  - `build/20260221-1946-current-from-stage0/bun -e 'console.log(1+1)'` => `2`
+  - `build/20260221-1946-current-from-stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'` => `function`
+
+### Notes
+
+- The long `LLVM Emit Object` phase can exceed 10 minutes on this host, so "hang" diagnosis should require CPU-time progression checks before aborting.
+
+## 2026-02-21 checkpoint: cleanroom step1 (date-prefixed dirs) fully succeeded
+
+### Cleanroom dirs used
+
+- Bootstrap dir:
+  - `/home/lwhsu/killme/bun/build/20260221-2027-freebsd-bootstrap-cleanroom-step1`
+- Final build dir:
+  - `/home/lwhsu/killme/bun/build/20260221-2027-current-from-cleanroom-step1`
+
+### New blockers resolved in this run
+
+1. Legacy stage0 link missing V8 + reload hook symbols:
+   - Added/used:
+     - `scripts/patches/freebsd-stage0-makefile-v8.patch`
+     - `scripts/patches/freebsd-stage0-c-bindings-reload.patch`
+   - Wired into `scripts/bootstrap-freebsd.sh`.
+2. Legacy stage0 runtime hang on `-e`:
+   - Root cause: FreeBSD `kevent64(..., timeout=NULL)` submission path blocked in uSockets compatibility shim.
+   - Added:
+     - `scripts/patches/freebsd-stage0-bun-usockets-kevent-nowait.patch`
+   - Wired into `scripts/bootstrap-freebsd.sh`.
+3. Current WebKit patch drift on commit `8af7958ff0e2...`:
+   - `scripts/prepare-webkit-freebsd.sh` RAMSize patching was too pattern-specific and failed.
+   - Updated RAMSize patch logic to support newer layout and still enforce FreeBSD-safe include splitting.
+
+### Final result
+
+- Cleanroom bootstrap command completed:
+  - `./scripts/bootstrap-freebsd.sh` with
+    - `BUN_FREEBSD_BOOTSTRAP_DIR=/home/lwhsu/killme/bun/build/20260221-2027-freebsd-bootstrap-cleanroom-step1`
+    - `BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/20260221-2027-current-from-cleanroom-step1`
+    - `BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd-release/stage3/bin/zig`
+    - `BUN_FREEBSD_CMAKE_BUILD_TYPE=Release`
+- Script output ended with:
+  - `stage0: /home/lwhsu/killme/bun/build/20260221-2027-freebsd-bootstrap-cleanroom-step1/stage0/bun`
+  - `final : /home/lwhsu/killme/bun/build/20260221-2027-current-from-cleanroom-step1/bun`
+
+### Runtime checks
+
+- Stage0:
+  - `build/20260221-2027-freebsd-bootstrap-cleanroom-step1/stage0/bun --version` => `0.0.0`
+  - `build/20260221-2027-freebsd-bootstrap-cleanroom-step1/stage0/bun -e 'console.log(1+1)'` => `2`
+- Final:
+  - `build/20260221-2027-current-from-cleanroom-step1/bun --version` => `1.3.10`
+  - `build/20260221-2027-current-from-cleanroom-step1/bun -e 'console.log(1+1)'` => `2`
+  - `build/20260221-2027-current-from-cleanroom-step1/bun -e 'import "node:fs"; console.log("ok")'` => `ok`

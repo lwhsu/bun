@@ -1,0 +1,17 @@
+--- a/src/bun.js/bindings/c-bindings.cpp
++++ b/src/bun.js/bindings/c-bindings.cpp
+@@ -231,6 +231,14 @@
+     sigprocmask(SIG_SETMASK, &signal_set, nullptr);
+ }
+ 
++#endif
++
++#if OS(FREEBSD)
++extern "C" void on_before_reload_process_linux()
++{
++    // FreeBSD uses the same reload path call site as Linux in this legacy tree.
++    // A no-op is sufficient for bootstrap builds.
++}
+ #endif
+ 
+ #define LSHPACK_MAX_HEADER_SIZE 65536

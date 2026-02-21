@@ -1,0 +1,13 @@
+--- a/Makefile
++++ b/Makefile
+@@ -499,6 +499,10 @@
+ 		$(BUN_DEPS_OUT_DIR)/liblshpack.a
+ 
+ ARCHIVE_FILES = $(ARCHIVE_FILES_WITHOUT_LIBCRYPTO)
++
++ifeq ($(OS_NAME),freebsd)
++ARCHIVE_FILES += -ldeflate -lmd -lbz2 -llzma -lbrotlidec -lbrotlienc -lbrotlicommon
++endif
+ 
+ STATIC_MUSL_FLAG ?=
+ 

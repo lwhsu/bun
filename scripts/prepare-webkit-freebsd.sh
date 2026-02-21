@@ -55,20 +55,22 @@ patch_webkit_freebsd_ram_size() {
     return 0
   fi
 
-  if grep -q 'sysctlbyname("hw.physmem"' "${ram_size_cpp}"; then
+  if ! grep -q '#elif OS(LINUX) || OS(FREEBSD)' "${ram_size_cpp}"; then
     return 0
   fi
 
-  perl -0pi -e 's/#if OS\(LINUX\) \|\| OS\(FREEBSD\)\n#include <sys\/sysinfo\.h>\n#elif OS\(UNIX\)\n#include <unistd\.h>\n#endif \/\/ OS\(LINUX\) \|\| OS\(FREEBSD\) \|\| OS\(UNIX\)/#if OS(LINUX)\n#include <sys\/sysinfo.h>\n#elif OS(FREEBSD)\n#include <sys\/types.h>\n#include <sys\/sysctl.h>\n#elif OS(UNIX)\n#include <unistd.h>\n#endif \/\/ OS(LINUX) || OS(FREEBSD) || OS(UNIX)/s' "${ram_size_cpp}"
+  perl -0pi -e 's/#elif OS\(LINUX\) \|\| OS\(FREEBSD\)\n#include <sys\/sysinfo\.h>\n#elif OS\(UNIX\)( \|\| OS\(HAIKU\))?\n#include <unistd\.h>\n/#elif OS(LINUX)\n#include <sys\/sysinfo.h>\n#elif OS(FREEBSD)\n#include <sys\/types.h>\n#include <sys\/sysctl.h>\n#elif OS(UNIX)$1\n#include <unistd.h>\n/s' "${ram_size_cpp}"
 
-  perl -0pi -e 's/#if OS\(LINUX\) \|\| OS\(FREEBSD\)\n\s*struct sysinfo si;\n\s*sysinfo\(&si\);\n\s*return si\.totalram \* si\.mem_unit;\n#elif OS\(UNIX\)/#if OS(LINUX)\n    struct sysinfo si;\n    sysinfo(&si);\n    return si.totalram * si.mem_unit;\n#elif OS(FREEBSD)\n    unsigned long long totalMemory = 0;\n    size_t totalMemorySize = sizeof(totalMemory);\n    if (!sysctlbyname("hw.physmem", &totalMemory, &totalMemorySize, nullptr, 0))\n        return static_cast<size_t>(totalMemory);\n    return 0;\n#elif OS(UNIX)/s' "${ram_size_cpp}"
+  if grep -q 'struct sysinfo si;' "${ram_size_cpp}"; then
+    perl -0pi -e 's/#if OS\(LINUX\) \|\| OS\(FREEBSD\)\n\s*struct sysinfo si;\n\s*sysinfo\(&si\);\n\s*return si\.totalram \* si\.mem_unit;\n#elif OS\(UNIX\)/#if OS(LINUX)\n    struct sysinfo si;\n    sysinfo(&si);\n    return si.totalram * si.mem_unit;\n#elif OS(FREEBSD)\n    unsigned long long totalMemory = 0;\n    size_t totalMemorySize = sizeof(totalMemory);\n    if (!sysctlbyname("hw.physmem", &totalMemory, &totalMemorySize, nullptr, 0))\n        return static_cast<size_t>(totalMemory);\n    return 0;\n#elif OS(UNIX)/s' "${ram_size_cpp}"
+  fi
 
-  if ! grep -q 'sysctlbyname("hw.physmem"' "${ram_size_cpp}"; then
+  if grep -q '#elif OS(LINUX) || OS(FREEBSD)' "${ram_size_cpp}"; then
     echo "error: failed to patch ${ram_size_cpp} for FreeBSD" >&2
     exit 1
   fi
 
-  echo "[webkit-freebsd] patched RAMSize.cpp for FreeBSD (hw.physmem)"
+  echo "[webkit-freebsd] patched RAMSize.cpp FreeBSD include/runtime compatibility"
 }
 
 patch_webkit_icu_header_api() {

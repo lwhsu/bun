@@ -38,6 +38,12 @@ if [[ -z "${FINAL_TARGET}" ]]; then
 fi
 CURRENT_ZIG="${BUN_FREEBSD_CURRENT_ZIG:-zig}"
 CURRENT_ZIG_LIB_DIR="${BUN_FREEBSD_CURRENT_ZIG_LIB_DIR:-}"
+LEGACY_MAKE_JOBS="${BUN_FREEBSD_MAKE_JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 1)}"
+
+if [[ ! "${LEGACY_MAKE_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "error: BUN_FREEBSD_MAKE_JOBS must be a positive integer (got '${LEGACY_MAKE_JOBS}')" >&2
+  exit 1
+fi
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -238,6 +244,24 @@ patch_legacy_worktree_for_freebsd() {
     apply_patch_if_needed "${lshpack_include_patch}" "FreeBSD ls-hpack include compatibility patch"
   fi
 
+  local makefile_link_libs_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-makefile-link-libs.patch"
+  if [[ -f "${makefile_file}" ]] && ! grep -q 'ARCHIVE_FILES += -ldeflate -lmd' "${makefile_file}"; then
+    if [[ ! -f "${makefile_link_libs_patch}" ]]; then
+      echo "error: missing patch file: ${makefile_link_libs_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${makefile_link_libs_patch}" "FreeBSD legacy Makefile link-libs patch"
+  fi
+
+  local makefile_v8_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-makefile-v8.patch"
+  if [[ -f "${makefile_file}" ]] && ! grep -q '^SRC_V8_FILES :=' "${makefile_file}"; then
+    if [[ ! -f "${makefile_v8_patch}" ]]; then
+      echo "error: missing patch file: ${makefile_v8_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${makefile_v8_patch}" "FreeBSD legacy Makefile V8 object patch"
+  fi
+
   local build_zig_file="${LEGACY_WORKTREE}/build.zig"
   local build_zig_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-build-zig.patch"
   if [[ -f "${build_zig_file}" ]] && grep -q "Unsupported OS tag" "${build_zig_file}"; then
@@ -304,6 +328,18 @@ patch_legacy_worktree_for_freebsd() {
     apply_patch_if_needed "${usockets_patch}" "FreeBSD bun-usockets compatibility patch"
   fi
 
+  local usockets_epoll_h="${LEGACY_WORKTREE}/packages/bun-usockets/src/internal/eventing/epoll_kqueue.h"
+  local usockets_kevent_nowait_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-bun-usockets-kevent-nowait.patch"
+  if [[ -f "${usockets_epoll_h}" ]] \
+    && grep -q '(void)flags;' "${usockets_epoll_h}" \
+    && ! grep -q 'effective_timeout = timeout' "${usockets_epoll_h}"; then
+    if [[ ! -f "${usockets_kevent_nowait_patch}" ]]; then
+      echo "error: missing patch file: ${usockets_kevent_nowait_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${usockets_kevent_nowait_patch}" "FreeBSD bun-usockets kevent no-wait patch"
+  fi
+
   local identifier_data_file="${LEGACY_WORKTREE}/src/js_lexer/identifier_data.zig"
   local identifier_data_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-identifier-data.patch"
   if [[ -f "${identifier_data_file}" ]] && grep -Fq 'std.fs.path.dirname(@src().file).?' "${identifier_data_file}"; then
@@ -334,6 +370,21 @@ patch_legacy_worktree_for_freebsd() {
     apply_patch_if_needed "${c_bindings_patch}" "FreeBSD c-bindings compatibility patch"
   fi
 
+  local c_bindings_reload_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-c-bindings-reload.patch"
+  if [[ ! -f "${c_bindings_reload_patch}" ]]; then
+    echo "error: missing patch file: ${c_bindings_reload_patch}" >&2
+    exit 1
+  fi
+  apply_patch_if_needed "${c_bindings_reload_patch}" "FreeBSD c-bindings reload hook patch"
+
+  # Additional legacy FreeBSD compatibility deltas required for a fresh worktree.
+  local legacy_extra_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-legacy-extra-compat.patch"
+  if [[ ! -f "${legacy_extra_patch}" ]]; then
+    echo "error: missing patch file: ${legacy_extra_patch}" >&2
+    exit 1
+  fi
+  apply_patch_if_needed "${legacy_extra_patch}" "FreeBSD legacy extra compatibility patch"
+
 }
 
 generate_legacy_codegen_files() {
@@ -351,6 +402,7 @@ sync_legacy_codegen_outputs() {
 
   local codegen_dir="${LEGACY_WORKTREE}/build/codegen"
   local bindings_dir="${LEGACY_WORKTREE}/src/bun.js/bindings"
+  local builtins_dir="${LEGACY_WORKTREE}/src/js/builtins"
   local src_dir="${LEGACY_WORKTREE}/src"
 
   if [[ ! -d "${codegen_dir}" ]]; then
@@ -385,6 +437,7 @@ sync_legacy_codegen_outputs() {
   )
 
   mkdir -p "${bindings_dir}"
+  mkdir -p "${builtins_dir}"
   for name in "${generated_files[@]}"; do
     if [[ -f "${codegen_dir}/${name}" ]]; then
       cp "${codegen_dir}/${name}" "${bindings_dir}/${name}"
@@ -402,6 +455,15 @@ sync_legacy_codegen_outputs() {
   fi
   if [[ -f "${codegen_dir}/ErrorCode+List.h" ]]; then
     cp "${codegen_dir}/ErrorCode+List.h" "${bindings_dir}/ErrorCode+List.h"
+  fi
+  if [[ -f "${codegen_dir}/WebCoreJSBuiltins.h" ]]; then
+    cp "${codegen_dir}/WebCoreJSBuiltins.h" "${bindings_dir}/WebCoreJSBuiltins.h"
+  fi
+  if [[ -f "${codegen_dir}/WebCoreJSBuiltins.cpp" ]]; then
+    cp "${codegen_dir}/WebCoreJSBuiltins.cpp" "${bindings_dir}/WebCoreJSBuiltins.cpp"
+  fi
+  if [[ -f "${codegen_dir}/BunBuiltinNames+extras.h" ]]; then
+    cp "${codegen_dir}/BunBuiltinNames+extras.h" "${builtins_dir}/BunBuiltinNames+extras.h"
   fi
 }
 
@@ -597,26 +659,28 @@ EOF2
   LEGACY_UWS_LDFLAGS="-I${LEGACY_WORKTREE}/src/deps/boringssl/include -I${LEGACY_WORKTREE}/src/deps/zlib -I${LEGACY_WORKTREE}/src/deps/libdeflate -I${LEGACY_WORKTREE}/src/deps/ls-hpack -I${LEGACY_WEBKIT_DIR}/include"
 
   echo "[bootstrap] building stage0 from legacy source tree"
+  echo "[bootstrap] legacy vendor step parallelism: -j1"
+  echo "[bootstrap] legacy build parallelism: -j${LEGACY_MAKE_JOBS}"
   (
     cd "${LEGACY_WORKTREE}"
     PATH="${SHIM_BIN_DIR}:${PATH}" \
-      gmake AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" vendor
+      gmake -j1 AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" vendor
 
     patch_legacy_worktree_for_freebsd
     generate_legacy_codegen_files
     sync_legacy_codegen_outputs
 
     PATH="${SHIM_BIN_DIR}:${PATH}" \
-      gmake AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" identifier-cache
+      gmake -j"${LEGACY_MAKE_JOBS}" AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" identifier-cache
 
     PATH="${SHIM_BIN_DIR}:${PATH}" \
-      gmake AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" sqlite
+      gmake -j"${LEGACY_MAKE_JOBS}" AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" sqlite
     PATH="${SHIM_BIN_DIR}:${PATH}" \
-      gmake AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" release-bindings
+      gmake -j"${LEGACY_MAKE_JOBS}" AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" release-bindings
     PATH="${SHIM_BIN_DIR}:${PATH}" \
-      gmake AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" build-obj
+      gmake -j"${LEGACY_MAKE_JOBS}" AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" build-obj
     PATH="${SHIM_BIN_DIR}:${PATH}" \
-      gmake AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" bun-link-lld-release
+      gmake -j"${LEGACY_MAKE_JOBS}" AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" bun-link-lld-release
   )
 
   if [[ ! -x "${LEGACY_STAGE0}" ]]; then

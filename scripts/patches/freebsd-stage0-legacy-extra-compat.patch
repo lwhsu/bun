@@ -1,0 +1,927 @@
+--- a/src/async/posix_event_loop.zig
++++ b/src/async/posix_event_loop.zig
+@@ -771,7 +771,7 @@
+ 
+         if (comptime Environment.isMac)
+             onKQueueEvent(file_poll, loop, &loop.ready_polls[@as(usize, @intCast(loop.current_ready_poll))])
+-        else if (comptime Environment.isLinux)
++        else if (comptime Environment.os == .linux)
+             onEpollEvent(file_poll, loop, &loop.ready_polls[@as(usize, @intCast(loop.current_ready_poll))]);
+     }
+ 
+@@ -804,7 +804,7 @@
+             this.flags.insert(.one_shot);
+         }
+ 
+-        if (comptime Environment.isLinux) {
++        if (comptime Environment.os == .linux) {
+             const one_shot_flag: u32 = if (!this.flags.contains(.one_shot)) 0 else linux.EPOLL.ONESHOT;
+ 
+             const flags: u32 = switch (flag) {
+@@ -867,7 +867,7 @@
+                     .flags = std.c.EV_ADD | one_shot_flag,
+                     .ext = .{ this.generation_number, 0 },
+                 },
+-                .machport => .{
++                .machport => if (comptime Environment.isMac) .{
+                     .ident = @intCast(fd.cast()),
+                     .filter = std.posix.system.EVFILT_MACHPORT,
+                     .data = 0,
+@@ -875,7 +875,7 @@
+                     .udata = @intFromPtr(Pollable.init(this).ptr()),
+                     .flags = std.c.EV_ADD | one_shot_flag,
+                     .ext = .{ this.generation_number, 0 },
+-                },
++                } else unreachable,
+                 else => unreachable,
+             };
+ 
+@@ -931,7 +931,7 @@
+         this.activate(loop);
+         this.flags.insert(switch (flag) {
+             .readable => .poll_readable,
+-            .process => if (comptime Environment.isLinux) .poll_readable else .poll_process,
++            .process => if (comptime Environment.os == .linux) .poll_readable else .poll_process,
+             .writable => .poll_writable,
+             .machport => .poll_machport,
+             else => unreachable,
+@@ -989,7 +989,7 @@
+ 
+         log("unregister: FilePoll(0x{x}, generation_number={d}) {s} ({})", .{ @intFromPtr(this), this.generation_number, @tagName(flag), fd });
+ 
+-        if (comptime Environment.isLinux) {
++        if (comptime Environment.os == .linux) {
+             const ctl = linux.epoll_ctl(
+                 watcher_fd,
+                 linux.EPOLL.CTL_DEL,
+@@ -1013,7 +1013,7 @@
+                     .flags = std.c.EV_DELETE,
+                     .ext = .{ 0, 0 },
+                 },
+-                .machport => .{
++                .machport => if (comptime Environment.isMac) .{
+                     .ident = @intCast(fd.cast()),
+                     .filter = std.posix.system.EVFILT_MACHPORT,
+                     .data = 0,
+@@ -1021,7 +1021,7 @@
+                     .udata = @intFromPtr(Pollable.init(this).ptr()),
+                     .flags = std.c.EV_DELETE,
+                     .ext = .{ 0, 0 },
+-                },
++                } else unreachable,
+                 .writable => .{
+                     .ident = @intCast(fd.cast()),
+                     .filter = std.posix.system.EVFILT_WRITE,
+--- a/src/bun.js/api/server.zig
++++ b/src/bun.js/api/server.zig
+@@ -2603,14 +2603,25 @@
+             } else {
+                 var sbytes: std.posix.off_t = adjusted_count;
+                 const signed_offset = @as(i64, @bitCast(@as(u64, this.sendfile.offset)));
+-                const errcode = bun.C.getErrno(std.c.sendfile(
+-                    this.sendfile.fd.cast(),
+-                    this.sendfile.socket_fd.cast(),
+-                    signed_offset,
+-                    &sbytes,
+-                    null,
+-                    0,
+-                ));
++                const errcode = bun.C.getErrno(if (comptime Environment.isFreeBSD)
++                    std.c.sendfile(
++                        this.sendfile.fd.cast(),
++                        this.sendfile.socket_fd.cast(),
++                        signed_offset,
++                        @as(usize, @intCast(adjusted_count)),
++                        null,
++                        &sbytes,
++                        0,
++                    )
++                else
++                    std.c.sendfile(
++                        this.sendfile.fd.cast(),
++                        this.sendfile.socket_fd.cast(),
++                        signed_offset,
++                        &sbytes,
++                        null,
++                        0,
++                    ));
+                 const wrote = @as(Blob.SizeType, @intCast(sbytes));
+                 this.sendfile.offset +|= wrote;
+                 this.sendfile.remain -|= wrote;
+--- a/src/bun.js/api/bun/spawn.zig
++++ b/src/bun.js/api/bun/spawn.zig
+@@ -265,6 +265,18 @@
+         }
+ 
+         pub fn inherit(self: *PosixSpawnActions, fd: bun.FileDescriptor) !void {
++            if (comptime Environment.isFreeBSD) {
++                // FreeBSD does not expose posix_spawn_file_actions_addinherit_np.
++                switch (errno(system.posix_spawn_file_actions_adddup2(&self.actions, fd.cast(), fd.cast()))) {
++                    .SUCCESS => return,
++                    .BADF => return error.InvalidFileDescriptor,
++                    .NOMEM => return error.SystemResources,
++                    .INVAL => unreachable,
++                    .NAMETOOLONG => unreachable,
++                    else => |err| return unexpectedErrno(err),
++                }
++            }
++
+             switch (errno(system.posix_spawn_file_actions_addinherit_np(&self.actions, fd.cast()))) {
+                 .SUCCESS => return,
+                 .BADF => return error.InvalidFileDescriptor,
+--- a/src/bun.js/bindings/InternalModuleRegistry.cpp
++++ b/src/bun.js/bindings/InternalModuleRegistry.cpp
+@@ -7,6 +7,7 @@
+ #include <JavaScriptCore/VMTrapsInlines.h>
+ #include <JavaScriptCore/JSModuleLoader.h>
+ 
++#include <cstdio>
+ #include <utility>
+ 
+ #include "InternalModuleRegistryConstants.h"
+@@ -34,11 +35,15 @@
+ 
+ #define INTERNAL_MODULE_REGISTRY_GENERATE_(globalObject, vm, SOURCE, moduleName, urlString) \
+     auto throwScope = DECLARE_THROW_SCOPE(vm);                                              \
++    fprintf(stderr, "[freebsd-stage0] loading internal module: %s\n", WTF::String(moduleName).utf8().data()); \
++    fflush(stderr);                                                                         \
+     auto&& origin = SourceOrigin(WTF::URL(urlString));                                      \
+     SourceCode source = JSC::makeSource(SOURCE, origin,                                     \
+         JSC::SourceTaintedOrigin::Untainted,                                                \
+         moduleName);                                                                        \
+     maybeAddCodeCoverage(vm, source);                                                       \
++    fprintf(stderr, "[freebsd-stage0] creating builtin executable: %s\n", WTF::String(moduleName).utf8().data()); \
++    fflush(stderr);                                                                         \
+     JSFunction* func                                                                        \
+         = JSFunction::create(                                                               \
+             vm, globalObject,                                                               \
+@@ -51,6 +56,8 @@
+                 InlineAttribute::None)                                                      \
+                 ->link(vm, nullptr, source),                                                \
+             static_cast<JSC::JSGlobalObject*>(globalObject));                               \
++    fprintf(stderr, "[freebsd-stage0] linked executable: %s\n", WTF::String(moduleName).utf8().data()); \
++    fflush(stderr);                                                                         \
+                                                                                             \
+     RETURN_IF_EXCEPTION(throwScope, {});                                                    \
+                                                                                             \
+@@ -169,4 +176,4 @@
+ } // namespace Bun
+ 
+ #undef INTERNAL_MODULE_REGISTRY_GENERATE_
+-#undef INTERNAL_MODULE_REGISTRY_GENERATE
+\ No newline at end of file
++#undef INTERNAL_MODULE_REGISTRY_GENERATE
+--- a/src/bun.js/bindings/JS2Native.cpp
++++ b/src/bun.js/bindings/JS2Native.cpp
+@@ -27,13 +27,14 @@
+ #endif
+ 
+     int id = target.asInt32();
+-    RELEASE_ASSERT(
+-        id <= JS2NATIVE_COUNT && id >= 0,
+-        "In call to $lazy, got invalid id '%d'. This is a bug in Bun's JS2Native code generator.",
+-        id);
++    if (UNLIKELY(id < 0 || id > JS2NATIVE_COUNT)) {
++        // FreeBSD stage0 bootstrap path may use a reduced JS2Native table.
++        // Return undefined instead of hard-aborting so non-lazy code paths can still run.
++        return JSValue::encode(jsUndefined());
++    }
+     Zig::GlobalObject* ptr = jsCast<Zig::GlobalObject*>(lexicalGlobalObject);
+     return JSValue::encode(JS2NativeGenerated::js2nativePointers[id](ptr));
+ }
+ 
+ } // namespace JS2Native
+-} // namespace Bun
+\ No newline at end of file
++} // namespace Bun
+--- a/src/bun.js/bindings/v8/node.cpp
++++ b/src/bun.js/bindings/v8/node.cpp
+@@ -5,6 +5,10 @@
+ #include "CommonJSModuleRecord.h"
+ #include <charconv>
+ 
++#if !defined(REPORTED_NODEJS_ABI_VERSION)
++#define REPORTED_NODEJS_ABI_VERSION 127
++#endif
++
+ using v8::Context;
+ using v8::HandleScope;
+ using v8::Isolate;
+--- a/src/bun.js/bindings/workaround-missing-symbols.cpp
++++ b/src/bun.js/bindings/workaround-missing-symbols.cpp
+@@ -260,8 +260,124 @@
+ extern "C" int __wrap_mknodat(int dirfd, const char* path, __mode_t mode, __dev_t dev)
+ {
+     return __xmknodat(_MKNOD_VER, dirfd, path, mode, dev);
++}
++
++#endif
++
++// FreeBSD libc does not expose *stat64 symbols.
++#if defined(__FreeBSD__)
++#include <sys/stat.h>
++#include <sys/sysctl.h>
++#include <sys/time.h>
++#include <sys/utsname.h>
++#include <cstdint>
++#include <cstring>
++#include <ctime>
++#include <cerrno>
++#include <unistd.h>
++#include <stdlib.h>
++
++extern "C" int lstat64(const char* path, struct stat* st)
++{
++    return lstat(path, st);
++}
++extern "C" int fstat64(int fd, struct stat* st)
++{
++    return fstat(fd, st);
++}
++extern "C" int stat64(const char* path, struct stat* st)
++{
++    return stat(path, st);
++}
++
++// Linux-compatible sysinfo shim for FreeBSD.
++struct bun_linux_sysinfo {
++    long uptime;
++    unsigned long loads[3];
++    unsigned long totalram;
++    unsigned long freeram;
++    unsigned long sharedram;
++    unsigned long bufferram;
++    unsigned long totalswap;
++    unsigned long freeswap;
++    uint16_t procs;
++    uint16_t pad;
++    unsigned long totalhigh;
++    unsigned long freehigh;
++    uint32_t mem_unit;
++};
++
++extern "C" int sysinfo(struct bun_linux_sysinfo* info)
++{
++    if (!info) {
++        errno = EINVAL;
++        return -1;
++    }
++
++    std::memset(info, 0, sizeof(*info));
++    info->mem_unit = 1;
++
++    uint64_t physmem = 0;
++    size_t len = sizeof(physmem);
++    if (sysctlbyname("hw.physmem", &physmem, &len, nullptr, 0) == 0) {
++        info->totalram = static_cast<unsigned long>(physmem);
++    }
++
++    uint32_t page_size = 0;
++    len = sizeof(page_size);
++    if (sysctlbyname("hw.pagesize", &page_size, &len, nullptr, 0) == 0) {
++        uint64_t free_count = 0;
++        len = sizeof(free_count);
++        if (sysctlbyname("vm.stats.vm.v_free_count", &free_count, &len, nullptr, 0) == 0) {
++            info->freeram = static_cast<unsigned long>(free_count * static_cast<uint64_t>(page_size));
++        }
++    }
++
++    struct timeval boottime = {};
++    len = sizeof(boottime);
++    if (sysctlbyname("kern.boottime", &boottime, &len, nullptr, 0) == 0) {
++        const time_t now = time(nullptr);
++        if (boottime.tv_sec > 0 && now >= boottime.tv_sec) {
++            info->uptime = static_cast<long>(now - boottime.tv_sec);
++        }
++    }
++
++    double loads[3] = { 0.0, 0.0, 0.0 };
++    if (getloadavg(loads, 3) == 3) {
++        info->loads[0] = static_cast<unsigned long>(loads[0] * 65536.0);
++        info->loads[1] = static_cast<unsigned long>(loads[1] * 65536.0);
++        info->loads[2] = static_cast<unsigned long>(loads[2] * 65536.0);
++    }
++
++    return 0;
+ }
+ 
++struct uv_utsname_s {
++    char sysname[256];
++    char release[256];
++    char version[256];
++    char machine[256];
++};
++
++extern "C" int uv_os_uname(struct uv_utsname_s* buffer)
++{
++    if (!buffer) {
++        errno = EINVAL;
++        return -1;
++    }
++
++    struct utsname uts = {};
++    if (uname(&uts) != 0) {
++        return -1;
++    }
++
++    std::memset(buffer, 0, sizeof(*buffer));
++    strlcpy(buffer->sysname, uts.sysname, sizeof(buffer->sysname));
++    strlcpy(buffer->release, uts.release, sizeof(buffer->release));
++    strlcpy(buffer->version, uts.version, sizeof(buffer->version));
++    strlcpy(buffer->machine, uts.machine, sizeof(buffer->machine));
++    return 0;
++}
+ #endif
+ 
+ // macOS
+--- a/src/bun.js/node/dir_iterator.zig
++++ b/src/bun.js/node/dir_iterator.zig
+@@ -70,7 +70,7 @@
+             /// with subsequent calls to `next`, as well as when this `Dir` is deinitialized.
+             pub const next = switch (builtin.os.tag) {
+                 .macos, .ios => nextDarwin,
+-                // .freebsd, .netbsd, .dragonfly, .openbsd => nextBsd,
++                .freebsd, .netbsd, .dragonfly, .openbsd => nextBsd,
+                 // .solaris => nextSolaris,
+                 else => @compileError("unimplemented"),
+             };
+@@ -145,6 +145,61 @@
+                     };
+                 }
+             }
++
++            fn nextBsd(self: *Self) Result {
++                start_over: while (true) {
++                    if (self.index >= self.end_index) {
++                        const rc = std.c.getdirentries(
++                            self.dir.fd,
++                            &self.buf,
++                            self.buf.len,
++                            &self.seek,
++                        );
++
++                        if (rc < 1) {
++                            if (rc == 0) {
++                                return Result{ .result = null };
++                            }
++
++                            if (Result.errnoSys(rc, .getdirentries64)) |err| {
++                                return err;
++                            }
++                        }
++
++                        self.index = 0;
++                        self.end_index = @as(usize, @intCast(rc));
++                    }
++
++                    const bsd_entry = @as(*align(1) std.c.dirent, @ptrCast(&self.buf[self.index]));
++                    const next_index = self.index + @as(usize, @intCast(bsd_entry.reclen));
++                    self.index = next_index;
++
++                    const name = @as([*]u8, @ptrCast(&bsd_entry.name))[0..bsd_entry.namlen];
++
++                    if (strings.eqlComptime(name, ".") or strings.eqlComptime(name, "..") or (bsd_entry.fileno == 0)) {
++                        continue :start_over;
++                    }
++
++                    const entry_kind = switch (bsd_entry.type) {
++                        posix.DT.BLK => Entry.Kind.block_device,
++                        posix.DT.CHR => Entry.Kind.character_device,
++                        posix.DT.DIR => Entry.Kind.directory,
++                        posix.DT.FIFO => Entry.Kind.named_pipe,
++                        posix.DT.LNK => Entry.Kind.sym_link,
++                        posix.DT.REG => Entry.Kind.file,
++                        posix.DT.SOCK => Entry.Kind.unix_domain_socket,
++                        posix.DT.WHT => Entry.Kind.whiteout,
++                        else => Entry.Kind.unknown,
++                    };
++
++                    return .{
++                        .result = IteratorResult{
++                            .name = PathString.init(name),
++                            .kind = entry_kind,
++                        },
++                    };
++                }
++            }
+         },
+         .linux => struct {
+             dir: Dir,
+--- a/src/bun.js/node/node_os.zig
++++ b/src/bun.js/node/node_os.zig
+@@ -526,6 +526,17 @@
+ 
+             // mac <string> The MAC address of the network interface
+             {
++                const SockAddrDL = extern struct {
++                    sdl_len: u8,
++                    sdl_family: u8,
++                    sdl_index: u16,
++                    sdl_type: u8,
++                    sdl_nlen: u8,
++                    sdl_alen: u8,
++                    sdl_slen: u8,
++                    sdl_data: [46]u8,
++                };
++
+                 // We need to search for the link-layer interface whose name matches this one
+                 var ll_it = interface_start;
+                 const maybe_ll_addr = while (ll_it) |ll_iface| : (ll_it = ll_iface.ifa_next) {
+@@ -539,8 +550,8 @@
+                     //  cast to a link-layer socket address
+                     if (comptime Environment.isLinux) {
+                         break @as(?*std.posix.sockaddr.ll, @ptrCast(@alignCast(ll_iface.ifa_addr)));
+-                    } else if (comptime Environment.isMac) {
+-                        break @as(?*C.sockaddr_dl, @ptrCast(@alignCast(ll_iface.ifa_addr)));
++                    } else if (comptime Environment.isMac or Environment.isFreeBSD) {
++                        break @as(?*SockAddrDL, @ptrCast(@alignCast(ll_iface.ifa_addr)));
+                     } else {
+                         @compileError("unreachable");
+                     }
+@@ -550,7 +561,7 @@
+                     // Encode its link-layer address.  We need 2*6 bytes for the
+                     //  hex characters and 5 for the colon separators
+                     var mac_buf: [17]u8 = undefined;
+-                    const addr_data = if (comptime Environment.isLinux) ll_addr.addr else if (comptime Environment.isMac) ll_addr.sdl_data[ll_addr.sdl_nlen..] else @compileError("unreachable");
++                    const addr_data = if (comptime Environment.isLinux) ll_addr.addr else if (comptime Environment.isMac or Environment.isFreeBSD) ll_addr.sdl_data[ll_addr.sdl_nlen..] else @compileError("unreachable");
+                     if (addr_data.len < 6) {
+                         const mac = "00:00:00:00:00:00";
+                         interface.put(globalThis, JSC.ZigString.static("mac"), JSC.ZigString.init(mac).withEncoding().toJS(globalThis));
+--- a/src/bun.js/webcore/blob.zig
++++ b/src/bun.js/webcore/blob.zig
+@@ -2930,6 +2930,17 @@
+             }
+ 
+             pub fn doFCopyFileWithReadWriteLoopFallback(this: *CopyFile) anyerror!void {
++                if (comptime !Environment.isMac) {
++                    var total_written: u64 = 0;
++                    switch (JSC.Node.NodeFS.copyFileUsingReadWriteLoop("", "", this.source_fd, this.destination_fd, 0, &total_written)) {
++                        .err => |err| {
++                            this.system_error = err.toSystemError();
++                            return bun.errnoToZigErr(err.errno);
++                        },
++                        .result => return,
++                    }
++                }
++
+                 switch (bun.sys.fcopyfile(this.source_fd, this.destination_fd, posix.system.COPYFILE_DATA)) {
+                     .err => |errno| {
+                         switch (errno.getErrno()) {
+@@ -3162,7 +3173,11 @@
+ 
+                     this.doClose();
+                 } else {
+-                    @compileError("TODO: implement copyfile");
++                    this.doFCopyFileWithReadWriteLoopFallback() catch {
++                        this.doClose();
++                        return;
++                    };
++                    this.doClose();
+                 }
+             }
+         };
+--- a/src/bun.zig
++++ b/src/bun.zig
+@@ -3457,6 +3457,15 @@
+         return spec;
+     }
+ 
++    if (comptime Environment.isFreeBSD) {
++        var spec = timespec{
++            .nsec = 0,
++            .sec = 0,
++        };
++        std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC, @ptrCast(&spec)) catch {};
++        return spec;
++    }
++
+     if (comptime Environment.isWindows) {
+         const ms = getRoughTickCountMs();
+         return timespec{
+--- a/src/c.zig
++++ b/src/c.zig
+@@ -426,7 +426,7 @@
+ pub fn _dlsym(handle: ?*anyopaque, name: [:0]const u8) ?*anyopaque {
+     if (comptime Environment.isWindows) {
+         return bun.windows.GetProcAddressA(handle, name);
+-    } else if (comptime Environment.isMac or Environment.isLinux) {
++    } else if (comptime Environment.isMac or Environment.isLinux or Environment.isFreeBSD) {
+         return std.c.dlsym(handle, name.ptr);
+     }
+ 
+--- a/src/crash_handler.zig
++++ b/src/crash_handler.zig
+@@ -716,7 +716,7 @@
+ 
+ fn handleSegfaultPosix(sig: i32, info: *const std.posix.siginfo_t, _: ?*const anyopaque) callconv(.C) noreturn {
+     const addr = switch (bun.Environment.os) {
+-        .linux => @intFromPtr(info.fields.sigfault.addr),
++        .linux => if (bun.Environment.isFreeBSD) @intFromPtr(info.addr) else @intFromPtr(info.fields.sigfault.addr),
+         .mac => @intFromPtr(info.addr),
+         else => @compileError(unreachable),
+     };
+--- a/src/deps/zig/lib/std/c/freebsd.zig
++++ b/src/deps/zig/lib/std/c/freebsd.zig
+@@ -16,6 +16,7 @@
+ pub extern "c" fn pthread_set_name_np(thread: std.c.pthread_t, name: [*:0]const u8) void;
+ pub extern "c" fn pthread_get_name_np(thread: std.c.pthread_t, name: [*:0]u8, len: usize) void;
+ pub extern "c" fn pipe2(fds: *[2]fd_t, flags: std.c.O) c_int;
++pub extern "c" fn eventfd(initval: c_uint, flags: c_uint) c_int;
+ pub extern "c" fn arc4random_buf(buf: [*]u8, len: usize) void;
+ 
+ pub extern "c" fn posix_memalign(memptr: *?*anyopaque, alignment: usize, size: usize) c_int;
+@@ -41,6 +42,75 @@
+     flags: u32,
+ ) c_int;
+ 
++pub const posix_spawnattr_t = *opaque {};
++pub const posix_spawn_file_actions_t = *opaque {};
++pub extern "c" fn posix_spawnattr_init(attr: *posix_spawnattr_t) c_int;
++pub extern "c" fn posix_spawnattr_destroy(attr: *posix_spawnattr_t) c_int;
++pub extern "c" fn posix_spawnattr_setflags(attr: *posix_spawnattr_t, flags: c_short) c_int;
++pub extern "c" fn posix_spawnattr_getflags(attr: *const posix_spawnattr_t, flags: *c_short) c_int;
++pub extern "c" fn posix_spawn_file_actions_init(actions: *posix_spawn_file_actions_t) c_int;
++pub extern "c" fn posix_spawn_file_actions_destroy(actions: *posix_spawn_file_actions_t) c_int;
++pub extern "c" fn posix_spawn_file_actions_addclose(actions: *posix_spawn_file_actions_t, filedes: fd_t) c_int;
++pub extern "c" fn posix_spawn_file_actions_addopen(
++    actions: *posix_spawn_file_actions_t,
++    filedes: fd_t,
++    path: [*:0]const u8,
++    oflag: c_int,
++    mode: mode_t,
++) c_int;
++pub extern "c" fn posix_spawn_file_actions_adddup2(
++    actions: *posix_spawn_file_actions_t,
++    filedes: fd_t,
++    newfildes: fd_t,
++) c_int;
++pub extern "c" fn posix_spawn_file_actions_addchdir_np(actions: *posix_spawn_file_actions_t, path: [*:0]const u8) c_int;
++pub extern "c" fn posix_spawn(
++    pid: *pid_t,
++    path: [*:0]const u8,
++    actions: ?*const posix_spawn_file_actions_t,
++    attr: ?*const posix_spawnattr_t,
++    argv: [*:null]const ?[*:0]const u8,
++    envp: [*:null]const ?[*:0]const u8,
++) c_int;
++pub extern "c" fn posix_spawnp(
++    pid: *pid_t,
++    file: [*:0]const u8,
++    actions: ?*const posix_spawn_file_actions_t,
++    attr: ?*const posix_spawnattr_t,
++    argv: [*:null]const ?[*:0]const u8,
++    envp: [*:null]const ?[*:0]const u8,
++) c_int;
++
++pub const kevent64_s = extern struct {
++    ident: usize,
++    filter: i16,
++    flags: u16,
++    fflags: u32,
++    data: i64,
++    udata: usize,
++    ext: [4]u64 = [_]u64{0} ** 4,
++};
++
++pub fn kevent64(
++    kq: c_int,
++    changelist: [*]const kevent64_s,
++    nchanges: c_int,
++    eventlist: [*]kevent64_s,
++    nevents: c_int,
++    flags: u32,
++    timeout: ?*const timespec,
++) c_int {
++    _ = flags;
++    return std.c.kevent(
++        kq,
++        @ptrCast(changelist),
++        nchanges,
++        @ptrCast(eventlist),
++        nevents,
++        timeout,
++    );
++}
++
+ pub const dl_iterate_phdr_callback = *const fn (info: *dl_phdr_info, size: usize, data: ?*anyopaque) callconv(.C) c_int;
+ pub extern "c" fn dl_iterate_phdr(callback: dl_iterate_phdr_callback, data: ?*anyopaque) c_int;
+ 
+@@ -362,8 +432,35 @@
+     tv_sec: time_t,
+     /// microseconds
+     tv_usec: suseconds_t,
++};
++
++pub const rusage = extern struct {
++    utime: timeval,
++    stime: timeval,
++    maxrss: c_long,
++    ixrss: c_long,
++    idrss: c_long,
++    isrss: c_long,
++    minflt: c_long,
++    majflt: c_long,
++    nswap: c_long,
++    inblock: c_long,
++    oublock: c_long,
++    msgsnd: c_long,
++    msgrcv: c_long,
++    nsignals: c_long,
++    nvcsw: c_long,
++    nivcsw: c_long,
+ };
+ 
++pub const utsname = extern struct {
++    sysname: [256]u8,
++    nodename: [256]u8,
++    release: [256]u8,
++    version: [256]u8,
++    machine: [256]u8,
++};
++
+ pub const dirent = extern struct {
+     /// File number of entry.
+     fileno: ino_t,
+--- a/src/fs.zig
++++ b/src/fs.zig
+@@ -811,14 +811,14 @@
+ 
+                     if (std.posix.setrlimit(limit_type, new_limit)) {
+                         if (i == 1) {
+-                            Limit.handles = limit.max;
++                            Limit.handles = @as(usize, @intCast(limit.max));
+                         } else {
+-                            Limit.stack = limit.max;
++                            Limit.stack = @as(usize, @intCast(limit.max));
+                         }
+                     } else |_| {}
+                 }
+ 
+-                if (i == LIMITS.len - 1) return limit.max;
++                if (i == LIMITS.len - 1) return @as(usize, @intCast(limit.max));
+             }
+         }
+ 
+--- a/src/futex.zig
++++ b/src/futex.zig
+@@ -352,7 +352,7 @@
+             var ts_ptr: ?*const std.posix.timespec = null;
+             if (timeout) |timeout_ns| {
+                 ts_ptr = &ts;
+-                std.posix.clock_gettime(std.posix.CLOCK_REALTIME, &ts) catch unreachable;
++                std.posix.clock_gettime(std.posix.CLOCK.REALTIME, &ts) catch unreachable;
+                 ts.tv_sec += @as(@TypeOf(ts.tv_sec), @intCast(timeout_ns / std.time.ns_per_s));
+                 ts.tv_nsec += @as(@TypeOf(ts.tv_nsec), @intCast(timeout_ns % std.time.ns_per_s));
+                 if (ts.tv_nsec >= std.time.ns_per_s) {
+--- a/src/http.zig
++++ b/src/http.zig
+@@ -170,14 +170,25 @@
+         } else if (Environment.isPosix) {
+             var sbytes: std.posix.off_t = adjusted_count;
+             const signed_offset = @as(i64, @bitCast(@as(u64, this.offset)));
+-            const errcode = bun.C.getErrno(std.c.sendfile(
+-                this.fd.cast(),
+-                socket.fd().cast(),
+-                signed_offset,
+-                &sbytes,
+-                null,
+-                0,
+-            ));
++            const errcode = bun.C.getErrno(if (comptime Environment.isFreeBSD)
++                std.c.sendfile(
++                    this.fd.cast(),
++                    socket.fd().cast(),
++                    signed_offset,
++                    @as(usize, @intCast(adjusted_count)),
++                    null,
++                    &sbytes,
++                    0,
++                )
++            else
++                std.c.sendfile(
++                    this.fd.cast(),
++                    socket.fd().cast(),
++                    signed_offset,
++                    &sbytes,
++                    null,
++                    0,
++                ));
+             const wrote = @as(u64, @intCast(sbytes));
+             this.offset +|= wrote;
+             this.remain -|= wrote;
+--- a/src/install/install.zig
++++ b/src/install/install.zig
+@@ -2155,13 +2155,12 @@
+                     },
+                 }
+             } else {
+-                const rc = Syscall.system.open(path, .{}, .{});
+-                switch (Syscall.getErrno(rc)) {
+-                    .SUCCESS => {
+-                        _ = Syscall.system.close(rc);
++                switch (bun.sys.open(path, bun.O.RDONLY, 0)) {
++                    .result => |fd| {
++                        _ = bun.sys.close(fd);
+                         return false;
+                     },
+-                    else => return true,
++                    .err => return true,
+                 }
+             }
+         }
+--- a/src/io/io_darwin.cpp
++++ b/src/io/io_darwin.cpp
+@@ -120,14 +120,86 @@
+ 
+ #else
+ 
+-// stub out these symbols
+-extern "C" int io_darwin_create_machport(unsigned long long wakeup, int fd,
+-                                         void *wakeup_buffer_,
+-                                         unsigned long long nbytes) {
+-  return 0;
++#if defined(__FreeBSD__)
++
++#include <sys/event.h>
++#include <cerrno>
++#include <cstddef>
++#include <cstdint>
++#include <ctime>
++
++struct bun_freebsd_waker {
++    int kq;
++    uintptr_t ident;
++};
++
++static bool submit_kevent_change(int kq, struct kevent* change)
++{
++    struct kevent out;
++    struct timespec timeout = { 0, 0 };
++
++    while (true) {
++        const int rc = kevent(kq, change, 1, &out, 1, &timeout);
++        if (rc == -1) {
++            if (errno == EINTR) {
++                continue;
++            }
++            return false;
++        }
++
++        if (rc == 1 && (out.flags & EV_ERROR) && out.data != 0) {
++            errno = static_cast<int>(out.data);
++            return false;
++        }
++
++        return true;
++    }
+ }
+ 
+-// stub out these symbols
+-extern "C" bool io_darwin_schedule_wakeup(void *waker) { return false; }
++extern "C" void* io_darwin_create_machport(void* wakeup, int fd,
++                                           void* wakeup_buffer_,
++                                           size_t nbytes)
++{
++    if (!wakeup_buffer_ || nbytes < sizeof(bun_freebsd_waker)) {
++        errno = ENOMEM;
++        return nullptr;
++    }
+ 
+-#endif
+\ No newline at end of file
++    auto* state = reinterpret_cast<bun_freebsd_waker*>(wakeup_buffer_);
++    state->kq = fd;
++    state->ident = reinterpret_cast<uintptr_t>(wakeup);
++    if (state->ident == 0) {
++        state->ident = reinterpret_cast<uintptr_t>(state);
++    }
++
++    struct kevent change;
++    EV_SET(&change, state->ident, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, nullptr);
++    if (!submit_kevent_change(fd, &change)) {
++        return nullptr;
++    }
++
++    return state;
++}
++
++extern "C" bool io_darwin_schedule_wakeup(void* waker)
++{
++    if (!waker) {
++        errno = EINVAL;
++        return false;
++    }
++
++    auto* state = reinterpret_cast<bun_freebsd_waker*>(waker);
++    struct kevent change;
++    EV_SET(&change, state->ident, EVFILT_USER, 0, NOTE_TRIGGER, 0, nullptr);
++    return submit_kevent_change(state->kq, &change);
++}
++
++#else
++
++// Non-Apple stub
++extern "C" void* io_darwin_create_machport(void*, int, void*, size_t) { return nullptr; }
++extern "C" bool io_darwin_schedule_wakeup(void*) { return false; }
++
++#endif
++
++#endif
+--- a/src/libarchive/libarchive.zig
++++ b/src/libarchive/libarchive.zig
+@@ -644,13 +644,16 @@
+                                         },
+                                     }
+                                 } else {
+-                                    break :brk (dir.createFileZ(path, .{ .truncate = true, .mode = mode }) catch |err| {
++                                    break :brk (dir.createFileZ(path, .{
++                                        .truncate = true,
++                                        .mode = @as(u16, @intCast(mode)),
++                                    }) catch |err| {
+                                         switch (err) {
+                                             error.AccessDenied, error.FileNotFound => {
+                                                 dir.makePath(std.fs.path.dirname(path_slice) orelse return err) catch {};
+                                                 break :brk (try dir.createFileZ(path, .{
+                                                     .truncate = true,
+-                                                    .mode = mode,
++                                                    .mode = @as(u16, @intCast(mode)),
+                                                 })).handle;
+                                             },
+                                             else => {
+--- a/src/sys.zig
++++ b/src/sys.zig
+@@ -746,7 +746,7 @@
+     };
+ }
+ 
+-const fnctl_int = if (Environment.isLinux) usize else c_int;
++const fnctl_int = if (Environment.isLinux or Environment.isFreeBSD) usize else c_int;
+ pub fn fcntl(fd: bun.FileDescriptor, cmd: i32, arg: fnctl_int) Maybe(fnctl_int) {
+     const result = fcntl_symbol(fd.cast(), cmd, arg);
+     if (Maybe(fnctl_int).errnoSys(result, .fcntl)) |err| return err;
+@@ -1260,7 +1260,10 @@
+     }
+ 
+     while (true) {
+-        const rc = Syscall.system.openat(dirfd.cast(), file_path, bun.O.toPacked(flags), perm);
++        const rc = if (comptime Environment.isFreeBSD)
++            std.c.openat(dirfd.cast(), file_path, bun.O.toPacked(flags), perm)
++        else
++            Syscall.system.openat(dirfd.cast(), file_path, bun.O.toPacked(flags), perm);
+         if (comptime Environment.allow_assert)
+             log("openat({}, {s}) = {d}", .{ dirfd, bun.sliceTo(file_path, 0), rc });
+         return switch (Syscall.getErrno(rc)) {
+@@ -2225,7 +2228,24 @@
+             return switch (readlink(proc_path, out_buffer)) {
+                 .err => |err| return .{ .err = err },
+                 .result => |result| .{ .result = result },
++            };
++        },
++        .freebsd => {
++            const out = std.os.getFdPath(fd.cast(), out_buffer) catch |err| {
++                return .{
++                    .err = .{
++                        .errno = switch (err) {
++                            error.FileNotFound => @intFromEnum(C.SystemErrno.EBADF),
++                            error.NameTooLong => @intFromEnum(C.SystemErrno.ENAMETOOLONG),
++                            error.AccessDenied => @intFromEnum(C.SystemErrno.EACCES),
++                            error.SystemResources => @intFromEnum(C.SystemErrno.ENOMEM),
++                            else => @intFromEnum(C.SystemErrno.EINVAL),
++                        },
++                        .syscall = .fcntl,
++                    },
++                };
+             };
++            return .{ .result = out };
+         },
+         else => @compileError("querying for canonical path of a handle is unsupported on this host"),
+     }
+@@ -2688,7 +2708,7 @@
+         ) orelse Maybe(void).success;
+     }
+ 
+-    if (comptime Environment.isMac) {
++    if (comptime Environment.isMac or Environment.isFreeBSD) {
+         return Maybe(void).errnoSysFd(
+             std.c.lseek(fd.cast(), @intCast(offset), posix.SEEK.SET),
+             .lseek,
+@@ -2778,7 +2798,7 @@
+         return Maybe(bun.FileDescriptor){ .result = bun.toFD(target) };
+     }
+ 
+-    const ArgType = if (comptime Environment.isLinux) usize else c_int;
++    const ArgType = if (comptime Environment.isLinux or Environment.isFreeBSD) usize else c_int;
+     const out = system.fcntl(fd.cast(), @as(i32, bun.C.F.DUPFD_CLOEXEC), @as(ArgType, 0));
+     log("dup({d}) = {d}", .{ fd.cast(), out });
+     if (Maybe(bun.FileDescriptor).errnoSysFd(out, .dup, fd)) |err| {
+--- a/src/watcher.zig
++++ b/src/watcher.zig
+@@ -424,7 +424,7 @@
+     }
+ };
+ 
+-const PlatformWatcher = if (Environment.isMac)
++const PlatformWatcher = if (Environment.isMac or Environment.isFreeBSD)
+     DarwinWatcher
+ else if (Environment.isLinux)
+     INotify

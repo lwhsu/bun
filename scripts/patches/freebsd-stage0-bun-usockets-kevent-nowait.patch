@@ -1,0 +1,34 @@
+--- a/packages/bun-usockets/src/internal/eventing/epoll_kqueue.h
++++ b/packages/bun-usockets/src/internal/eventing/epoll_kqueue.h
+@@ -34,6 +34,7 @@
+ 
+ #if defined(__FreeBSD__)
+ #include <stdint.h>
++#include <time.h>
+ #define kevent64_s kevent
+ #ifndef KEVENT_FLAG_ERROR_EVENTS
+ #define KEVENT_FLAG_ERROR_EVENTS 0
+@@ -44,13 +45,21 @@
+ static inline int kevent64(int kq, const struct kevent64_s *changelist, int nchanges,
+                            struct kevent64_s *eventlist, int nevents, unsigned int flags,
+                            const struct timespec *timeout) {
+-    (void)flags;
++    struct timespec no_wait = { 0, 0 };
++    const struct timespec *effective_timeout = timeout;
++
++    // FreeBSD kevent blocks with timeout=NULL even for change-submission calls.
++    // uSockets uses KEVENT_FLAG_ERROR_EVENTS for these "apply changes now" calls.
++    if (flags == KEVENT_FLAG_ERROR_EVENTS && nchanges > 0 && timeout == NULL) {
++        effective_timeout = &no_wait;
++    }
++
+     return kevent(
+         kq,
+         (const struct kevent *)changelist,
+         nchanges,
+         (struct kevent *)eventlist,
+         nevents,
+-        timeout);
++        effective_timeout);
+ }
+ #endif

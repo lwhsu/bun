@@ -10,3 +10,4 @@ index 4cdff8250e..9ef5f71b57 100644
      });
      obj.bundle_compiler_rt = false;
      obj.formatted_panics = true;
+     obj.root_module.omit_frame_pointer = false;
