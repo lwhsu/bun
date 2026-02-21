@@ -95,6 +95,22 @@ This section documents the current cold-start dependency chain implemented by `s
 5. Script installs produced stage0 binary to deterministic path:
    - `${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun`
 
+### Stage0 runtime acceptance gate (current behavior)
+
+`scripts/bootstrap-freebsd.sh` now validates stage0 runtime before accepting/reusing it.
+
+Validation commands:
+
+1. `${stage0} --version`
+2. `${stage0} -e 'console.log(1+1)'`
+3. `${stage0} -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'`
+
+Behavior:
+
+1. If an existing stage0 binary fails any check, bootstrap forcibly rebuilds stage0.
+2. During forced rebuild, bootstrap removes stale legacy generated code outputs before regenerating codegen artifacts.
+3. If post-build stage0 still fails runtime validation, bootstrap exits non-zero.
+
 ### How stage0 is used afterwards
 
 1. Current-tree CMake configure receives:

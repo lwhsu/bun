@@ -467,6 +467,74 @@ sync_legacy_codegen_outputs() {
   fi
 }
 
+clean_legacy_codegen_outputs() {
+  local codegen_dir="${LEGACY_WORKTREE}/build/codegen"
+  local bindings_dir="${LEGACY_WORKTREE}/src/bun.js/bindings"
+  local builtins_dir="${LEGACY_WORKTREE}/src/js/builtins"
+  local src_dir="${LEGACY_WORKTREE}/src"
+
+  rm -rf "${codegen_dir}"
+
+  local generated_files=(
+    "ZigGeneratedClasses.h"
+    "ZigGeneratedClasses.cpp"
+    "ZigGeneratedClasses.zig"
+    "ZigGeneratedClasses+DOMClientIsoSubspaces.h"
+    "ZigGeneratedClasses+DOMIsoSubspaces.h"
+    "ZigGeneratedClasses+lazyStructureHeader.h"
+    "ZigGeneratedClasses+lazyStructureImpl.h"
+    "SyntheticModuleType.h"
+    "InternalModuleRegistry+createInternalModuleById.h"
+    "InternalModuleRegistryConstants.h"
+    "InternalModuleRegistry+enum.h"
+    "InternalModuleRegistry+numberOfModules.h"
+    "NativeModuleImpl.h"
+    "GeneratedJS2Native.h"
+    "BunObject.lut.h"
+    "ZigGlobalObject.lut.h"
+    "JSBuffer.lut.h"
+    "BunProcess.lut.h"
+    "ProcessBindingConstants.lut.h"
+    "ProcessBindingNatives.lut.h"
+    "JSSink.h"
+    "JSSink.cpp"
+    "JSSink.lut.h"
+    "ErrorCode+Data.h"
+    "ErrorCode+List.h"
+    "WebCoreJSBuiltins.h"
+    "WebCoreJSBuiltins.cpp"
+  )
+
+  for name in "${generated_files[@]}"; do
+    rm -f "${bindings_dir}/${name}"
+  done
+
+  rm -f "${builtins_dir}/BunBuiltinNames+extras.h"
+  rm -f "${src_dir}/ResolvedSourceTag.zig" "${src_dir}/ErrorCode.zig"
+}
+
+validate_stage0_runtime() {
+  local bin="$1"
+
+  if [[ ! -x "${bin}" ]]; then
+    return 1
+  fi
+
+  if ! "${bin}" --version >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! "${bin}" -e 'console.log(1+1)' >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! "${bin}" -e 'import fs from "node:fs"; console.log(typeof fs.readFile)' >/dev/null 2>&1; then
+    return 1
+  fi
+
+  return 0
+}
+
 pick_legacy_ar() {
   if command -v llvm-ar >/dev/null 2>&1; then
     command -v llvm-ar
@@ -634,7 +702,17 @@ ensure_legacy_worktree() {
 mkdir -p "${BOOTSTRAP_DIR}" "${STAGE0_DIR}" "${SHIM_BIN_DIR}"
 ln -sf "$(command -v gmake)" "${SHIM_BIN_DIR}/make"
 
-if [[ ! -x "${STAGE0_BIN}" ]]; then
+STAGE0_REBUILD_REASON=""
+if [[ -x "${STAGE0_BIN}" ]]; then
+  if ! validate_stage0_runtime "${STAGE0_BIN}"; then
+    STAGE0_REBUILD_REASON="existing stage0 failed runtime validation"
+  fi
+else
+  STAGE0_REBUILD_REASON="stage0 binary missing"
+fi
+
+if [[ -n "${STAGE0_REBUILD_REASON}" ]]; then
+  echo "[bootstrap] rebuilding stage0: ${STAGE0_REBUILD_REASON}"
   pick_legacy_zig
   LEGACY_ZIG_BIN="$(command -v "${LEGACY_ZIG}")"
   LEGACY_AR="$(pick_legacy_ar)"
@@ -667,6 +745,7 @@ EOF2
       gmake -j1 AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" vendor
 
     patch_legacy_worktree_for_freebsd
+    clean_legacy_codegen_outputs
     generate_legacy_codegen_files
     sync_legacy_codegen_outputs
 
@@ -693,6 +772,11 @@ fi
 
 echo "[bootstrap] stage0 ready: ${STAGE0_BIN}"
 "${STAGE0_BIN}" --version
+if ! validate_stage0_runtime "${STAGE0_BIN}"; then
+  echo "error: stage0 runtime validation failed after build (${STAGE0_BIN})" >&2
+  echo "  expected stage0 to run: --version, -e '1+1', and import node:fs" >&2
+  exit 1
+fi
 
 CURRENT_ZIG_LIB_DIR="$(resolve_current_zig_lib_dir "${CURRENT_ZIG_BIN}")"
 if [[ -n "${CURRENT_ZIG_LIB_DIR}" ]]; then

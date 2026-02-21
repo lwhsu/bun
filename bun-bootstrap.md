@@ -2809,3 +2809,43 @@ Checkpoint commit:
   - `build/20260221-2027-current-from-cleanroom-step1/bun --version` => `1.3.10`
   - `build/20260221-2027-current-from-cleanroom-step1/bun -e 'console.log(1+1)'` => `2`
   - `build/20260221-2027-current-from-cleanroom-step1/bun -e 'import "node:fs"; console.log("ok")'` => `ok`
+
+## 2026-02-22 checkpoint: stage0 runtime hardening (`node:fs`) in progress
+
+### Objective
+
+- Tighten stage0 reliability so `import fs from "node:fs"` works consistently before stage0 is accepted by bootstrap.
+
+### Findings before changes
+
+- Regression repro still present in cleanroom stage0 artifact:
+  - `build/20260221-2027-freebsd-bootstrap-cleanroom-step1/stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'`
+  - failure: `ReferenceError: Can't find variable: __publicField` from `node:stream`/`Denqueue` path.
+- Another stage0 artifact at `build/freebsd-bootstrap/stage0/bun` passes the same `node:fs` import check.
+- Final bun (`build/20260221-2027-current-from-cleanroom-step1/bun`) passes `node:fs` import.
+
+### Hardening changes applied
+
+- Updated `scripts/bootstrap-freebsd.sh`:
+  1. Added `validate_stage0_runtime()` that checks:
+     - `--version`
+     - `-e 'console.log(1+1)'`
+     - `-e 'import fs from "node:fs"; console.log(typeof fs.readFile)'`
+  2. Changed stage0 gating logic:
+     - if stage0 exists but fails runtime validation, force a stage0 rebuild.
+  3. Added `clean_legacy_codegen_outputs()` and invoke it before legacy codegen generation during rebuild:
+     - removes stale `build/codegen` outputs
+     - removes synced generated headers/zig files from `src/bun.js/bindings`, `src/js/builtins`, and `src/`
+     - goal: prevent stale generated artifacts from surviving rebuild.
+  4. Added a post-build hard fail if stage0 runtime validation still fails.
+
+### Validation run started
+
+- Command running:
+  - `BUN_FREEBSD_ALLOW_DOWNLOADS=1 BUN_FREEBSD_BOOTSTRAP_DIR=/home/lwhsu/killme/bun/build/20260221-2027-freebsd-bootstrap-cleanroom-step1 BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/20260221-2027-current-from-cleanroom-step1 BUN_FREEBSD_CMAKE_BUILD_TYPE=Release BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd-release/stage3/bin/zig ./scripts/bootstrap-freebsd.sh`
+- Initial script behavior confirmed:
+  - detected bad stage0 and entered forced rebuild path:
+    - `[bootstrap] rebuilding stage0: existing stage0 failed runtime validation`
+- Current status:
+  - long legacy rebuild in progress (`release-bindings`/`build-obj` phase); no deadlock symptoms so far.
+
