@@ -3260,3 +3260,26 @@ Actions performed:
   - compiler-switch rerun works (stock Zig failure confirmed, oven-zig success confirmed)
 - **C-strict: pending**
   - full no-fallback mode remains blocked by stage0 runtime behavior (`bundle-modules.ts` under stage0)
+
+## 2026-02-22: Phase E partial gate run on build/release/bun
+
+### Commands and results
+
+- Smoke checks on `build/release/bun`:
+  - `--version` => `1.3.10`
+  - `-e 'console.log(process.platform, process.arch, 1+1)'` => `freebsd x64 2`
+  - `-e 'import fs from "node:fs"; console.log(typeof fs.readFile)'` => `function`
+- Spawn focused:
+  - `build/release/bun test test/js/bun/spawn/spawn.test.ts -t "Uint8Array works as stdin"`
+  - result: pass (`2 pass`, `0 fail`)
+- Shell focused:
+  - `build/release/bun test test/js/bun/shell/shell-hang.test.ts`
+  - result: pass (`6 pass`, `0 fail`)
+- Watcher coverage:
+  - `build/release/bun test test/js/node/watch/fs.watch.test.ts`
+  - result: repeated timeouts/failures across `fs.watch` and `fs.promises.watch`, run terminated (`RC_FSWATCH=143`).
+
+### Interpretation
+
+- Core runtime, spawn, and shell are in good shape for this checkpoint.
+- FreeBSD watcher behavior remains a major open runtime parity gap and should be treated as a Phase D/E priority.

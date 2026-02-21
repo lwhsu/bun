@@ -379,6 +379,16 @@ Goal: define and execute a FreeBSD confidence gate before upstreaming.
 
 Status: **In progress**.
 
+Latest checkpoint (2026-02-22):
+
+1. `build/release/bun` smoke checks pass (`--version`, arithmetic, `node:fs` import).
+2. Spawn and shell focused tests pass:
+   - `test/js/bun/spawn/spawn.test.ts -t "Uint8Array works as stdin"` passed.
+   - `test/js/bun/shell/shell-hang.test.ts` passed.
+3. Watcher coverage currently fails on FreeBSD:
+   - `test/js/node/watch/fs.watch.test.ts` shows widespread timeout failures and did not complete cleanly in the timed run.
+   - This is now a prioritized Phase D/E follow-up item.
+
 How to do it:
 
 1. Run baseline smoke checks on stage0 and final.
