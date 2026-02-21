@@ -78,6 +78,8 @@ Current status at 2026-02-22:
    - `bun install --frozen-lockfile` segfault
    - `bundle-modules.ts` segfault under stage0
    - `bindgen.ts` functional mismatch under stage0
+4. Latest crash narrowing for install path:
+   - stage0 `bun install` core backtrace points at `src.sys.File.toSource` during lockfile workspace parsing (`Package.processWorkspaceName*`).
 
 ## 2.2 Current Stage0 Build Design (How It Works Today)
 

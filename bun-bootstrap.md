@@ -3076,3 +3076,35 @@ build/freebsd-selfhost-stepD/bun -e 'console.log(1+1)'
 - `stage0 bun install --frozen-lockfile` still segfaults.
 - stage0 execution of `src/codegen/bundle-modules.ts` still segfaults in no-fallback mode.
 - stage0 execution of `src/codegen/bindgen.ts` still hits functional mismatch (`DevServer.bind.ts` export validation path).
+
+## 2026-02-22 investigation note: stage0 `bun install` crash trace
+
+### Repro
+
+```bash
+cd /home/lwhsu/killme/bun/packages/bun-error
+/home/lwhsu/killme/bun/build/freebsd-bootstrap/stage0/bun install --frozen-lockfile
+```
+
+### Result
+
+- Immediate crash (`panic(main thread): Segmentation fault at address 0x0`).
+- Core captured at:
+  - `packages/bun-error/bun.core`
+- Saved logs:
+  - `build/freebsd-bootstrap/logs/stage0-install-bun-error.err`
+  - `build/freebsd-bootstrap/logs/stage0-install-bun-error-lldb.txt`
+
+### Backtrace signal
+
+- `lldb` shows crash flow through install lockfile workspace parsing:
+  - `src.sys.File.toSource`
+  - `src.install.lockfile.Package.processWorkspaceName`
+  - `src.install.lockfile.Package.processWorkspaceNamesArray`
+  - `src.install.install.PackageManager.init`
+  - `src.cli.install_command.InstallCommand.exec`
+
+### Working conclusion
+
+- Remaining no-fallback blocker is now narrowed to stage0 install runtime behavior, with a concrete crash site (`File.toSource` path).
+- This is separate from the previously fixed bindgen-v2 list-outputs command-path issue.
