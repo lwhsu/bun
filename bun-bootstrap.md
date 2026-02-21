@@ -2644,3 +2644,49 @@ Checkpoint commit:
    - generate `stage0-freebsd-x64/bun`
    - use generated stage0 to drive full build path
 3. Keep running focused spawn regressions after each bootstrap patch touching eventing/process I/O.
+
+## 2026-02-21 checkpoint: FreeBSD cold-start + selfhost stepD succeeded
+
+### What worked
+
+- Branch checkpoint commit created before rerun:
+  - `eae2d6eff7`
+- Stage0 validation (existing bootstrap artifact):
+  - `build/freebsd-bootstrap/stage0/bun --version` => `0.0.0`
+  - `build/freebsd-bootstrap/stage0/bun -e "console.log(1+1)"` => `2`
+
+### Root cause of prior zig/parser churn
+
+- The failing `bun-zig.o` runs were using mixed/stale Zig cache state in:
+  - `build/freebsd-selfhost-stepD/cache/zig/local`
+  - `build/freebsd-selfhost-stepD/cache/zig/global`
+- After clearing both caches and rebuilding with oven-zig `stage3/bin/zig`, `zig build obj ...` completed successfully.
+- Evidence:
+  - long `zig build-obj` run finished with:
+    - `Build Summary: 5/5 steps succeeded`
+    - `install generated to bun-zig.o success`
+  - output object:
+    - `build/freebsd-selfhost-stepD/bun-zig.o` (~253 MB)
+
+### Full bootstrap result
+
+- Re-ran:
+  - `BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/freebsd-selfhost-stepD BUN_FREEBSD_CMAKE_BUILD_TYPE=Release BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/zig-fork-wrapper.sh ./scripts/bootstrap-freebsd.sh`
+- Script completed:
+  - `stage0: /home/lwhsu/killme/bun/build/freebsd-bootstrap/stage0/bun`
+  - `final : /home/lwhsu/killme/bun/build/freebsd-selfhost-stepD/bun`
+
+### Runtime verification
+
+- Final selfhost bun:
+  - `build/freebsd-selfhost-stepD/bun --version` => `1.3.10`
+  - `build/freebsd-selfhost-stepD/bun -e "console.log(1+1)"` => `2`
+- Stage0 recheck:
+  - `build/freebsd-bootstrap/stage0/bun --version` => `0.0.0`
+  - `build/freebsd-bootstrap/stage0/bun -e "console.log('stage0 ok')"` => `stage0 ok`
+
+### Next
+
+1. Record this success checkpoint in git (docs-only commit).
+2. Add a small reproducibility guard in bootstrap flow to avoid cross-Zig cache reuse (or document mandatory cache reset when switching Zig binaries).
+3. Run selected FreeBSD smoke tests with `build/freebsd-selfhost-stepD/bun` to confirm no regression from the rebuilt toolchain path.
