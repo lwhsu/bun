@@ -2719,3 +2719,9 @@ Checkpoint commit:
   - final binary still valid:
     - `build/freebsd-selfhost-stepD/bun --version` => `1.3.10`
     - `build/freebsd-selfhost-stepD/bun -e "console.log(1+1)"` => `2`
+
+### Additional runtime check
+
+- Final stepD bun passes focused spawn regression:
+  - `timeout 600 build/freebsd-selfhost-stepD/bun test test/js/bun/spawn/spawn.test.ts -t "Uint8Array works as stdin"`
+  - result: `2 pass, 0 fail`
