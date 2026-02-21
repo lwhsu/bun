@@ -1,6 +1,6 @@
 # FreeBSD Bootstrap and Upstream Readiness Plan
 
-Last updated: 2026-02-21
+Last updated: 2026-02-22
 Repository: `/home/lwhsu/killme/bun`
 Branch at planning time: `freebsd-bootstrap` (`6e4df755017d`)
 
@@ -9,12 +9,21 @@ Branch at planning time: `freebsd-bootstrap` (`6e4df755017d`)
 ### Verified now
 
 - `git status --porcelain` in main worktree is clean.
+- Canonical full bootstrap script rerun succeeded in active dirs:
+  - `BUN_FREEBSD_BOOTSTRAP_DIR=/home/lwhsu/killme/bun/build/freebsd-bootstrap`
+  - `BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/freebsd-selfhost-stepD`
 - Stage0 binary exists and runs:
   - `build/20260221-2027-freebsd-bootstrap-cleanroom-step1/stage0/bun --version` -> `0.0.0`
   - `build/20260221-2027-freebsd-bootstrap-cleanroom-step1/stage0/bun -e 'console.log(1+1)'` -> `2`
+- Active stage0 runtime gate now also passes for node fs import:
+  - `build/freebsd-bootstrap/stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'` -> `function`
 - Final current-tree binary exists and runs:
   - `build/20260221-2027-current-from-cleanroom-step1/bun --version` -> `1.3.10`
   - `build/20260221-2027-current-from-cleanroom-step1/bun -e 'console.log(1+1)'` -> `2`
+- Active final binary refreshed and validated:
+  - `build/freebsd-selfhost-stepD/bun --version` -> `1.3.10`
+  - `build/freebsd-selfhost-stepD/bun -e 'console.log(1+1)'` -> `2`
+  - `build/freebsd-selfhost-stepD/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'` -> `function`
 
 ### State that still needs cleanup/normalization
 
@@ -234,7 +243,7 @@ Exit criteria:
 
 Goal: make cold-start script robust and deterministic on FreeBSD.
 
-Status: **In progress** (script works in cleanroom, rerun matrix still pending after Phase B cleanup).
+Status: **In progress** (major milestone reached: canonical dirs end-to-end rerun succeeded on 2026-02-22).
 
 How to do it:
 
@@ -242,6 +251,7 @@ How to do it:
 2. Run it from a cleaned workspace using canonical dirs.
 3. Re-run without clearing caches to prove idempotence.
 4. Re-run after Zig variant switch to prove cache fingerprint invalidation.
+5. Record long Zig object compile expectation in docs/logs to avoid false hang diagnosis.
 
 How to reproduce:
 
@@ -264,8 +274,9 @@ How to verify:
    - `${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun`
 3. Final binary exists at `${BUN_FREEBSD_BUILD_DIR}/bun`.
 4. Stage0 runtime gate includes `import fs from "node:fs"` and must print `function` for `typeof fs.readFile`.
-4. Stage0 runtime gate passes:
+5. Stage0 runtime gate passes:
    - `${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'`
+6. Note for reviewers: `zig build-obj` can take around 15 minutes with high CPU before finishing.
 
 How to review:
 

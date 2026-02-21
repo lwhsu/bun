@@ -2952,3 +2952,52 @@ Checkpoint commit:
 
 - Stage0 runtime gate (`node:fs`) now has a deterministic source-side workaround for this legacy bootstrap commit.
 - This is intentionally scoped to legacy bootstrap patching only; no current-tree runtime behavior is changed.
+
+## 2026-02-22 checkpoint: full bootstrap run succeeded in canonical dirs
+
+### Command used
+
+```bash
+cd /home/lwhsu/killme/bun
+export BUN_FREEBSD_ALLOW_DOWNLOADS=1
+export BUN_FREEBSD_BOOTSTRAP_DIR=/home/lwhsu/killme/bun/build/freebsd-bootstrap
+export BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/freebsd-selfhost-stepD
+export BUN_FREEBSD_CMAKE_BUILD_TYPE=Release
+export BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd-release/stage3/bin/zig
+./scripts/bootstrap-freebsd.sh
+```
+
+### Result
+
+- Script completed and produced:
+  - `build/freebsd-bootstrap/stage0/bun`
+  - `build/freebsd-selfhost-stepD/bun`
+- Final bun binary mtime after this run:
+  - `build/freebsd-selfhost-stepD/bun` -> `Feb 22 02:47:49 2026`
+
+### Runtime verification
+
+```bash
+build/freebsd-bootstrap/stage0/bun --version
+# 0.0.0
+build/freebsd-bootstrap/stage0/bun -e 'console.log(1+1)'
+# 2
+build/freebsd-bootstrap/stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'
+# function
+
+build/freebsd-selfhost-stepD/bun --version
+# 1.3.10
+build/freebsd-selfhost-stepD/bun -e 'console.log(1+1)'
+# 2
+build/freebsd-selfhost-stepD/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'
+# function
+```
+
+### Timing note (important for hang triage)
+
+- In this successful run, the long Zig object phase:
+  - command: `zig build-obj ...` (spawned by `zig build ... obj`)
+  - elapsed: about **15 minutes** before exit
+  - behavior: sustained ~99% CPU; RSS grew to ~7.9 GB before completion
+- Conclusion:
+  - this phase is compute-heavy and can look stalled; treat as normal unless CPU drops to idle or process exits with error/OOM.
