@@ -2849,3 +2849,28 @@ Checkpoint commit:
 - Current status:
   - long legacy rebuild in progress (`release-bindings`/`build-obj` phase); no deadlock symptoms so far.
 
+
+### Result of this run
+
+- The forced rebuild path completed the full legacy dependency/build/link sequence and reached stage0 handoff.
+- Script failed at the new post-build stage0 runtime gate:
+  - `error: stage0 runtime validation failed after build (...)`
+- Repro after rebuild still fails on cleanroom stage0:
+  - `build/20260221-2027-freebsd-bootstrap-cleanroom-step1/stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'`
+  - failure remains `ReferenceError: Can't find variable: __publicField` (from `node:stream` / `Denqueue`).
+
+### New isolation finding
+
+- Generated internal module registry artifacts are identical between failing and passing legacy worktrees:
+  - `InternalModuleRegistryConstants.h` hash matches in both worktrees.
+  - `InternalModuleRegistry+createInternalModuleById.h` hash matches in both worktrees.
+- Legacy WebKit package archives are **different** between failing cleanroom and previously passing bootstrap dirs, even though both report the same `BUN_WEBKIT_VERSION` commit (`147ed53838e...`):
+  - `libJavaScriptCore.a` hash differs
+  - `libWTF.a` hash differs
+- This strongly suggests current stage0 `node:fs` behavioral split is correlated with WebKit package build drift (same commit, different packaged archive content), not only generated module payload content.
+
+### Immediate next step
+
+1. Rebuild stage0 using the known-good legacy WebKit package from `build/freebsd-bootstrap/bun-webkit-legacy` to verify whether `node:fs` success tracks WebKit package variant.
+2. If confirmed, pin/verify deterministic legacy WebKit package fingerprint (not just commit hash) in bootstrap flow.
+

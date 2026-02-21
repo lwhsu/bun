@@ -258,12 +258,17 @@ How to verify:
 2. Stage0 path is deterministic:
    - `${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun`
 3. Final binary exists at `${BUN_FREEBSD_BUILD_DIR}/bun`.
+4. Stage0 runtime gate passes:
+   - `${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'`
 
 How to review:
 
 1. Inspect `scripts/bootstrap-freebsd.sh` and patch list in `scripts/patches/`.
 2. Confirm error paths are explicit (missing zig/webkit/patch failures).
 3. Confirm cache fingerprint logic is still present and exercised.
+4. Confirm legacy WebKit package reproducibility:
+   - same commit metadata (`BUN_WEBKIT_VERSION`) is not sufficient by itself
+   - compare archive fingerprints (`libJavaScriptCore.a`, `libWTF.a`) when behavior diverges.
 
 Exit criteria:
 
@@ -521,6 +526,12 @@ build/freebsd-selfhost-stepD/bun -e 'import fs from "node:fs"; console.log(typeo
 2. Stage0 binary exists at `build/freebsd-bootstrap/stage0/bun`.
 3. Final binary exists at `build/freebsd-selfhost-stepD/bun`.
 4. If rerunning with different zig binary, script reports cache fingerprint reset.
+5. If stage0 `node:fs` behavior differs across runs, compare WebKit package archive fingerprints:
+
+```bash
+sha256 -q build/freebsd-bootstrap/bun-webkit-legacy/lib/libJavaScriptCore.a
+sha256 -q build/freebsd-bootstrap/bun-webkit-legacy/lib/libWTF.a
+```
 
 ## 5. Definition of Done for This Porting Track
 
