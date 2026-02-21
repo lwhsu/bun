@@ -2690,3 +2690,32 @@ Checkpoint commit:
 1. Record this success checkpoint in git (docs-only commit).
 2. Add a small reproducibility guard in bootstrap flow to avoid cross-Zig cache reuse (or document mandatory cache reset when switching Zig binaries).
 3. Run selected FreeBSD smoke tests with `build/freebsd-selfhost-stepD/bun` to confirm no regression from the rebuilt toolchain path.
+
+## 2026-02-21 checkpoint: bootstrap cache-fingerprint hardening landed
+
+### Change
+
+- Updated:
+  - `scripts/bootstrap-freebsd.sh`
+- Added `ensure_current_zig_cache_fingerprint`:
+  - records active zig command/path/version/sha256 at:
+    - `${BUILD_DIR}/cache/zig/compiler-fingerprint.txt`
+  - if fingerprint changes, script now clears:
+    - `${BUILD_DIR}/cache/zig/local`
+    - `${BUILD_DIR}/cache/zig/global`
+
+### Why
+
+- Prevents silent reuse of incompatible/stale Zig cache entries when switching between:
+  - system `/usr/local/bin/zig`
+  - local oven-zig wrapper/binaries
+- This directly addresses the prior `bun-zig.o` parser-error loop caused by cache contamination across zig variants.
+
+### Validation
+
+- `bash -n scripts/bootstrap-freebsd.sh` => pass
+- Re-ran full bootstrap command with stepD settings:
+  - completed successfully
+  - final binary still valid:
+    - `build/freebsd-selfhost-stepD/bun --version` => `1.3.10`
+    - `build/freebsd-selfhost-stepD/bun -e "console.log(1+1)"` => `2`
