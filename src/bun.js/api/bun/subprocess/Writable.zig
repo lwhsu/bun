@@ -157,8 +157,13 @@ pub const Writable = union(enum) {
         }
 
         if (comptime Environment.isPosix) {
-            if (stdio.* == .pipe) {
-                _ = bun.sys.setNonblocking(result.?);
+            switch (stdio.*) {
+                .pipe, .readable_stream, .blob, .array_buffer => {
+                    if (result) |fd| {
+                        _ = bun.sys.setNonblocking(fd);
+                    }
+                },
+                else => {},
             }
         }
 

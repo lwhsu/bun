@@ -2507,3 +2507,37 @@ Applied in `src/bun.js/api/bun/process.zig`:
 
 1. keep correctness-first FreeBSD waiter-thread path for async/onExit while optimizing throughput
 2. continue dedicated root-cause work for sync stdin deadlock (`spawnSync` + large stdin/stdout echo)
+
+## 2026-02-21 checkpoint: Writable nonblocking attempt + repro rerun
+
+### Build status
+
+- Rebuilt `build/freebsd-selfhost-stepC/bun-profile` after local `Writable.zig` change.
+- Long Zig object phase (`zig build-obj` for `bun-zig.o`) completed successfully in ~15 minutes on this host.
+
+### Change under test
+
+- `src/bun.js/api/bun/subprocess/Writable.zig`
+  - expanded POSIX nonblocking setup from only `.pipe` to:
+    - `.pipe`
+    - `.readable_stream`
+    - `.blob`
+    - `.array_buffer`
+  - intent: avoid blocking writes when stdin payload is fed through non-pipe writer modes.
+
+### Validation results
+
+- Async/onExit stress:
+  - `REPRO_COUNT=40 timeout 120 ./build/freebsd-selfhost-stepC/bun-profile build/freebsd-bootstrap/repro-spawn-onexit-loop.js`
+  - result: **pass**, `repro done`
+  - runtime: `42.15s real`
+
+- Sync stdin stress:
+  - `timeout 180 ./build/freebsd-selfhost-stepC/bun-profile build/freebsd-bootstrap/repro-spawn-uint8-stdin.js`
+  - result: **timeout** (`exit 124`, `3m0.02s real`)
+  - conclusion: this change does **not** resolve the FreeBSD stdin deadlock.
+
+### Next
+
+1. keep this checkpoint committed for traceability
+2. investigate the sync path in `Subprocess`/`Readable`/`Writable` event handling and blocking edges (stdin writer vs stdout reader progress guarantees)
