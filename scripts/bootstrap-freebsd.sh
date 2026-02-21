@@ -313,6 +313,16 @@ patch_legacy_worktree_for_freebsd() {
     apply_patch_if_needed "${sync_watch_patch}" "FreeBSD legacy sync subprocess wait compatibility patch"
   fi
 
+  local waiter_thread_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-waiter-thread-default.patch"
+  if [[ -f "${process_zig_file}" ]] \
+    && grep -q "var should_use_waiter_thread = false;" "${process_zig_file}"; then
+    if [[ ! -f "${waiter_thread_patch}" ]]; then
+      echo "error: missing patch file: ${waiter_thread_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${waiter_thread_patch}" "FreeBSD legacy waiter-thread default patch"
+  fi
+
   local prim_file="${LEGACY_WORKTREE}/src/deps/mimalloc/src/prim/unix/prim.c"
   if [[ -f "${prim_file}" ]] && grep -q 'try_alignment, hint);' "${prim_file}"; then
     # FreeBSD/MAP_ALIGNED path in this historical tree logs `hint` before declaration.
@@ -395,6 +405,17 @@ patch_legacy_worktree_for_freebsd() {
       exit 1
     fi
     apply_patch_if_needed "${read_syscalls_patch}" "FreeBSD legacy read syscall compatibility patch"
+  fi
+
+  local zig_freebsd_file="${LEGACY_WORKTREE}/src/deps/zig/lib/std/c/freebsd.zig"
+  local zig_freebsd_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-zig-stdlib-freebsd.patch"
+  if [[ -f "${zig_freebsd_file}" ]] \
+    && ! grep -q 'pub const rusage = extern struct' "${zig_freebsd_file}"; then
+    if [[ ! -f "${zig_freebsd_patch}" ]]; then
+      echo "error: missing patch file: ${zig_freebsd_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${zig_freebsd_patch}" "FreeBSD legacy zig stdlib freebsd declarations patch"
   fi
 
 }
@@ -839,6 +860,7 @@ cmake \
   -B "${BUILD_DIR}" \
   -GNinja \
   -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+  -DSKIP_CODEGEN=OFF \
   -DBUN_EXECUTABLE="${STAGE0_BIN}" \
   -DUSE_SYSTEM_ZIG=ON \
   -DZIG_EXECUTABLE="${CURRENT_ZIG_BIN}" \

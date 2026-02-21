@@ -75,6 +75,8 @@ globalThis.requireTransformer = requireTransformer;
 // should actually write the file.
 const verbose = Bun.env.VERBOSE ? console.log : () => {};
 const isFreeBSD = process.platform === "freebsd";
+const isStage0Bun = typeof Bun !== "undefined" && Bun.version === "0.0.0";
+const useSpawnWriteCompat = isFreeBSD && (isStage0Bun || process.env.BUN_FREEBSD_FORCE_TEE_WRITE === "1");
 
 function ensureDirSync(dirPath: string) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -91,6 +93,16 @@ function ensureDirSync(dirPath: string) {
 }
 
 function writeFileCompatSync(filePath: string, contents: string) {
+  if (useSpawnWriteCompat) {
+    const fallback = spawnSync("/usr/bin/tee", [filePath], {
+      input: contents,
+      stdio: ["pipe", "ignore", "pipe"],
+      encoding: "utf8",
+    });
+    if (fallback.status === 0) return;
+    throw new Error(`write fallback failed for ${filePath}: ${fallback.stderr || fallback.error || "unknown error"}`);
+  }
+
   try {
     fs.writeFileSync(filePath, contents);
     return;

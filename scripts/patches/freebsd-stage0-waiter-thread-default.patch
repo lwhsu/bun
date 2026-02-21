@@ -1,0 +1,27 @@
+--- a/src/bun.js/api/bun/process.zig
++++ b/src/bun.js/api/bun/process.zig
+@@ -882,7 +882,9 @@ const WaiterThreadPosix = struct {
+         }
+     }
+ 
+-    var should_use_waiter_thread = false;
++    // FreeBSD kqueue/NOTE_EXIT delivery can miss short-lived children in
++    // high-churn workloads. Use waiter-thread polling by default.
++    var should_use_waiter_thread = Environment.isFreeBSD;
+ 
+     const stack_size = 512 * 1024;
+     pub var instance: WaiterThread = .{};
+@@ -948,8 +950,13 @@ const WaiterThreadPosix = struct {
+                 }
+ 
+                 _ = std.posix.poll(&polls, std.math.maxInt(i32)) catch 0;
++            } else if (comptime Environment.isFreeBSD) {
++                // Poll waitpid(WNOHANG) at a short interval instead of relying on
++                // SIGCHLD routing to a specific waiter thread.
++                std.Thread.sleep(1 * std.time.ns_per_ms);
+             } else {
+                 var mask = std.posix.empty_sigset;
++                _ = std.c.sigaddset(&mask, std.posix.SIG.CHLD);
+                 var signal: c_int = std.posix.SIG.CHLD;
+                 const rc = std.c.sigwait(&mask, &signal);
+                 _ = rc;

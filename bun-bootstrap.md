@@ -3159,3 +3159,70 @@ Logs:
 
 - `stage0 run src/codegen/bundle-modules.ts ...` still deadlocks (`sbwait`/socket read wait), so full no-fallback mode is still blocked by codegen runtime behavior.
 - This fix specifically unblocks the `BUN_FREEBSD_NPM_INSTALL` crash class.
+
+## 2026-02-22 update: zig stdlib patch expansion and current hard blocker
+
+### What was fixed in this step
+
+- Split/cleaned legacy patches and added dedicated zig stdlib FreeBSD patch:
+  - `scripts/patches/freebsd-stage0-zig-stdlib-freebsd.patch`
+- Added bootstrap hook to apply it when `src/deps/zig/lib/std/c/freebsd.zig` is present.
+- Extended the patch to include missing declarations needed by legacy `build-obj-safe`:
+  - `eventfd`
+  - `posix_spawn_*` types/functions
+  - `kevent64_s`/`kevent64` shim
+  - `rusage`
+  - `utsname`
+
+### Evidence
+
+- Initial `build-obj-safe` failures for missing `std.c` members (`rusage`, `utsname`, `eventfd`) were resolved after patch expansion.
+- Next failure for missing `posix_spawn_file_actions_t` was also addressed by expanding the same patch.
+
+### Current blocker (still active)
+
+- Legacy zig `build obj` (both `ReleaseSafe` and `ReleaseFast`) repeatedly enters a deadlock state on FreeBSD:
+  - main thread blocks in `wait4`
+  - worker threads block in `__umtx_op_wait_uint_private`
+- Captured artifact:
+  - `build/freebsd-bootstrap/logs/zig-buildobj-deadlock-lldb.txt`
+- LLDB confirms `zig` parent waiting on child process while threadpool is parked.
+
+### Additional notes from this step
+
+- Tried host Zig `0.14.0`; rejected by legacy `build.zig` gate and API incompatibility (`Build.zig_lib_dir` no longer present).
+- Restored host Zig to `0.13.0` (debug package) for consistent legacy path and better diagnostics.
+- Clearing zig cache fixed transient missing `libcompiler_rt.a` lookup, but did not resolve the deadlock.
+
+### Next step
+
+- Investigate/patch Zig 0.13 deadlock path (with debug symbols) or avoid legacy `zig build obj` invocation path that triggers the wait deadlock.
+
+## 2026-02-22: Milestone - Full Release bun built on FreeBSD via stage0 + Node codegen + Oven Zig
+
+### What succeeded
+- Re-ran bootstrap end-to-end from this tree using:
+  - stage0: `build/freebsd-bootstrap/stage0/bun` (legacy cold-start output)
+  - current-tree codegen path: `BUN_FREEBSD_BINDGENV2_NODE=1`, `BUN_FREEBSD_GENERATE_CLASSES_NODE=1`, `BUN_FREEBSD_CODEGEN_NODE=1`, `BUN_FREEBSD_NPM_INSTALL=1`
+  - current-tree compiler: local `oven-zig` stage3 binary
+- Command that completed successfully:
+  - `BUN_FREEBSD_ALLOW_DOWNLOADS=1 BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd/stage3/bin/zig ./scripts/bootstrap-freebsd.sh`
+- Final build output:
+  - `build/release/bun`
+
+### Runtime verification
+- Stage0:
+  - `build/freebsd-bootstrap/stage0/bun --version` => `0.0.0`
+  - `build/freebsd-bootstrap/stage0/bun -e 'console.log(process.platform, process.arch)'` => `freebsd x64`
+  - `build/freebsd-bootstrap/stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFileSync)'` => `function`
+- Final bun:
+  - `build/release/bun --version` => `1.3.10`
+  - `build/release/bun -e 'console.log(process.platform, process.arch, 1+1)'` => `freebsd x64 2`
+
+### Important finding about Zig toolchain
+- Current tree cannot be built with stock `/usr/local/bin/zig` (0.15.2) because parser errors occur on Bun-specific syntax (`#raw`, etc.).
+- Switching to local `oven-zig` stage3 unblocked `bun-zig.o` and completed link.
+
+### Remaining known blocker (not yet solved)
+- Stage0 still does not reliably run `src/codegen/bundle-modules.ts` directly on FreeBSD (timeout/crash behavior remains).
+- This is currently bypassed for current-tree builds by using Node-based codegen paths.
