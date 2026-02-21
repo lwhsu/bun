@@ -1,0 +1,56 @@
+--- a/src/sys.zig	2026-02-22 04:23:49.181343000 +0800
++++ b/src/sys.zig	2026-02-22 04:33:56.054014000 +0800
+@@ -3227,7 +3227,7 @@
+     pub fn readFillBuf(this: File, buf: []u8) Maybe([]u8) {
+         var read_amount: usize = 0;
+         while (read_amount < buf.len) {
+-            switch (if (comptime Environment.isPosix)
++            switch (if (comptime Environment.isPosix and !Environment.isFreeBSD)
+                 bun.sys.pread(this.handle, buf[read_amount..], @intCast(read_amount))
+             else
+                 bun.sys.read(this.handle, buf[read_amount..])) {
+@@ -3248,34 +3248,20 @@
+     }
+ 
+     pub fn readToEndWithArrayList(this: File, list: *std.ArrayList(u8)) Maybe(usize) {
+-        const size = switch (this.getEndPos()) {
+-            .err => |err| {
+-                return .{ .err = err };
+-            },
+-            .result => |s| s,
+-        };
+-
+-        list.ensureTotalCapacityPrecise(size + 16) catch bun.outOfMemory();
+-
+         var total: i64 = 0;
+-        while (true) {
+-            if (list.unusedCapacitySlice().len == 0) {
+-                list.ensureUnusedCapacity(16) catch bun.outOfMemory();
+-            }
++        var chunk: [16 * 1024]u8 = undefined;
+ 
+-            switch (if (comptime Environment.isPosix)
+-                bun.sys.pread(this.handle, list.unusedCapacitySlice(), total)
++        while (true) {
++            const rc = if (comptime Environment.isPosix and !Environment.isFreeBSD)
++                bun.sys.pread(this.handle, chunk[0..], total)
+             else
+-                bun.sys.read(this.handle, list.unusedCapacitySlice())) {
+-                .err => |err| {
+-                    return .{ .err = err };
+-                },
+-                .result => |bytes_read| {
+-                    if (bytes_read == 0) {
+-                        break;
+-                    }
++                bun.sys.read(this.handle, chunk[0..]);
+ 
+-                    list.items.len += bytes_read;
++            switch (rc) {
++                .err => |err| return .{ .err = err },
++                .result => |bytes_read| {
++                    if (bytes_read == 0) break;
++                    list.appendSlice(chunk[0..bytes_read]) catch bun.outOfMemory();
+                     total += @intCast(bytes_read);
+                 },
+             }

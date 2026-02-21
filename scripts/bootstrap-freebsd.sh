@@ -39,6 +39,7 @@ fi
 CURRENT_ZIG="${BUN_FREEBSD_CURRENT_ZIG:-zig}"
 CURRENT_ZIG_LIB_DIR="${BUN_FREEBSD_CURRENT_ZIG_LIB_DIR:-}"
 LEGACY_MAKE_JOBS="${BUN_FREEBSD_MAKE_JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 1)}"
+LEGACY_BUILD_OBJ_TARGET="${BUN_FREEBSD_LEGACY_BUILD_OBJ_TARGET:-build-obj-safe}"
 
 if [[ ! "${LEGACY_MAKE_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
   echo "error: BUN_FREEBSD_MAKE_JOBS must be a positive integer (got '${LEGACY_MAKE_JOBS}')" >&2
@@ -384,6 +385,17 @@ patch_legacy_worktree_for_freebsd() {
     exit 1
   fi
   apply_patch_if_needed "${legacy_extra_patch}" "FreeBSD legacy extra compatibility patch"
+
+  local read_syscalls_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-read-syscalls.patch"
+  local sys_zig_file="${LEGACY_WORKTREE}/src/sys.zig"
+  if [[ -f "${sys_zig_file}" ]] \
+    && grep -q "list.unusedCapacitySlice" "${sys_zig_file}"; then
+    if [[ ! -f "${read_syscalls_patch}" ]]; then
+      echo "error: missing patch file: ${read_syscalls_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${read_syscalls_patch}" "FreeBSD legacy read syscall compatibility patch"
+  fi
 
 }
 
@@ -739,6 +751,7 @@ EOF2
   echo "[bootstrap] building stage0 from legacy source tree"
   echo "[bootstrap] legacy vendor step parallelism: -j1"
   echo "[bootstrap] legacy build parallelism: -j${LEGACY_MAKE_JOBS}"
+  echo "[bootstrap] legacy zig object target: ${LEGACY_BUILD_OBJ_TARGET}"
   (
     cd "${LEGACY_WORKTREE}"
     PATH="${SHIM_BIN_DIR}:${PATH}" \
@@ -757,7 +770,7 @@ EOF2
     PATH="${SHIM_BIN_DIR}:${PATH}" \
       gmake -j"${LEGACY_MAKE_JOBS}" AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" release-bindings
     PATH="${SHIM_BIN_DIR}:${PATH}" \
-      gmake -j"${LEGACY_MAKE_JOBS}" AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" build-obj
+      gmake -j"${LEGACY_MAKE_JOBS}" AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" "${LEGACY_BUILD_OBJ_TARGET}"
     PATH="${SHIM_BIN_DIR}:${PATH}" \
       gmake -j"${LEGACY_MAKE_JOBS}" AR="${LEGACY_AR}" RANLIB="${LEGACY_RANLIB}" ZIG="${LEGACY_ZIG_BIN}" NPM_CLIENT="${NPM_CLIENT_OVERRIDE}" UWS_LDFLAGS="${LEGACY_UWS_LDFLAGS}" JSC_BASE_DIR="${LEGACY_WEBKIT_DIR}" bun-link-lld-release
   )

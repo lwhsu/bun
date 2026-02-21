@@ -75,11 +75,13 @@ Current status at 2026-02-22:
    - `BUN_FREEBSD_NPM_INSTALL=1`
 2. Verified by building target `bun-bindgen-v2` in a fresh build directory.
 3. Full no-fallback (`BUN_FREEBSD_BINDGENV2_NODE=0`, `BUN_FREEBSD_CODEGEN_NODE=0`, `BUN_FREEBSD_NPM_INSTALL=0`) is still blocked by stage0 runtime issues:
-   - `bun install --frozen-lockfile` segfault
-   - `bundle-modules.ts` segfault under stage0
+   - `bundle-modules.ts` deadlock under stage0
    - `bindgen.ts` functional mismatch under stage0
 4. Latest crash narrowing for install path:
    - stage0 `bun install` core backtrace points at `src.sys.File.toSource` during lockfile workspace parsing (`Package.processWorkspaceName*`).
+5. 2026-02-22 update:
+   - Legacy stage0 with `build-obj-safe` plus FreeBSD `read`-based file-read path no longer crashes on `bun install --frozen-lockfile`.
+   - This narrows remaining no-fallback work to stage0 codegen/runtime behavior rather than install lockfile parsing.
 
 ## 2.2 Current Stage0 Build Design (How It Works Today)
 

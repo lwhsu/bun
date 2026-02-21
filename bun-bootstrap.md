@@ -3131,3 +3131,31 @@ cd /home/lwhsu/killme/bun/packages/bun-error
 
 - `toSourceAt` path-string forwarding is not sufficient to explain/fix this crash.
 - Next debugging should focus deeper in `readFrom`/file-read result handling or a Zig 0.13 ReleaseFast miscompile in this code path.
+
+## 2026-02-22 breakthrough: stage0 `bun install` crash eliminated with ReleaseSafe + FreeBSD read path fix
+
+### What changed
+
+1. Legacy stage0 object target switched to `build-obj-safe` (ReleaseSafe) for bootstrap flow.
+2. In legacy `src/sys.zig`, FreeBSD file-read path in `File.readFillBuf` and `File.readToEndWithArrayList` now avoids `pread` and uses `read`.
+3. `readToEndWithArrayList` was rewritten to append buffered chunks instead of manual `unusedCapacitySlice` indexing.
+
+### Evidence
+
+- Before this fix:
+  - `bun install --frozen-lockfile` crashed in `packages/bun-error` with:
+    - segfault, then (under ReleaseSafe) bounds panics in `File.readToEndWithArrayList`.
+- After this fix (same repro):
+  - command exits `0`:
+    - `bun install v0.0.0 ...`
+    - `[3.00ms] done`
+  - no core dump generated.
+
+Logs:
+
+- `build/freebsd-bootstrap/logs/stage0-install-bun-error-releasesafe-readsyscall-ok.err`
+
+### Remaining blocker status after this fix
+
+- `stage0 run src/codegen/bundle-modules.ts ...` still deadlocks (`sbwait`/socket read wait), so full no-fallback mode is still blocked by codegen runtime behavior.
+- This fix specifically unblocks the `BUN_FREEBSD_NPM_INSTALL` crash class.
