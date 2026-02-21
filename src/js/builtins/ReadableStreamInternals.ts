@@ -915,12 +915,6 @@ export async function readStreamIntoSink(stream: ReadableStream, sink, isNative)
       sink.write(values[i]);
     }
 
-    var streamState = $getByIdDirectPrivate(stream, "state");
-    if (streamState === $streamClosed) {
-      didClose = true;
-      return sink.end();
-    }
-
     while (true) {
       var { value, done } = await reader.read();
       if (done) {
