@@ -38,6 +38,74 @@ We consider FreeBSD support complete for upstream submission when all of these a
 4. Patch stack is split into reviewable units with minimal risk and clear rationale.
 5. Workspace is tidy: no ambiguous parallel worktrees or undocumented local-only artifacts.
 
+## 2.1 Node Fallback Exit Point
+
+Question: when can we set these to fully self-hosted defaults?
+
+- `BUN_FREEBSD_BINDGENV2_NODE=0`
+- `BUN_FREEBSD_CODEGEN_NODE=0`
+- `BUN_FREEBSD_NPM_INSTALL=0`
+
+Answer:
+
+1. Target phase: **Phase C (Bootstrap Pipeline Hardening)**.
+2. Practical gate: mark this change only when Phase C rerun matrix passes with these settings forced to `0` in configure.
+3. Confidence gate: keep it only after Phase E targeted tests pass on the same build.
+4. Upstreaming gate: land this default switch in Phase F as a separate reviewable patch.
+
+Why Phase C:
+
+1. These flags directly control configure/codegen runner behavior (`cmake/Globals.cmake`, `cmake/targets/BuildBun.cmake`, `cmake/tools/SetupEsbuild.cmake`).
+2. The phase objective is deterministic bootstrap without FreeBSD-only fallback behavior.
+3. Until Phase C exits cleanly, leaving fallback-enabled defaults reduces bootstrap breakage risk.
+
+## 2.2 Current Stage0 Build Design (How It Works Today)
+
+This section documents the current cold-start dependency chain implemented by `scripts/bootstrap-freebsd.sh`.
+
+### Inputs
+
+1. Source tree:
+   - main branch/worktree (current tree)
+   - legacy commit worktree for stage0 (`8d7d58606b`)
+2. WebKit source repository clone:
+   - default expected at `vendor/WebKit`
+3. Two WebKit package outputs produced by `scripts/prepare-webkit-freebsd.sh`:
+   - legacy stage0 WebKit package
+   - current-tree WebKit package
+4. Toolchains:
+   - legacy zig: **0.13.x** required for legacy stage0 build
+   - current zig: configured via `BUN_FREEBSD_CURRENT_ZIG` (can be oven-zig path)
+5. Runtimes/tools:
+   - git, cmake, ninja, gmake, node, npm, perl, python3, clang, clang++, zig
+
+### What stage0 is built from
+
+1. Script creates/uses detached legacy worktree at `${BUN_FREEBSD_BOOTSTRAP_DIR}/legacy-worktree`.
+2. Script applies FreeBSD compatibility patches from `scripts/patches/freebsd-stage0-*.patch`.
+3. Script runs Node-based legacy codegen helper:
+   - `scripts/bootstrap-freebsd-generate-legacy-codegen.mjs`
+4. Script builds stage0 in legacy tree via `gmake` targets:
+   - `vendor`
+   - `identifier-cache`
+   - `sqlite`
+   - `release-bindings`
+   - `build-obj`
+   - `bun-link-lld-release`
+5. Script installs produced stage0 binary to deterministic path:
+   - `${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun`
+
+### How stage0 is used afterwards
+
+1. Current-tree CMake configure receives:
+   - `-DBUN_EXECUTABLE=${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun`
+2. Current-tree configure/build currently forces FreeBSD Node fallbacks in bootstrap script:
+   - `BUN_FREEBSD_BINDGENV2_NODE=1`
+   - `BUN_FREEBSD_GENERATE_CLASSES_NODE=1`
+   - `BUN_FREEBSD_CODEGEN_NODE=1`
+   - `BUN_FREEBSD_NPM_INSTALL=1`
+3. Final binary is then built in `${BUN_FREEBSD_BUILD_DIR}`.
+
 ## 3. Full Roadmap
 
 Documentation rule for every phase update:
@@ -184,6 +252,10 @@ How to review:
 Exit criteria:
 
 1. Two consecutive runs succeed with no manual patching between runs.
+2. A no-fallback configure/build run succeeds with:
+   - `-DBUN_FREEBSD_BINDGENV2_NODE=0`
+   - `-DBUN_FREEBSD_CODEGEN_NODE=0`
+   - `-DBUN_FREEBSD_NPM_INSTALL=0`
 
 ### Phase D: Runtime and Platform Parity
 
@@ -357,6 +429,82 @@ Exit criteria:
 2. Re-run canonical cleanroom bootstrap once after cleanup (Phase C).
 3. Run and record full FreeBSD test gate (Phase E).
 4. Split current branch into upstream PR stack (Phase F), starting with build-system plumbing.
+
+## 4.1 Clean Checkout Reproduction (Current Branch)
+
+This is the current reproducible flow for a clean checkout of this branch.
+
+### Prerequisites
+
+1. Host: FreeBSD amd64.
+2. Required packages:
+   - `sudo pkg install -y cmake ninja gmake node npm perl python3 llvm19`
+3. Zig:
+   - legacy stage0 must use Zig 0.13.x at `/usr/local/bin/zig` (or set `BUN_FREEBSD_LEGACY_ZIG`)
+   - current-tree zig can be system zig or oven-zig path (set `BUN_FREEBSD_CURRENT_ZIG`)
+4. WebKit local clone:
+   - `vendor/WebKit` must exist and contain required commits referenced by legacy/current trees.
+
+### Setup from clean branch checkout
+
+```bash
+cd /home/lwhsu/killme
+git clone <your-bun-remote> bun
+cd /home/lwhsu/killme/bun
+git fetch origin freebsd-bootstrap
+git checkout freebsd-bootstrap
+```
+
+### Ensure WebKit repo is present locally
+
+```bash
+cd /home/lwhsu/killme/bun
+rm -rf vendor/WebKit
+git clone --filter=blob:none --no-checkout https://github.com/oven-sh/WebKit.git vendor/WebKit
+```
+
+Then ensure required commits exist in the local WebKit clone before bootstrap:
+
+```bash
+cd /home/lwhsu/killme/bun
+CURRENT_WEBKIT_COMMIT=$(awk '/set\\(WEBKIT_VERSION [0-9a-f]{40}\\)/ {v=$2; gsub("\\\\)","",v); print v; exit}' cmake/tools/SetupWebKit.cmake)
+git -C vendor/WebKit cat-file -e "${CURRENT_WEBKIT_COMMIT}^{commit}"
+```
+
+Legacy WebKit commit is resolved automatically by `scripts/bootstrap-freebsd.sh` from the legacy worktree CMake metadata.
+
+### Run bootstrap (cold-start)
+
+```bash
+cd /home/lwhsu/killme/bun
+
+export BUN_FREEBSD_ALLOW_DOWNLOADS=1
+export BUN_FREEBSD_BOOTSTRAP_DIR=/home/lwhsu/killme/bun/build/freebsd-bootstrap
+export BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/freebsd-selfhost-stepD
+export BUN_FREEBSD_CMAKE_BUILD_TYPE=Release
+export BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd-release/stage3/bin/zig
+
+./scripts/bootstrap-freebsd.sh
+```
+
+### Verify outputs
+
+```bash
+cd /home/lwhsu/killme/bun
+
+build/freebsd-bootstrap/stage0/bun --version
+build/freebsd-bootstrap/stage0/bun -e 'console.log(1+1)'
+build/freebsd-selfhost-stepD/bun --version
+build/freebsd-selfhost-stepD/bun -e 'console.log(1+1)'
+build/freebsd-selfhost-stepD/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'
+```
+
+### Review checklist for clean-checkout bootstrap
+
+1. `scripts/bootstrap-freebsd.sh` log shows legacy worktree creation, patch apply, codegen, and stage0 install.
+2. Stage0 binary exists at `build/freebsd-bootstrap/stage0/bun`.
+3. Final binary exists at `build/freebsd-selfhost-stepD/bun`.
+4. If rerunning with different zig binary, script reports cache fingerprint reset.
 
 ## 5. Definition of Done for This Porting Track
 
