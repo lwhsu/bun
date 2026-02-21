@@ -2,7 +2,7 @@
 
 Last updated: 2026-02-22
 Repository: `/home/lwhsu/killme/bun`
-Branch at planning time: `freebsd-bootstrap` (`6e4df755017d`)
+Branch at planning time: `freebsd-bootstrap` (`2e7d7b21a7`)
 
 ## 1. Current Status (Re-checked)
 
@@ -11,31 +11,30 @@ Branch at planning time: `freebsd-bootstrap` (`6e4df755017d`)
 - `git status --porcelain` in main worktree is clean.
 - Canonical full bootstrap script rerun succeeded in active dirs:
   - `BUN_FREEBSD_BOOTSTRAP_DIR=/home/lwhsu/killme/bun/build/freebsd-bootstrap`
-  - `BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/freebsd-selfhost-stepD`
+  - `BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/release`
 - Stage0 binary exists and runs:
-  - `build/20260221-2027-freebsd-bootstrap-cleanroom-step1/stage0/bun --version` -> `0.0.0`
-  - `build/20260221-2027-freebsd-bootstrap-cleanroom-step1/stage0/bun -e 'console.log(1+1)'` -> `2`
+  - `build/freebsd-bootstrap/stage0/bun --version` -> `0.0.0`
+  - `build/freebsd-bootstrap/stage0/bun -e 'console.log(1+1)'` -> `2`
 - Active stage0 runtime gate now also passes for node fs import:
   - `build/freebsd-bootstrap/stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'` -> `function`
-- Final current-tree binary exists and runs:
-  - `build/20260221-2027-current-from-cleanroom-step1/bun --version` -> `1.3.10`
-  - `build/20260221-2027-current-from-cleanroom-step1/bun -e 'console.log(1+1)'` -> `2`
 - Active final binary refreshed and validated:
-  - `build/freebsd-selfhost-stepD/bun --version` -> `1.3.10`
-  - `build/freebsd-selfhost-stepD/bun -e 'console.log(1+1)'` -> `2`
-  - `build/freebsd-selfhost-stepD/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'` -> `function`
+  - `build/release/bun --version` -> `1.3.10`
+  - `build/release/bun -e 'console.log(1+1)'` -> `2`
+  - `build/release/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'` -> `function`
 
 ### State that still needs cleanup/normalization
 
-- Multiple legacy detached worktrees at the same commit `8d7d58606b`:
-  - `build/freebsd-bootstrap/legacy-worktree`
-  - `build/freebsd-bootstrap-cleanroom-step1/legacy-worktree`
-  - `build/20260221-1844-freebsd-bootstrap-cleanroom-step1/legacy-worktree`
-  - `build/20260221-2027-freebsd-bootstrap-cleanroom-step1/legacy-worktree`
+- Workspace-local cleanup is complete:
+  - duplicate legacy worktrees under `build/` were removed
+  - non-canonical build outputs were archived under `build/archive-freebsd-experiments/20260222-phaseB`
+  - active `build/` entries are now only:
+    - `build/freebsd-bootstrap`
+    - `build/release`
+    - `build/archive-freebsd-experiments`
+- Remaining non-canonical detached worktrees outside workspace:
   - `/home/lwhsu/tmp/bun-stage0-compat`
   - `/home/lwhsu/tmp/bun-stage0-june2024/legacy-worktree`
 - `vendor/WebKit` is intentionally not clean (local FreeBSD patching work + stash).
-- `build/` has many historical experiment directories; reproducible upstream prep needs a canonical layout.
 
 ## 2. Target Definition
 
@@ -214,7 +213,7 @@ Exit criteria:
 
 Goal: remove ambiguity and make the repository auditable for upstream.
 
-Status: **In progress** (not completed).
+Status: **Completed (workspace scope)** on 2026-02-22.
 
 How to do it:
 
@@ -254,11 +253,27 @@ Exit criteria:
 1. Worktree list is small and purposeful.
 2. Directory layout is explicit and documented.
 
+Completion evidence (2026-02-22):
+
+1. Removed in-workspace duplicate detached worktrees:
+   - `build/20260221-1844-freebsd-bootstrap-cleanroom-step1/legacy-worktree`
+   - `build/20260221-2027-freebsd-bootstrap-cleanroom-step1/legacy-worktree`
+   - `build/freebsd-bootstrap-cleanroom-step1/legacy-worktree`
+2. Archived 44 non-canonical build outputs to:
+   - `build/archive-freebsd-experiments/20260222-phaseB`
+3. Active `build/` top-level entries reduced to:
+   - `archive-freebsd-experiments`, `freebsd-bootstrap`, `release`
+
 ### Phase C: Bootstrap Pipeline Hardening
 
 Goal: make cold-start script robust and deterministic on FreeBSD.
 
-Status: **In progress** (major milestone reached: canonical dirs now pass two consecutive runs on 2026-02-22; zig-variant rerun still pending).
+Status: **In progress**.
+
+Phase C split:
+
+1. **C-basic: completed** (deterministic bootstrap + idempotent rerun + compiler-switch rebuild succeeded).
+2. **C-strict: in progress** (full no-fallback mode still blocked by stage0 runtime behavior).
 
 How to do it:
 
@@ -274,9 +289,9 @@ How to reproduce:
 cd /home/lwhsu/killme/bun
 
 export BUN_FREEBSD_BOOTSTRAP_DIR=/home/lwhsu/killme/bun/build/freebsd-bootstrap
-export BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/freebsd-selfhost-stepD
+export BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/release
 export BUN_FREEBSD_CMAKE_BUILD_TYPE=Release
-export BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd-release/stage3/bin/zig
+export BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd/stage3/bin/zig
 
 ./scripts/bootstrap-freebsd.sh
 ./scripts/bootstrap-freebsd.sh
@@ -312,7 +327,7 @@ Exit criteria:
 
 2026-02-22 milestone evidence:
 
-1. Run #1 completed with rebuilt final binary in `build/freebsd-selfhost-stepD/bun`.
+1. Run #1 completed with rebuilt final binary in `build/release/bun`.
 2. Run #2 completed immediately after and reported:
    - `obj cached`
    - `compile obj bun ReleaseFast x86_64-freebsd cached 16ms`
@@ -486,11 +501,9 @@ Exit criteria:
 
 ## 4. Immediate Next Steps (Execution Order)
 
-1. Workspace hygiene pass (Phase B):
-   - consolidate worktrees and archive stale build dirs.
-2. Re-run canonical cleanroom bootstrap once after cleanup (Phase C).
-3. Run and record full FreeBSD test gate (Phase E).
-4. Split current branch into upstream PR stack (Phase F), starting with build-system plumbing.
+1. Resolve remaining out-of-workspace detached legacy worktrees in `/home/lwhsu/tmp` (Phase B closure).
+2. Execute and record Phase E test gate on `build/release/bun`.
+3. Start Phase F patch-stack split (build/bootstrap/runtime/docs series).
 
 ## 4.1 Clean Checkout Reproduction (Current Branch)
 
@@ -542,9 +555,9 @@ cd /home/lwhsu/killme/bun
 
 export BUN_FREEBSD_ALLOW_DOWNLOADS=1
 export BUN_FREEBSD_BOOTSTRAP_DIR=/home/lwhsu/killme/bun/build/freebsd-bootstrap
-export BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/freebsd-selfhost-stepD
+export BUN_FREEBSD_BUILD_DIR=/home/lwhsu/killme/bun/build/release
 export BUN_FREEBSD_CMAKE_BUILD_TYPE=Release
-export BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd-release/stage3/bin/zig
+export BUN_FREEBSD_CURRENT_ZIG=/home/lwhsu/killme/bun/build/freebsd-bootstrap/oven-zig/build-freebsd/stage3/bin/zig
 
 ./scripts/bootstrap-freebsd.sh
 ```
@@ -556,16 +569,16 @@ cd /home/lwhsu/killme/bun
 
 build/freebsd-bootstrap/stage0/bun --version
 build/freebsd-bootstrap/stage0/bun -e 'console.log(1+1)'
-build/freebsd-selfhost-stepD/bun --version
-build/freebsd-selfhost-stepD/bun -e 'console.log(1+1)'
-build/freebsd-selfhost-stepD/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'
+build/release/bun --version
+build/release/bun -e 'console.log(1+1)'
+build/release/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'
 ```
 
 ### Review checklist for clean-checkout bootstrap
 
 1. `scripts/bootstrap-freebsd.sh` log shows legacy worktree creation, patch apply, codegen, and stage0 install.
 2. Stage0 binary exists at `build/freebsd-bootstrap/stage0/bun`.
-3. Final binary exists at `build/freebsd-selfhost-stepD/bun`.
+3. Final binary exists at `build/release/bun`.
 4. If rerunning with different zig binary, script reports cache fingerprint reset.
 5. If stage0 `node:fs` behavior differs across runs, compare WebKit package archive fingerprints:
 

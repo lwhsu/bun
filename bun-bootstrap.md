@@ -3226,3 +3226,37 @@ Logs:
 ### Remaining known blocker (not yet solved)
 - Stage0 still does not reliably run `src/codegen/bundle-modules.ts` directly on FreeBSD (timeout/crash behavior remains).
 - This is currently bypassed for current-tree builds by using Node-based codegen paths.
+
+## 2026-02-22: Phase B workspace cleanup + Phase C status split
+
+### Phase B (workspace scope) completed
+
+Actions performed:
+
+- Removed duplicate detached legacy worktrees under `build/`:
+  - `build/20260221-1844-freebsd-bootstrap-cleanroom-step1/legacy-worktree`
+  - `build/20260221-2027-freebsd-bootstrap-cleanroom-step1/legacy-worktree`
+  - `build/freebsd-bootstrap-cleanroom-step1/legacy-worktree`
+- Kept canonical legacy worktree:
+  - `build/freebsd-bootstrap/legacy-worktree`
+- Archived non-canonical build outputs to:
+  - `build/archive-freebsd-experiments/20260222-phaseB`
+- Active top-level build dirs are now:
+  - `build/freebsd-bootstrap`
+  - `build/release`
+  - `build/archive-freebsd-experiments`
+
+### Remaining Phase B item
+
+- Two detached legacy worktrees outside workspace still exist in `~/tmp`:
+  - `/home/lwhsu/tmp/bun-stage0-compat`
+  - `/home/lwhsu/tmp/bun-stage0-june2024/legacy-worktree`
+
+### Phase C status split
+
+- **C-basic: completed**
+  - deterministic bootstrap path works
+  - idempotent rerun works
+  - compiler-switch rerun works (stock Zig failure confirmed, oven-zig success confirmed)
+- **C-strict: pending**
+  - full no-fallback mode remains blocked by stage0 runtime behavior (`bundle-modules.ts` under stage0)
