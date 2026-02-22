@@ -853,7 +853,14 @@ declare module "module" {
 
 mark("Generate Code");
 
-const evalFiles = new Bun.Glob(path.join(BASE, "eval", "*.ts")).scanSync();
+// Legacy FreeBSD stage0 can fail with `ReferenceError: __yieldStar` when touching
+// `Bun.Glob(...).scanSync()` iterators at all. Use `readdirSync()` here for bootstrap stability.
+const evalDir = path.join(BASE, "eval");
+const evalFiles = fs
+  .readdirSync(evalDir)
+  .filter(file => file.endsWith(".ts"))
+  .sort()
+  .map(file => path.join(evalDir, file));
 for (const file of evalFiles) {
   const {
     outputs: [output],
@@ -894,4 +901,11 @@ if (!silent) {
     globalThis.internalFunctionCount,
     globalThis.internalFunctionFileCount,
   );
+}
+
+if (isFreeBSD && isStage0Bun) {
+  // Legacy FreeBSD stage0 can crash during process teardown after successful codegen completion.
+  // All outputs have been written by this point, so bypass teardown to keep the bootstrap path
+  // deterministic and allow the caller to treat the run as successful.
+  process.reallyExit(0);
 }

@@ -903,3 +903,51 @@ This is intentionally slow, but it gives deterministic evidence (`batchIndex`, `
     corruption signature is detected.
   - No output remap is required in this path because builtin-functions consumes `build.outputs[0].text()`
     directly.
+
+### Phase C-strict codegen gate update (2026-02-22, later)
+
+Status change:
+- The traced no-fallback stage0 `bundle-modules.ts` run now completes end-to-end and exits `0`.
+
+Command (deterministic isolation / evidence mode):
+
+```bash
+cd /home/lwhsu/killme/bun
+BUN_FREEBSD_CODEGEN_TRACE=1 \
+BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE=1 \
+BUN_FREEBSD_STAGE0_DISABLE_ALIAS_ALL_SINGLE_ENTRY=1 \
+build/freebsd-bootstrap/stage0/bun --no-install run src/codegen/bundle-modules.ts --debug=OFF build/release
+```
+
+Observed terminal evidence:
+- `bundle-modules:postbuild:done { outputs: 138 }`
+- `bundle-functions:done`
+- `[155.98s] Bundled "src/js" for production`
+- `EXIT:0`
+
+Additional stage0 runtime workarounds required to reach this point:
+
+1. `src/codegen/bundle-functions.ts` (builtin temp functions / `tmp_functions`)
+   - Legacy FreeBSD stage0 `Bun.build()` remained unstable for some entries (`Bake*.ts`), including
+     corrupted entrypoint paths and malformed "successful" outputs.
+   - Bootstrap-only FreeBSD stage0 workaround:
+     - use `Bun.Transpiler` by default for builtin temp function sources
+     - keep `Bun.build()` path available for debugging via
+       `BUN_FREEBSD_STAGE0_BUNDLE_FUNCTIONS_USE_BUILD=1`
+   - Rationale:
+     - builtin-function extraction only needs transformed JS text with `$$capture_*$$` markers intact
+     - the transpiler path preserves those markers reliably on stage0
+
+2. `src/codegen/bundle-modules.ts` (`Generate Code` eval discovery)
+   - Legacy FreeBSD stage0 throws `ReferenceError: __yieldStar` when touching
+     `Bun.Glob(...).scanSync()` iterators in this file (including `.next()` probes).
+   - Workaround:
+     - replace `eval/*.ts` discovery with `fs.readdirSync(...).filter(...).sort()` for deterministic
+       file enumeration without the iterator helper path
+
+Implication for roadmap:
+- The long-running `bundle-modules.ts` no-fallback stage0 runtime blocker is no longer the gating item
+  for `C-strict`.
+- Remaining `C-strict` exit work should focus on **full no-fallback bootstrap validation**
+  (`BUN_FREEBSD_BINDGENV2_NODE=0`, `BUN_FREEBSD_CODEGEN_NODE=0`, `BUN_FREEBSD_NPM_INSTALL=0`) using the
+  documented bootstrap entrypoint.

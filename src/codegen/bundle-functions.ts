@@ -42,6 +42,9 @@ let TMP_DIR = "";
 let freebsdStage0FunctionAliasCounter = 0;
 
 const isFreeBSDStage0 = process.platform === "freebsd" && Bun.version === "0.0.0";
+const freebsdStage0BuiltinFunctionTranspiler = isFreeBSDStage0 ? new Bun.Transpiler({ loader: "ts" }) : null;
+const useFreebsdStage0BuiltinFunctionTranspiler =
+  isFreeBSDStage0 && process.env.BUN_FREEBSD_STAGE0_BUNDLE_FUNCTIONS_USE_BUILD !== "1";
 
 function buildLogsContainLegacyStage0EntrypointCorruption(logs: readonly any[]) {
   return logs.some(log => {
@@ -52,7 +55,11 @@ function buildLogsContainLegacyStage0EntrypointCorruption(logs: readonly any[]) 
           : typeof log?.toString === "function"
             ? String(log)
             : JSON.stringify(log);
-      return text.includes("failed to open entry point directory") && text.includes("var __b0;");
+      // Legacy FreeBSD stage0 emits multiple malformed-entrypoint variants here.
+      // Some include a parser-generated fragment (`var __b0;`), others splice tmp file
+      // contents (e.g. `@ts-nocheck`) into the path. For this bootstrap-only retry path,
+      // any "failed to open entry point directory" is a safe signal to retry with a short alias.
+      return text.includes("failed to open entry point directory");
     } catch {
       return false;
     }
@@ -315,32 +322,52 @@ $$capture_start$$(${fn.async ? "async " : ""}${
 `,
     );
     await Bun.sleep(1);
-    let build = await Bun.build({
-      entrypoints: [tmpFile],
-      define,
-      target: "bun",
-      minify: { syntax: true, whitespace: false, keepNames: true },
-    });
-    if (!build.success && isFreeBSDStage0 && buildLogsContainLegacyStage0EntrypointCorruption(build.logs)) {
-      // Legacy FreeBSD stage0 can corrupt some tmp_functions entrypoint paths. Retry with a short
-      // alias path to avoid the corruption without changing source content.
-      const aliasTmpFile = path.join(TMP_DIR, `.bf${freebsdStage0FunctionAliasCounter++}.ts`);
-      await Bun.write(aliasTmpFile, await Bun.file(tmpFile).text());
-      build = await Bun.build({
-        entrypoints: [aliasTmpFile],
+    let output: string;
+    if (useFreebsdStage0BuiltinFunctionTranspiler && freebsdStage0BuiltinFunctionTranspiler) {
+      // Bootstrap-only workaround: legacy FreeBSD stage0 bundler is unstable for tmp_functions
+      // (entrypoint corruption, bogus empty-module outputs, teardown crashes). The transpiler path
+      // preserves the $$capture_*$$ markers needed by builtin-function extraction and is sufficient
+      // for the temp function sources generated here.
+      output = freebsdStage0BuiltinFunctionTranspiler.transformSync(await Bun.file(tmpFile).text());
+    } else {
+      let build = await Bun.build({
+        entrypoints: [tmpFile],
         define,
         target: "bun",
         minify: { syntax: true, whitespace: false, keepNames: true },
       });
+      if (!build.success && isFreeBSDStage0 && buildLogsContainLegacyStage0EntrypointCorruption(build.logs)) {
+        // Legacy FreeBSD stage0 can corrupt some tmp_functions entrypoint paths. Retry with a short
+        // alias path to avoid the corruption without changing source content.
+        // Use a non-dot basename: hidden-file aliases can still produce malformed stage0 output on FreeBSD.
+        const aliasTmpFile = path.join(TMP_DIR, `bf${freebsdStage0FunctionAliasCounter++}.ts`);
+        await Bun.write(aliasTmpFile, await Bun.file(tmpFile).text());
+        build = await Bun.build({
+          entrypoints: [aliasTmpFile],
+          define,
+          target: "bun",
+          minify: { syntax: true, whitespace: false, keepNames: true },
+        });
+      }
+      // TODO: Wait a few versions before removing this
+      if (!build.success) {
+        throw new AggregateError(build.logs, "Failed bundling builtin function " + fn.name + " from " + basename + ".ts");
+      }
+      if (build.outputs.length !== 1) {
+        throw new Error("expected one output");
+      }
+      output = (await build.outputs[0].text()).replaceAll("// @bun\n", "");
+      if (
+        isFreeBSDStage0 &&
+        (!output.includes("$$capture_start$$") || !output.includes("$$capture_end$$")) &&
+        freebsdStage0BuiltinFunctionTranspiler
+      ) {
+        // Legacy FreeBSD stage0 can sometimes produce a "successful" bundle output that is an empty
+        // module stub for tmp_functions entries. Fall back to the stage0 transpiler, which preserves
+        // the capture markers we need for builtin-function extraction.
+        output = freebsdStage0BuiltinFunctionTranspiler.transformSync(await Bun.file(tmpFile).text());
+      }
     }
-    // TODO: Wait a few versions before removing this
-    if (!build.success) {
-      throw new AggregateError(build.logs, "Failed bundling builtin function " + fn.name + " from " + basename + ".ts");
-    }
-    if (build.outputs.length !== 1) {
-      throw new Error("expected one output");
-    }
-    let output = (await build.outputs[0].text()).replaceAll("// @bun\n", "");
     let usesDebug = output.includes("$debug_log");
     let usesAssert = output.includes("$assert");
     const captured = output.match(/\$\$capture_start\$\$([\s\S]+)\.\$\$capture_end\$\$/)![1];

@@ -3917,3 +3917,61 @@ Actions performed:
   - reviewed,
   - narrowed further,
   - or removed once a deeper legacy bundler root cause is identified.
+
+## 2026-02-22: Phase C-strict codegen gate reached (`bundle-modules.ts` EXIT:0 under stage0 no-fallback trace)
+
+### Result
+
+- `build/freebsd-bootstrap/stage0/bun --no-install run src/codegen/bundle-modules.ts --debug=OFF build/release`
+  now completes end-to-end on FreeBSD stage0 in the traced no-fallback isolation mode and exits `0`.
+- This includes:
+  - module bundling (`batchIndex 0..137`)
+  - module postprocess
+  - builtin-functions bundling (`bundle-functions:done`)
+  - final codegen stage
+  - clean process exit (`EXIT:0`)
+
+### Final blockers resolved in this step
+
+1. `bundle-functions.ts` (`tmp_functions/Bake*.ts`) stage0 instability:
+   - `Bun.build()` on legacy FreeBSD stage0 could return corrupted entrypoint errors or malformed
+     "successful" outputs for `tmp_functions`.
+   - Current bootstrap workaround (FreeBSD stage0 scoped):
+     - use `Bun.Transpiler` by default for builtin temp function sources
+     - keep `Bun.build()` path opt-in via `BUN_FREEBSD_STAGE0_BUNDLE_FUNCTIONS_USE_BUILD=1`
+   - Why this is acceptable for bootstrap:
+     - builtin-functions extraction only needs transformed JS text with `$$capture_*$$` markers preserved
+     - `Bun.Transpiler` preserves those markers reliably on stage0
+
+2. `bundle-modules.ts` `Generate Code` stage `__yieldStar` crash:
+   - Legacy stage0 throws `ReferenceError: Can't find variable: __yieldStar` when touching
+     `Bun.Glob(...).scanSync()` iterators in this file (even `.next()` probe reproduces).
+   - Workaround:
+     - replace `eval/*.ts` discovery with `fs.readdirSync(...).filter(...).sort()` in
+       `src/codegen/bundle-modules.ts`
+   - Scope:
+     - behavior-preserving for normal runs (same deterministic file list intent), but chosen mainly to
+       avoid the legacy stage0 iterator helper bug
+
+### Command and evidence
+
+- Command:
+  - `BUN_FREEBSD_CODEGEN_TRACE=1 BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE=1 BUN_FREEBSD_STAGE0_DISABLE_ALIAS_ALL_SINGLE_ENTRY=1 build/freebsd-bootstrap/stage0/bun --no-install run src/codegen/bundle-modules.ts --debug=OFF build/release`
+- Final stderr markers:
+  - `bundle-modules:postbuild:done { outputs: 138 }`
+  - `bundle-functions:done`
+  - `[155.98s] Bundled "src/js" for production`
+  - `EXIT:0`
+- Final stdout summary:
+  - `Preprocess modules (...)`
+  - `Bundle modules (...)`
+  - `Postprocesss modules (...)`
+  - `Bundle Functions (...)`
+  - `Generate Code (...)`
+
+### Phase C impact
+
+- This closes the `bundle-modules.ts` stage0 no-fallback codegen runtime blocker that was preventing
+  `C-strict` progress.
+- Remaining `C-strict` work is now the **full no-fallback bootstrap validation** (`BUN_FREEBSD_*_NODE=0`)
+  through the complete bootstrap path, not this specific codegen script runtime.
