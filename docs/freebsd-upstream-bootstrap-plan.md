@@ -839,6 +839,7 @@ Why bundler-time aliasing instead of preprocess-time aliasing:
 - `node/_http_server.ts` -> alias `s76.ts` (promoted from auto-retry)
 - `node/assert.strict.ts` -> alias `s84.ts` (promoted from auto-retry)
 - `node/child_process.ts` -> alias `s87.ts` (promoted from auto-retry)
+- `node/diagnostics_channel.ts` -> alias `s92.ts` (promoted from auto-retry)
 
 ### Explicit alias vs auto-retry behavior (important)
 

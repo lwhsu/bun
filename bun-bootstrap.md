@@ -3826,6 +3826,9 @@ Actions performed:
 - `node/child_process.ts`
   - Failing batch: `87`
   - Same retry-poisoning pattern; promoted to explicit alias (`s87.ts`)
+- `node/diagnostics_channel.ts`
+  - Failing batch: `92`
+  - Same retry-poisoning pattern; promoted to explicit alias (`s92.ts`)
 
 ### Evidence (latest run pattern)
 
@@ -3838,7 +3841,7 @@ Actions performed:
   - batch `51` explicit alias+build+remap success
   - stage0 run advanced into `node/_http_*` and `node/assert.strict.ts`
   - stage0 run advanced past batch `88` into `node/*` compatibility modules
-  - retry-poisoning failures promoted to explicit aliases at batches `76`, `84`, and `87`
+  - retry-poisoning failures promoted to explicit aliases at batches `76`, `84`, `87`, and `92`
 
 ### Explicit vs auto alias policy (current)
 
