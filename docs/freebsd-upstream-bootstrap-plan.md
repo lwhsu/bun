@@ -338,7 +338,7 @@ Exit criteria:
 
 Goal: move from bootstrap success to maintainable FreeBSD runtime support.
 
-Status: **In progress**.
+Status: **In progress (major gate slices passing)**.
 
 How to do it:
 
@@ -401,12 +401,20 @@ Latest checkpoint (2026-02-22):
    - `spawn-stdin-readable-stream-edge-cases.test.ts` passes (`13 pass / 1 todo / 0 fail`)
    - `spawn-stdin-readable-stream-integration.test.ts` passes (`5 pass / 0 fail`)
    - `spawn.test.ts` passes (`108 pass / 5 skip / 0 fail`)
+7. Node `fs` suite milestone achieved:
+   - `test/js/node/fs/fs.test.ts` passes on FreeBSD (`234 pass / 6 skip / 0 fail`).
+   - FreeBSD fixes included:
+     - `copyFile`/`cp` fallback to read/write loop paths instead of Linux-only `copy_file_range`/`ioctl_ficlone` fast paths.
+     - `mkdtemp(os.tmpdir())` prefix normalization (append separator when prefix is an existing directory path).
+   - Current compatibility workaround:
+     - `node:fs` / `node:fs/promises` `rmdir` normalize `EREMOTE` to `ENOTEMPTY` on FreeBSD in JS wrappers.
+     - This is a temporary compatibility layer pending a proper FreeBSD errno table split (Bun currently aliases FreeBSD to Linux errno tables).
 
 How to do it:
 
 1. Run baseline smoke checks on stage0 and final.
 2. Run focused spawn suite first (highest risk area from prior failures).
-3. Run selected Node fs/watch and Bun shell tests.
+3. Run selected Node fs/watch and Bun shell tests (including `test/js/node/fs/fs.test.ts`).
 4. Capture pass/fail and skips into `bun-bootstrap.md` with command lines.
 5. Mark temporary compatibility workarounds explicitly (what is acceptable for local bootstrap vs. what must be refined before upstream).
 6. Promote new blockers discovered during expanded slices into the Phase D/E priority list with isolation repro, and downgrade them once a reproducible fix is validated.
@@ -432,6 +440,7 @@ How to verify:
 1. Smoke checks pass.
 2. Spawn-focused tests pass without hangs.
 3. fs/watch/shell selected tests pass or have documented, reproducible failure records.
+4. If errno-compat shims are used (e.g., `rmdir`), they are documented with upstream follow-up scope.
 4. Any temporary FreeBSD-only compatibility workaround is clearly identified and bounded.
 
 How to review:
@@ -529,8 +538,8 @@ Exit criteria:
 ## 4. Immediate Next Steps (Execution Order)
 
 1. Resolve remaining out-of-workspace detached legacy worktrees in `/home/lwhsu/tmp` (Phase B closure).
-2. Execute and record Phase E test gate on `build/release/bun`.
-3. Start Phase F patch-stack split (build/bootstrap/runtime/docs series).
+2. Expand/record the Phase E gate beyond current passing slices (process/fs/watch/spawn coverage already green).
+3. Start Phase F patch-stack split (build/bootstrap/runtime/docs series), with the `rmdir` errno shim isolated for later replacement.
 
 ## 4.1 Clean Checkout Reproduction (Current Branch)
 

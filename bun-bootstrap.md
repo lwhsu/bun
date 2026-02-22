@@ -3422,3 +3422,42 @@ Actions performed:
 - `build/release/bun test test/js/bun/spawn/spawn.test.ts`
   - result: `108 pass / 5 skip / 0 fail`
   - long hang-stress and close-handling matrices completed successfully
+
+## 2026-02-22: `test/js/node/fs/fs.test.ts` passes on FreeBSD (Phase E milestone)
+
+### Starting point
+
+- Previous `fs.test.ts` run had three failures after the `copyFileSync` crash (`SIGSYS`) was removed:
+  - `mkdtempSync() empty name`
+  - `promises.cp should work even if dest does not exist`
+  - `rmdir > does not remove a dir with a file in it` (returned `EREMOTE`)
+
+### Root causes and fixes
+
+- Linux-only file-copy fast paths were still reachable on FreeBSD in `node_fs.zig` (`cp` path) and `copy_file.zig`.
+  - Added non-Linux guards / FreeBSD entry into the shared Linux+FreeBSD branch.
+  - FreeBSD path now uses read/write loop fallback instead of Linux-only `copy_file_range` / `ioctl_ficlone`.
+- `mkdtemp(os.tmpdir())` compatibility mismatch:
+  - Bun treated `/tmp` as a literal filename prefix and generated `/tmpXXXXXX`.
+  - Added prefix normalization in `NodeFS.mkdtemp` to append a separator when the prefix is an existing directory path.
+- `rmdir` errno mismatch on FreeBSD:
+  - Bun currently aliases FreeBSD to Linux errno tables, so FreeBSD `ENOTEMPTY` (errno 66) surfaced as `EREMOTE`.
+  - Added a temporary JS compatibility shim in `src/js/node/fs.ts` and `src/js/node/fs.promises.ts` to normalize `EREMOTE` -> `ENOTEMPTY` for `rmdir`/`rmdirSync` on FreeBSD.
+
+### Validation
+
+- Targeted tests:
+  - `build/release/bun test test/js/node/fs/fs.test.ts -t "mkdtempSync"` => pass
+  - `build/release/bun test test/js/node/fs/fs.test.ts -t "promises.cp should work even if dest does not exist"` => pass
+  - `build/release/bun test test/js/node/fs/fs.test.ts -t "does not remove a dir with a file in it"` => pass
+- Runtime repro for `rmdir` normalization:
+  - `fs.rmdirSync(nonEmptyDir)` now returns `ENOTEMPTY` (was `EREMOTE`)
+  - `fs.promises.rmdir(nonEmptyDir)` now returns `ENOTEMPTY` (was `EREMOTE`)
+- Full suite:
+  - `build/release/bun test test/js/node/fs/fs.test.ts`
+  - result: `234 pass / 6 skip / 0 fail`
+
+### Follow-up note (upstream-quality)
+
+- The `rmdir` JS-layer normalization is a compatibility workaround to unblock Phase E.
+- Proper upstream fix should replace this with a FreeBSD-specific errno table/mapping in Bun (`src/errno/*`, `src/sys.zig`) so `ENOTEMPTY` is preserved natively across all APIs.
