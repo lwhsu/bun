@@ -432,7 +432,12 @@ async function runBundlerCli(entryPoints: string[], batchIndex?: number) {
     const explicitAliasBase =
       entryPoints.length === 1 ? stage0AliasedModuleBaseNames[entryPoints[0].slice(TMP_DIR.length + 1)] : undefined;
     const defaultSingleEntryAliasBase =
-      !explicitAliasBase && entryPoints.length === 1 && stage0PreferFirstAttemptAliasForSingleEntry
+      !explicitAliasBase &&
+      entryPoints.length === 1 &&
+      stage0PreferFirstAttemptAliasForSingleEntry &&
+      // `alias-all` mode can hang very early (e.g. bun/ffi.ts). Constrain the first-attempt alias
+      // default to the node-module region, where retry-poisoning is currently clustered.
+      entryPoints[0].slice(TMP_DIR.length + 1).startsWith("node/")
         ? `s${String(batchIndex ?? 0)}.ts`
         : undefined;
     let result = await runStage0BuildOnce(

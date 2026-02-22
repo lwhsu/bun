@@ -863,10 +863,13 @@ This keeps the workaround auditable:
 ### Batch-1 acceleration mode (current local workaround)
 
 - For the stage0 isolation run (`BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE=1`), the current branch now
-  defaults to first-attempt aliasing for single-entry builds (FreeBSD stage0 only).
+  defaults to first-attempt aliasing for `node/*` single-entry builds (FreeBSD stage0 only).
 - Rationale:
   - avoids repeated failed-first-attempt poisoning before auto-retry
   - significantly reduces manual promotion churn while preserving traceability
+- Scope note:
+  - not enabled for all single-entry modules because early modules (e.g. `bun/ffi.ts`) can hang when
+    first-attempt aliasing is forced.
 - Opt-out (for debugging parity):
   - `BUN_FREEBSD_STAGE0_DISABLE_ALIAS_ALL_SINGLE_ENTRY=1`
 

@@ -3874,10 +3874,12 @@ Actions performed:
 ### New acceleration for batch-1 stage0 isolation runs
 
 - In FreeBSD stage0 single-entry mode (`BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE=1`), `bundle-modules.ts`
-  now prefers a first-attempt short alias path by default for single-entry builds.
+  now prefers a first-attempt short alias path by default for `node/*` single-entry builds.
 - Why:
   - repeated "retry-poisoning" cases were consuming time even with auto-retry.
-  - first-attempt aliasing in batch-1 mode is a scoped bootstrap workaround that keeps the run moving.
+  - first-attempt aliasing in the late `node/*` batch-1 region is a scoped bootstrap workaround that keeps the run moving.
+- Why not all single-entry builds:
+  - aliasing very early modules (e.g. `bun/ffi.ts`) can hang legacy stage0 before the first build starts.
 - Opt-out:
   - `BUN_FREEBSD_STAGE0_DISABLE_ALIAS_ALL_SINGLE_ENTRY=1`
 - Explicit aliases are still kept/documented because they are proven problematic entries and useful evidence
