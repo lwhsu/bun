@@ -13,7 +13,7 @@ const This = @This();
 const platform_defs = switch (Environment.os) {
     .windows => @import("./errno/windows_errno.zig"),
     .linux => @import("./errno/linux_errno.zig"),
-    .freebsd => @import("./errno/linux_errno.zig"),
+    .freebsd => @import("./errno/freebsd_errno.zig"),
     .mac => @import("./errno/darwin_errno.zig"),
     .wasm => {},
 };

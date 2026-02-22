@@ -3585,3 +3585,37 @@ Actions performed:
 - `test/js/node/process/process.test.js` is still blocked in the current local test environment if `detect-libc` is not installed.
 - The file imports `detect-libc` at top level; when the package is missing, the file aborts before running any actual `process` assertions.
 - This is tracked as a test-environment dependency/setup blocker, not currently a confirmed FreeBSD runtime regression.
+
+## 2026-02-22: FreeBSD errno table + `node:util` + `node:os` Phase E milestone
+
+### FreeBSD errno mapping (fundamental fix)
+
+- Added `src/errno/freebsd_errno.zig` (based on FreeBSD `/usr/include/sys/errno.h`) and switched `src/sys.zig` to use it for `.freebsd`.
+- This replaced the previous Linux errno aliasing on FreeBSD and removed broad errno-name mismatches across Node compatibility APIs.
+
+### `node:util` `getSystemErrorName()` fix
+
+- `test/js/node/util/util.test.js` now passes on FreeBSD:
+  - `192 pass / 0 fail`
+- Key FreeBSD-specific detail matched to Node behavior:
+  - `getSystemErrorName(-9919) === "ENODATA"`
+  - `getSystemErrorName(-4024)` remains unknown on FreeBSD (matches Node negative-space expectations)
+
+### `node:os` FreeBSD runtime fixes
+
+- `src/bun.js/node/node_os.zig`
+  - `loadavg()` on FreeBSD now uses `getloadavg(3)` instead of returning `[0, 0, 0]`
+  - `userInfo()` now falls back to passwd (`getpwuid_r` / `getpwuid`) when `USER` / `SHELL` are missing
+  - `cpus()` now uses a FreeBSD-specific `sysctl` path (`hw.ncpu`, `hw.model`, `hw.clockrate`, `kern.cp_times`) instead of Linux `/proc/*`
+
+### `node:os` test updates for FreeBSD
+
+- `test/js/node/os/os.test.js`
+  - include `freebsd` in `platform()` expectations
+  - include `FreeBSD` in `type()` expectations
+  - `userInfo()` assertions now allow passwd-derived values when `USER` / `SHELL` are unset (controlled clean-env runs)
+
+### Validation
+
+- `test/js/node/util/util.test.js` => `192 pass / 0 fail`
+- `test/js/node/os/os.test.js` => `52 pass / 0 fail`

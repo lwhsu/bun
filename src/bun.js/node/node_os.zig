@@ -36,7 +36,7 @@ const CPUTimes = struct {
 pub fn cpus(global: *jsc.JSGlobalObject) bun.JSError!jsc.JSValue {
     const cpusImpl = switch (Environment.os) {
         .linux => cpusImplLinux,
-        .freebsd => cpusImplLinux,
+        .freebsd => cpusImplFreeBSD,
         .mac => cpusImplDarwin,
         .windows => cpusImplWindows,
         .wasm => @compileError("Unsupported OS"),
@@ -49,6 +49,60 @@ pub fn cpus(global: *jsc.JSGlobalObject) bun.JSError!jsc.JSValue {
         };
         return global.throwValue(err.toErrorInstance(global));
     };
+}
+
+fn cpusImplFreeBSD(globalThis: *jsc.JSGlobalObject) !jsc.JSValue {
+    var ncpu: c_uint = 0;
+    var ncpu_len: usize = @sizeOf(c_uint);
+    try std.posix.sysctlbynameZ("hw.ncpu", &ncpu, &ncpu_len, null, 0);
+    if (ncpu == 0) return error.no_processor_info;
+
+    var model_buf: [512]u8 = undefined;
+    var model_len: usize = model_buf.len;
+    const model_name = model: {
+        if (std.posix.sysctlbynameZ("hw.model", &model_buf, &model_len, null, 0)) |_| {
+            break :model jsc.ZigString.init(std.mem.sliceTo(&model_buf, 0)).withEncoding().toJS(globalThis);
+        } else |_| {
+            break :model jsc.ZigString.static("unknown").withEncoding().toJS(globalThis);
+        }
+    };
+
+    var speed_mhz: c_uint = 0;
+    var speed_len: usize = @sizeOf(c_uint);
+    _ = std.posix.sysctlbynameZ("hw.clockrate", &speed_mhz, &speed_len, null, 0) catch {};
+
+    const values = try jsc.JSValue.createEmptyArray(globalThis, @intCast(ncpu));
+
+    const cpu_states = 5;
+    const times_buf = try bun.default_allocator.alloc(c_long, @as(usize, @intCast(ncpu)) * cpu_states);
+    defer bun.default_allocator.free(times_buf);
+
+    var times_len_bytes: usize = times_buf.len * @sizeOf(c_long);
+    try std.posix.sysctlbynameZ("kern.cp_times", times_buf.ptr, &times_len_bytes, null, 0);
+
+    const ticks: i64 = bun_sysconf__SC_CLK_TCK();
+    const multiplier: u64 = if (ticks > 0) 1000 / @as(u64, @intCast(ticks)) else 1;
+
+    var i: u32 = 0;
+    while (i < ncpu) : (i += 1) {
+        const off = @as(usize, i) * cpu_states;
+        // FreeBSD cp_times layout: user, nice, sys, intr, idle
+        const times = CPUTimes{
+            .user = @as(u64, @intCast(@max(times_buf[off + 0], 0))) * multiplier,
+            .nice = @as(u64, @intCast(@max(times_buf[off + 1], 0))) * multiplier,
+            .sys = @as(u64, @intCast(@max(times_buf[off + 2], 0))) * multiplier,
+            .irq = @as(u64, @intCast(@max(times_buf[off + 3], 0))) * multiplier,
+            .idle = @as(u64, @intCast(@max(times_buf[off + 4], 0))) * multiplier,
+        };
+
+        const cpu = jsc.JSValue.createEmptyObject(globalThis, 3);
+        cpu.put(globalThis, jsc.ZigString.static("model"), model_name);
+        cpu.put(globalThis, jsc.ZigString.static("speed"), jsc.JSValue.jsNumber(speed_mhz));
+        cpu.put(globalThis, jsc.ZigString.static("times"), times.toValue(globalThis));
+        try values.putIndex(globalThis, i, cpu);
+    }
+
+    return values;
 }
 
 fn cpusImplLinux(globalThis: *jsc.JSGlobalObject) !jsc.JSValue {
@@ -407,10 +461,18 @@ pub fn hostname(global: *jsc.JSGlobalObject) bun.JSError!jsc.JSValue {
 
 pub fn loadavg(global: *jsc.JSGlobalObject) bun.JSError!jsc.JSValue {
     if (comptime Environment.isFreeBSD) {
+        var avg: [3]f64 = .{ 0, 0, 0 };
+        if (c.getloadavg(&avg, 3) != 3) {
+            return jsc.JSArray.create(global, &.{
+                jsc.JSValue.jsNumber(0),
+                jsc.JSValue.jsNumber(0),
+                jsc.JSValue.jsNumber(0),
+            });
+        }
         return jsc.JSArray.create(global, &.{
-            jsc.JSValue.jsNumber(0),
-            jsc.JSValue.jsNumber(0),
-            jsc.JSValue.jsNumber(0),
+            jsc.JSValue.jsNumber(avg[0]),
+            jsc.JSValue.jsNumber(avg[1]),
+            jsc.JSValue.jsNumber(avg[2]),
         });
     }
     const result = switch (bun.Environment.os) {
@@ -969,10 +1031,57 @@ pub fn userInfo(globalThis: *jsc.JSGlobalObject, options: gen.UserInfoOptions) b
         result.put(globalThis, jsc.ZigString.static("gid"), jsc.JSValue.jsNumber(-1));
         result.put(globalThis, jsc.ZigString.static("shell"), jsc.JSValue.jsNull());
     } else {
-        const username = bun.env_var.USER.get() orelse "unknown";
+        var username = bun.env_var.USER.get();
+        var shell = bun.env_var.SHELL.get();
 
-        result.put(globalThis, jsc.ZigString.static("username"), jsc.ZigString.init(username).withEncoding().toJS(globalThis));
-        result.put(globalThis, jsc.ZigString.static("shell"), jsc.ZigString.init(bun.env_var.SHELL.get() orelse "unknown").withEncoding().toJS(globalThis));
+        if ((username == null or shell == null) and comptime !Environment.isWindows) {
+            // Match Node's behavior better in clean environments by falling back
+            // to passwd entries when USER/SHELL are not set.
+            var stack_string_bytes: [4096]u8 = undefined;
+            var string_bytes: []u8 = &stack_string_bytes;
+            defer if (string_bytes.ptr != &stack_string_bytes)
+                bun.default_allocator.free(string_bytes);
+
+            var pw: bun.c.passwd = undefined;
+            var pw_result: ?*bun.c.passwd = null;
+
+            const ret = while (true) {
+                const ret = bun.c.getpwuid_r(
+                    bun.c.geteuid(),
+                    &pw,
+                    string_bytes.ptr,
+                    string_bytes.len,
+                    &pw_result,
+                );
+
+                if (ret == @intFromEnum(bun.sys.E.INTR))
+                    continue;
+
+                if (ret == @intFromEnum(bun.sys.E.RANGE)) {
+                    const len = string_bytes.len;
+                    if (string_bytes.ptr != &stack_string_bytes) bun.default_allocator.free(string_bytes);
+                    string_bytes = try bun.default_allocator.alloc(u8, len * 2);
+                    continue;
+                }
+
+                break ret;
+            };
+
+            if (ret == 0 and pw_result != null) {
+                if (username == null and pw.pw_name != null) username = bun.span(pw.pw_name);
+                if (shell == null and pw.pw_shell != null) shell = bun.span(pw.pw_shell);
+            }
+
+            if (username == null or shell == null) {
+                if (bun.c.getpwuid(bun.c.geteuid())) |pw_ptr| {
+                    if (username == null and pw_ptr.*.pw_name != null) username = bun.span(pw_ptr.*.pw_name);
+                    if (shell == null and pw_ptr.*.pw_shell != null) shell = bun.span(pw_ptr.*.pw_shell);
+                }
+            }
+        }
+
+        result.put(globalThis, jsc.ZigString.static("username"), jsc.ZigString.init(username orelse "unknown").withEncoding().toJS(globalThis));
+        result.put(globalThis, jsc.ZigString.static("shell"), jsc.ZigString.init(shell orelse "unknown").withEncoding().toJS(globalThis));
         result.put(globalThis, jsc.ZigString.static("uid"), jsc.JSValue.jsNumber(c.getuid()));
         result.put(globalThis, jsc.ZigString.static("gid"), jsc.JSValue.jsNumber(c.getgid()));
     }

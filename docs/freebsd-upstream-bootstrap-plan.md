@@ -447,6 +447,18 @@ Latest checkpoint (2026-02-22):
    - Top-level import requires `detect-libc`; if absent locally, the file aborts before tests execute.
    - `detect-libc` is declared in `test/package.json`.
    - Treat this as a test-environment setup blocker until test deps are installed for that slice.
+13. FreeBSD errno and `node:os` parity improved substantially:
+   - Added `src/errno/freebsd_errno.zig` and switched `src/sys.zig` to use it on FreeBSD.
+   - `test/js/node/util/util.test.js` now passes (`192 pass / 0 fail`), including FreeBSD-specific `ENODATA` behavior:
+     - `-9919 => ENODATA`
+     - `-4024` remains unknown (matching Node on FreeBSD).
+   - `test/js/node/os/os.test.js` now passes (`52 pass / 0 fail`) after:
+     - FreeBSD `os.loadavg()` implementation via `getloadavg(3)`
+     - FreeBSD `os.userInfo()` passwd fallback in clean env
+     - FreeBSD `os.cpus()` implementation via `sysctl` (`hw.ncpu`, `hw.model`, `hw.clockrate`, `kern.cp_times`)
+   - Test updates:
+     - include `freebsd` / `FreeBSD` in `platform` / `type` expectations
+     - allow passwd-based `userInfo()` values when `USER` / `SHELL` are unset in controlled runs
 
 How to do it:
 
