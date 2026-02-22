@@ -409,6 +409,13 @@ Latest checkpoint (2026-02-22):
    - Current compatibility workaround:
      - `node:fs` / `node:fs/promises` `rmdir` normalize `EREMOTE` to `ENOTEMPTY` on FreeBSD in JS wrappers.
      - This is a temporary compatibility layer pending a proper FreeBSD errno table split (Bun currently aliases FreeBSD to Linux errno tables).
+8. Node `child_process` broad slice mostly passes with controlled test environment:
+   - `test/js/node/child_process/child_process.test.ts` => `29 pass / 1 todo / 1 fail` when invoked with clean env and `SHELL=/bin/sh`.
+   - Non-runtime invocation artifacts (`bun` missing in `PATH`, `$SHELL` unset) were eliminated by controlled invocation.
+   - Remaining blocker:
+     - `spawn(..., { env })` exact-env test fails when spawning Bun because the child Bun process reports injected internal/test cache vars (`BUN_*`, `ZIG_*`) even under `env -i`.
+   - Follow-up:
+     - trace and fix Bun startup/test-mode env injection so plain Bun execution does not mutate `process.env` with internal defaults in a way that breaks Node child_process env semantics.
 
 How to do it:
 
@@ -538,8 +545,9 @@ Exit criteria:
 ## 4. Immediate Next Steps (Execution Order)
 
 1. Resolve remaining out-of-workspace detached legacy worktrees in `/home/lwhsu/tmp` (Phase B closure).
-2. Expand/record the Phase E gate beyond current passing slices (process/fs/watch/spawn coverage already green).
-3. Start Phase F patch-stack split (build/bootstrap/runtime/docs series), with the `rmdir` errno shim isolated for later replacement.
+2. Fix or isolate the remaining `child_process.test.ts` explicit-env blocker (spawned Bun injects internal/test cache vars into `process.env`).
+3. Expand/record the Phase E gate beyond current passing slices (process/fs/watch/spawn coverage now largely green, with one known `child_process` blocker).
+4. Start Phase F patch-stack split (build/bootstrap/runtime/docs series), with the `rmdir` errno shim isolated for later replacement.
 
 ## 4.1 Clean Checkout Reproduction (Current Branch)
 

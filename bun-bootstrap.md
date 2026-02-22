@@ -3461,3 +3461,38 @@ Actions performed:
 
 - The `rmdir` JS-layer normalization is a compatibility workaround to unblock Phase E.
 - Proper upstream fix should replace this with a FreeBSD-specific errno table/mapping in Bun (`src/errno/*`, `src/sys.zig`) so `ENOTEMPTY` is preserved natively across all APIs.
+
+## 2026-02-22: `child_process.test.ts` mostly passes; isolated env injection blocker
+
+### Phase E run and isolation
+
+- Initial direct run had multiple environment-induced failures (`bun` not in `PATH`, extra shell/session vars).
+- Clean invocation for meaningful signal:
+  - `env -i PATH=... HOME=... TMPDIR=/tmp SHELL=/bin/sh build/release/bun test test/js/node/child_process/child_process.test.ts`
+- Result:
+  - `29 pass / 1 todo / 1 fail`
+  - only failing case: `spawn() > should allow us to set env`
+
+### Remaining failure (real runtime behavior)
+
+- Test expects explicit `options.env` to fully control child environment for `spawn(bunExe(), ..., { env: { TEST: "test" } })`.
+- Observed extra variables in child Bun process on FreeBSD build:
+  - `BUN_DEBUG_QUIET_LOGS`
+  - `BUN_FEATURE_FLAG_INTERNAL_FOR_TESTING`
+  - `BUN_GARBAGE_COLLECTOR_LEVEL`
+  - `BUN_INSTALL_CACHE_DIR`
+  - `ZIG_LOCAL_CACHE_DIR`
+  - `ZIG_GLOBAL_CACHE_DIR`
+
+### Repro proving it is not `child_process.ts` merge logic
+
+- Plain Bun execution also injects these vars under a clean OS environment:
+  - `env -i PATH=... HOME=... TMPDIR=/tmp build/release/bun -e 'console.log(JSON.stringify(process.env))'`
+- This shows the issue is deeper than `src/js/node/child_process.ts`:
+  - Bun runtime / test-mode startup is populating `process.env` with internal/testing/cache defaults.
+
+### Current interpretation
+
+- `child_process.ts` explicit env handling appears correct.
+- The blocker is that the spawned Bun process reports internal/test defaults in `process.env`, which violates the Node compatibility expectation used by this test.
+- This may be tied to the current FreeBSD build/test runner mode and needs source-level tracing in Bun startup / test command initialization.
