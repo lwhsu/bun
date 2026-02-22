@@ -3844,6 +3844,9 @@ Actions performed:
 - `node/timers.promises.ts`
   - Failing batch: `120`
   - Same retry-poisoning pattern; promoted to explicit alias (`s120.ts`)
+- `node/trace_events.ts`
+  - Failing batch: `123`
+  - Same retry-poisoning pattern; promoted to explicit alias (`s123.ts`)
 
 ### Evidence (latest run pattern)
 
@@ -3856,7 +3859,7 @@ Actions performed:
   - batch `51` explicit alias+build+remap success
   - stage0 run advanced into `node/_http_*` and `node/assert.strict.ts`
   - stage0 run advanced past batch `88` into `node/*` compatibility modules
-  - retry-poisoning failures promoted to explicit aliases at batches `76`, `84`, `87`, `92`, `102`, `112`, `115`, `116`, and `120`
+  - retry-poisoning failures promoted to explicit aliases at batches `76`, `84`, `87`, `92`, `102`, `112`, `115`, `116`, `120`, and `123`
 
 ### Explicit vs auto alias policy (current)
 
