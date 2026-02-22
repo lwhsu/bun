@@ -3711,3 +3711,24 @@ Actions performed:
 - Verified independently:
   - `build/release/bun -e 'import "bun:internal-for-testing"'` fails with the same `ENOENT`
 - This is tracked as a release-build/internal-test-module exposure issue, not a confirmed FreeBSD TLS runtime regression.
+
+## 2026-02-22: `node:stream` and `node:zlib` slices expanded; fix zlib `kMaxLength` global override (Phase E progress)
+
+### Validation (`node:stream`)
+
+- `test/js/node/stream/node-stream.test.js` + `node-stream-uint8array.test.ts` + `emit-readable-on-end.js`
+  - Result: `41 pass / 1 skip / 5 todo / 0 fail`
+  - No new FreeBSD-specific runtime issues found in this slice.
+
+### New runtime fix (`node:zlib`)
+
+- `src/js/node/zlib.ts`
+  - Replaced module-level cached `kMaxLength` lookup with a dynamic helper (`getBufferKMaxLength()`), used in `ZlibBase`.
+  - This fixes `zlib.kMaxLength.global.test.js`, where the test mutates `require("node:buffer").kMaxLength` and expects decompression APIs to enforce that updated global limit.
+  - Likely affects any scenario where `node:zlib` is evaluated before the buffer limit is overridden (e.g. preloading/test harness ordering), not FreeBSD-only.
+
+### Validation (`node:zlib`)
+
+- `test/js/node/zlib/zlib.kMaxLength.global.test.js` => `8 pass / 0 fail` (fixed)
+- `test/js/node/zlib/zlib.test.js` + `deflate-streaming.test.ts` + `bytesWritten.test.ts` + `zlib.kMaxLength.global.test.js`
+  - Result: `390 pass / 2 skip / 0 fail`

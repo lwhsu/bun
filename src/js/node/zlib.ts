@@ -20,7 +20,9 @@ const MathMax = Math.max;
 const ArrayBufferIsView = ArrayBuffer.isView;
 const isArrayBufferView = ArrayBufferIsView;
 const isAnyArrayBuffer = b => b instanceof ArrayBuffer || b instanceof SharedArrayBuffer;
-const kMaxLength = $requireMap.$get("buffer")?.exports.kMaxLength ?? BufferModule.kMaxLength;
+function getBufferKMaxLength() {
+  return $requireMap.$get("buffer")?.exports.kMaxLength ?? BufferModule.kMaxLength;
+}
 
 const { Transform, finished } = require("node:stream");
 const owner_symbol = Symbol("owner_symbol");
@@ -144,6 +146,7 @@ const FLUSH_BOUND_IDX_ZSTD = 2;
 // The base class for all Zlib-style streams.
 function ZlibBase(opts, mode, handle, { flush, finishFlush, fullFlush }) {
   let chunkSize = Z_DEFAULT_CHUNK;
+  const kMaxLength = getBufferKMaxLength();
   let maxOutputLength = kMaxLength;
   // The ZlibBase class is not exported to user land, the mode should only be passed in by us.
   $assert(typeof mode === "number");

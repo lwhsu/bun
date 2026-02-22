@@ -657,6 +657,17 @@ Tracked non-runtime blocker:
 
 1. `test/js/node/tls/node-tls-internals.test.ts` currently fails in `build/release/bun` because `bun:internal-for-testing` is not exposed (`ENOENT reading "bun:internal-for-testing"`). Treat separately from FreeBSD TLS parity.
 
+### Phase E progress update (2026-02-22, stream + zlib)
+
+1. `node:stream` slice (`node-stream.test.js`, `node-stream-uint8array.test.ts`, `emit-readable-on-end.js`) passes with only upstream `todo`/`skip` cases.
+2. `node:zlib` functional slice passes after fixing a Bun runtime compatibility bug in `src/js/node/zlib.ts`:
+   - `zlib.kMaxLength.global.test.js` expects `require("node:buffer").kMaxLength` overrides to affect decompression max-output checks.
+   - Bun previously cached `kMaxLength` at module-eval time in `node:zlib`, so preloading/order differences caused false passes (no `RangeError`) and test failures.
+   - Fix: compute buffer max length dynamically in `ZlibBase` construction.
+3. Post-fix `node:zlib` validation:
+   - `zlib.kMaxLength.global.test.js` passes
+   - broader functional zlib batch (`zlib.test.js`, `deflate-streaming`, `bytesWritten`, `zlib.kMaxLength.global`) passes
+
 ## 4.1 Clean Checkout Reproduction (Current Branch)
 
 This is the current reproducible flow for a clean checkout of this branch.
