@@ -155,6 +155,7 @@ const stage0AliasedModuleBaseNames: Record<string, string> = {
   "node/child_process.ts": "s87.ts",
   "node/diagnostics_channel.ts": "s92.ts",
   "node/inspector.promises.ts": "s102.ts",
+  "node/readline.promises.ts": "s112.ts",
 };
 trace("preprocess:start");
 for (let i = 0; i < nativeStartIndex; i++) {

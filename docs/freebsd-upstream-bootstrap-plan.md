@@ -841,6 +841,7 @@ Why bundler-time aliasing instead of preprocess-time aliasing:
 - `node/child_process.ts` -> alias `s87.ts` (promoted from auto-retry)
 - `node/diagnostics_channel.ts` -> alias `s92.ts` (promoted from auto-retry)
 - `node/inspector.promises.ts` -> alias `s102.ts` (promoted from auto-retry)
+- `node/readline.promises.ts` -> alias `s112.ts` (promoted from auto-retry)
 
 ### Explicit alias vs auto-retry behavior (important)
 
