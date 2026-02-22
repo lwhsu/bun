@@ -3851,6 +3851,10 @@ Actions performed:
   - Failing batch: `135`
   - Same retry-poisoning pattern; auto-retry alias prep completed, then hung before alias build start
   - Promoted to explicit alias (`s135.ts`)
+- `internal-for-testing.ts`
+  - Failing batch: `137` (final batch)
+  - Same retry-poisoning pattern; auto-retry alias prep completed, then hung before alias build start
+  - Promoted to explicit alias (`s137.ts`)
 
 ### Evidence (latest run pattern)
 
@@ -3864,7 +3868,8 @@ Actions performed:
   - stage0 run advanced into `node/_http_*` and `node/assert.strict.ts`
   - stage0 run advanced past batch `88` into `node/*` compatibility modules
   - retry-poisoning failures promoted to explicit aliases at batches `76`, `84`, `87`, `92`, `102`, `112`, `115`, `116`, `120`, and `123`
-  - additional late-stage retry-poisoning failure at batch `135` (`thirdparty/vercel_fetch.ts`) promoted to explicit alias (`s135.ts`)
+  - additional late-stage retry-poisoning failures at batches `135` (`thirdparty/vercel_fetch.ts`) and `137`
+    (`internal-for-testing.ts`) promoted to explicit aliases (`s135.ts`, `s137.ts`)
 
 ### Explicit vs auto alias policy (current)
 

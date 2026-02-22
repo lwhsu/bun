@@ -836,6 +836,7 @@ Why bundler-time aliasing instead of preprocess-time aliasing:
 - `internal/streams/end-of-stream.ts` -> alias `eos.ts`
 - `internal/streams/lazy_transform.ts` -> alias `lazy.ts`
 - `internal/streams/native-readable.ts` -> alias `s51.ts` (promoted from auto-retry)
+- `internal-for-testing.ts` -> alias `s137.ts` (promoted from auto-retry)
 - `node/_http_server.ts` -> alias `s76.ts` (promoted from auto-retry)
 - `node/assert.strict.ts` -> alias `s84.ts` (promoted from auto-retry)
 - `node/child_process.ts` -> alias `s87.ts` (promoted from auto-retry)
@@ -860,9 +861,11 @@ Why bundler-time aliasing instead of preprocess-time aliasing:
 This keeps the workaround auditable:
 - generic behavior covers new cases automatically
 - explicit list documents exceptions where retry-in-place is unstable
-- latest known late-stage retry-poisoning case was `thirdparty/vercel_fetch.ts` (batch `135`),
-  which hung after auto-retry alias file write and before alias `Bun.build()` start; it is now
-  promoted to explicit first-attempt alias `s135.ts`.
+- latest known late-stage retry-poisoning cases:
+  - `thirdparty/vercel_fetch.ts` (batch `135`)
+  - `internal-for-testing.ts` (batch `137`, final batch)
+  Both hung after auto-retry alias file write and before alias `Bun.build()` start and are now
+  promoted to explicit first-attempt aliases (`s135.ts`, `s137.ts`).
 
 ### Batch-1 acceleration mode (current local workaround)
 

@@ -150,6 +150,7 @@ const stage0AliasedModuleBaseNames: Record<string, string> = {
   "internal/streams/end-of-stream.ts": "eos.ts",
   "internal/streams/lazy_transform.ts": "lazy.ts",
   "internal/streams/native-readable.ts": "s51.ts",
+  "internal-for-testing.ts": "s137.ts",
   "node/_http_server.ts": "s76.ts",
   "node/assert.strict.ts": "s84.ts",
   "node/child_process.ts": "s87.ts",
