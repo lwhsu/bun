@@ -796,3 +796,53 @@ All items must hold simultaneously:
 3. FreeBSD test gate passes, with tracked exceptions only.
 4. Upstream patch series is minimal, documented, and review-ready.
 5. Workspace state is tidy enough for handoff/migration without hidden dependencies.
+
+## Appendix: Phase C-strict Legacy Stage0 Findings (2026-02-22)
+
+### Context
+
+- Goal of `C-strict`: run codegen/install steps without Node fallbacks:
+  - `BUN_FREEBSD_BINDGENV2_NODE=0`
+  - `BUN_FREEBSD_CODEGEN_NODE=0`
+  - `BUN_FREEBSD_NPM_INSTALL=0`
+- Current blocker is in legacy stage0 `bundle-modules.ts` execution on FreeBSD.
+
+### Proven behavior and current workaround direction
+
+1. Legacy stage0 `Bun.build(...)` works on FreeBSD for simple cases.
+2. Multi-entry bundling can corrupt entrypoint paths on FreeBSD legacy stage0.
+3. Single-entry (`BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE=1`) isolates failures deterministically.
+4. A small subset of entrypoints still corrupt even in single-entry mode.
+5. Those can be worked around by **bundler-time aliasing** (short temp basename only for the failing entrypoint), then remapping outputs back to canonical paths.
+
+Why bundler-time aliasing instead of preprocess-time aliasing:
+- Preprocess-time alias writes caused legacy stage0 hangs in the preprocessing loop.
+- Bundler-time aliasing limits risk to one single-entry build invocation and is easier to audit.
+
+### Current implementation notes (for reviewers)
+
+- File: `src/codegen/bundle-modules.ts`
+- Scope is explicitly limited to:
+  - FreeBSD host
+  - stage0 Bun (`Bun.version === "0.0.0"`)
+- The workaround is heavily commented in-code with:
+  - what legacy bug is being worked around
+  - why `fs.copyFileSync()` is avoided on legacy FreeBSD stage0
+  - why output remap tolerates two legacy output naming behaviors
+
+### Confirmed failing entrypoints and aliases (iterative list)
+
+- `internal/perf_hooks/monitorEventLoopDelay.ts` -> alias `29.ts`
+- `internal/streams/end-of-stream.ts` -> alias `eos.ts`
+- `internal/streams/lazy_transform.ts` -> alias `lazy.ts` (added; validate in next rerun)
+
+### Repro command used for isolation
+
+```bash
+cd /home/lwhsu/killme/bun
+BUN_FREEBSD_CODEGEN_TRACE=1 \
+BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE=1 \
+build/freebsd-bootstrap/stage0/bun --no-install run src/codegen/bundle-modules.ts --debug=OFF build/release
+```
+
+This is intentionally slow, but it gives deterministic evidence (`batchIndex`, `entrypoint0`) and is the best current path to finish `C-strict` while preserving a reviewable audit trail.

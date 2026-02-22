@@ -25,6 +25,7 @@ const BASE = path.join(import.meta.dir, "../js");
 const debug = process.argv[2] === "--debug=ON";
 const CMAKE_BUILD_ROOT = process.argv[3];
 const traceEnabled = process.env.BUN_FREEBSD_CODEGEN_TRACE === "1";
+const traceAllPreprocessItems = process.env.BUN_FREEBSD_CODEGEN_TRACE_PREPROCESS_ALL === "1";
 // On FreeBSD, direct self-host codegen uses Bun's bundler path (not the node fallback path).
 // For internal module parity with the node/esbuild runner, force CommonJS bundle output.
 const forceCJSFormat =
@@ -141,10 +142,18 @@ const bunRepoRoot = path.join(CMAKE_BUILD_ROOT, "..", "..");
 
 // Preprocess builtins
 const bundledEntryPoints: string[] = [];
+// Legacy FreeBSD stage0 has a path-string corruption bug in some single-entry Bun.build() calls.
+// We keep a small, explicit list of problematic entrypoints and apply a short-path alias only at
+// bundler invocation time (not preprocess time) because preprocess-time aliasing can deadlock stage0.
+const stage0AliasedModuleBaseNames: Record<string, string> = {
+  "internal/perf_hooks/monitorEventLoopDelay.ts": "29.ts",
+  "internal/streams/end-of-stream.ts": "eos.ts",
+  "internal/streams/lazy_transform.ts": "lazy.ts",
+};
 trace("preprocess:start");
 for (let i = 0; i < nativeStartIndex; i++) {
   try {
-    if (traceEnabled && (i === 0 || i === nativeStartIndex - 1 || (i % 50) === 0)) {
+    if (traceEnabled && (traceAllPreprocessItems || i === 0 || i === nativeStartIndex - 1 || (i % 50) === 0)) {
       trace("preprocess:item", { i, id: moduleList[i] });
     }
     const file = path.join(BASE, moduleList[i]);
@@ -207,9 +216,13 @@ for (let i = 0; i < nativeStartIndex; i++) {
       true,
       x => requireTransformer(x, moduleList[i]),
     );
-    let fileToTranspile = `// GENERATED TEMP FILE - DO NOT EDIT
+    const stage0FreeBSD = isFreeBSD && isStage0Bun;
+    const fileHeader = stage0FreeBSD
+      ? ""
+      : `// GENERATED TEMP FILE - DO NOT EDIT
 // Sourced from src/js/${moduleList[i]}
-${importStatements.join("\n")}
+`;
+    let fileToTranspile = `${fileHeader}${importStatements.join("\n")}
 
 ${processed.result.slice(1).trim()}
 ;$$EXPORT$$(__intrinsic__exports).$$EXPORT_END$$;
@@ -226,7 +239,17 @@ ${processed.result.slice(1).trim()}
       },
     );
     if (!exportOptimization) {
-      fileToTranspile = `var $;` + fileToTranspile.replaceAll("__intrinsic__exports", "$");
+      if (stage0FreeBSD) {
+        const stage0ExportVar = "__b0";
+        fileToTranspile = `${fileHeader}${importStatements.join("\n")}
+
+var ${stage0ExportVar};
+${processed.result.slice(1).trim().replaceAll("__intrinsic__exports", stage0ExportVar)}
+;$$EXPORT$$(${stage0ExportVar}).$$EXPORT_END$$;
+`;
+      } else {
+        fileToTranspile = `var $;` + fileToTranspile.replaceAll("__intrinsic__exports", "$");
+      }
     }
     const outputPath = path.join(TMP_DIR, moduleList[i].slice(0, -3) + ".ts");
 
@@ -235,7 +258,9 @@ ${processed.result.slice(1).trim()}
       verbose("directory did not exist after mkdir twice:", path.dirname(outputPath));
     }
 
-    fileToTranspile = "// @ts-nocheck\n" + fileToTranspile;
+    if (!stage0FreeBSD) {
+      fileToTranspile = "// @ts-nocheck\n" + fileToTranspile;
+    }
 
     try {
       writeFileCompatSync(outputPath, fileToTranspile);
@@ -266,11 +291,10 @@ ${processed.result.slice(1).trim()}
 mark("Preprocess modules");
 trace("preprocess:done", { bundledEntryPoints: bundledEntryPoints.length });
 
-// directory caching stuff breaks this sometimes. CLI rules
-const config_cli = [
+const makeBundlerCli = (entryPoints: string[]) => [
   process.execPath,
   "build",
-  ...bundledEntryPoints,
+  ...entryPoints,
   ...(debug ? [] : ["--minify-syntax", "--keep-names"]),
   "--root",
   TMP_DIR,
@@ -288,31 +312,164 @@ const config_cli = [
   "--outdir",
   path.join(TMP_DIR, "modules_out"),
 ];
-verbose("running: ", config_cli);
-trace("bun.build.cli:start", { args: config_cli.length });
+
 const useNodeSpawnForBundler =
   isFreeBSD && isStage0Bun && process.env.BUN_FREEBSD_STAGE0_USE_NODE_SPAWN_BUNDLER === "1";
-const out = useNodeSpawnForBundler
-  ? spawnSync(config_cli[0], config_cli.slice(1), {
-      cwd: process.cwd(),
-      env: process.env,
-      stdio: ["ignore", "inherit", "pipe"],
-    })
-  : Bun.spawnSync({
-      cmd: config_cli,
-      cwd: process.cwd(),
-      env: process.env,
-      stdio: ["ignore", "inherit", "inherit"],
+const stage0BundlerBatchSize =
+  isFreeBSD && isStage0Bun
+    ? Math.max(
+        1,
+        Number.parseInt(process.env.BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE || "16", 10) ||
+          16,
+      )
+    : 0;
+
+function runBundlerCli(entryPoints: string[], batchIndex?: number) {
+  const useStage0BunBuildAPI = isFreeBSD && isStage0Bun;
+  if (useStage0BunBuildAPI) {
+    let bundlerEntryPoints = entryPoints;
+    let aliasedEntrypointOutputPath: string | undefined;
+    if (entryPoints.length === 1) {
+      const original = entryPoints[0];
+      const rel = original.slice(TMP_DIR.length + 1);
+      const aliasBase = stage0AliasedModuleBaseNames[rel];
+      if (aliasBase) {
+        const aliasPath = path.join(TMP_DIR, path.dirname(rel), aliasBase);
+        // Copy just before the single-entry Bun.build() call to avoid the preprocess-stage hangs seen
+        // when legacy stage0 writes these alias paths during the preprocessing loop.
+        // Use text read/write instead of fs.copyFileSync(): legacy FreeBSD stage0 can hit an internal
+        // TODO path in copyFileSync even though plain file reads/writes are stable.
+        trace("bun.build.api:entrypoint-alias-prepare", { original, aliasPath, batchIndex, step: "mkdir" });
+        ensureDirSync(path.dirname(aliasPath));
+        trace("bun.build.api:entrypoint-alias-prepare", { original, aliasPath, batchIndex, step: "read" });
+        const aliasedSourceText = readUtf8CompatSync(original);
+        trace("bun.build.api:entrypoint-alias-prepare", {
+          original,
+          aliasPath,
+          batchIndex,
+          step: "write",
+          bytes: aliasedSourceText.length,
+        });
+        writeFileCompatSync(aliasPath, aliasedSourceText);
+        bundlerEntryPoints = [aliasPath];
+        aliasedEntrypointOutputPath = rel.replace(/\.ts$/, ".js");
+        trace("bun.build.api:entrypoint-alias", { original, aliasPath, batchIndex });
+      }
+    }
+
+    trace("bun.build.api:start", {
+      entryPoints: bundlerEntryPoints.length,
+      entrypoint0: bundlerEntryPoints.length === 1 ? bundlerEntryPoints[0] : undefined,
+      batchIndex,
+      stage0BundlerBatchSize,
     });
-const bundlerExitCode = useNodeSpawnForBundler ? out.status : out.exitCode;
-trace("bun.build.cli:done", { exitCode: bundlerExitCode, useNodeSpawnForBundler });
-if (bundlerExitCode !== 0) {
-  const stderrText = out.stderr && out.stderr.length > 0 ? Buffer.from(out.stderr).toString("utf8").trim() : "";
-  if (stderrText.length > 0) {
-    console.error(stderrText);
+    return Bun.build({
+      entrypoints: bundlerEntryPoints,
+      outdir: path.join(TMP_DIR, "modules_out"),
+      root: TMP_DIR,
+      target: "bun",
+      external: builtinModules,
+      define: {
+        ...define,
+        IS_BUN_DEVELOPMENT: String(!!debug),
+        __intrinsic__debug: debug ? "$debug_log_enabled" : "false",
+      },
+      minify: debug ? false : { syntax: true },
+      keepNames: !debug,
+    }).then(result => {
+      trace("bun.build.api:done", {
+        success: result.success,
+        outputs: result.outputs?.length ?? 0,
+        logs: result.logs?.length ?? 0,
+        batchIndex,
+      });
+      if (result.success && aliasedEntrypointOutputPath && bundlerEntryPoints[0] !== entryPoints[0]) {
+        // Bun.build() emits to the alias output path; remap the artifact back to the canonical module
+        // path so the existing postprocess loop and generated registry logic remain unchanged.
+        const aliasRelJs = bundlerEntryPoints[0].slice(TMP_DIR.length + 1).replace(/\.ts$/, ".js");
+        const outdir = path.join(TMP_DIR, "modules_out");
+        const aliasOutput = path.join(outdir, aliasRelJs);
+        const canonicalOutput = path.join(outdir, aliasedEntrypointOutputPath);
+        if (fs.existsSync(aliasOutput)) {
+          ensureDirSync(path.dirname(canonicalOutput));
+          // Same rationale as above: avoid legacy stage0 copyFileSync() on FreeBSD.
+          writeFileCompatSync(canonicalOutput, readUtf8CompatSync(aliasOutput));
+          trace("bun.build.api:entrypoint-alias-remap", { aliasOutput, canonicalOutput, batchIndex, mode: "copy" });
+        } else if (fs.existsSync(canonicalOutput)) {
+          // Some legacy stage0 code paths preserve the original module-derived output name even when the
+          // entrypoint file path is aliased. Accept that as success and keep going.
+          trace("bun.build.api:entrypoint-alias-remap", {
+            aliasOutput,
+            canonicalOutput,
+            batchIndex,
+            mode: "canonical-already-exists",
+          });
+        } else {
+          throw new Error(
+            `stage0 alias remap failed: missing both alias output '${aliasOutput}' and canonical output '${canonicalOutput}'`,
+          );
+        }
+      }
+      if (result.success) return;
+      for (const log of result.logs ?? []) {
+        console.error(log);
+      }
+      console.error("bundle-modules.ts: Bun.build API failed");
+      process.exit(1);
+    });
   }
-  console.error("bundle-modules.ts: child bun build failed");
-  process.exit(bundlerExitCode ?? 1);
+
+  const config_cli = makeBundlerCli(entryPoints);
+  verbose("running: ", config_cli);
+  trace("bun.build.cli:start", {
+    args: config_cli.length,
+    entryPoints: entryPoints.length,
+    batchIndex,
+    stage0BundlerBatchSize,
+  });
+  if (traceEnabled) {
+    console.error("[freebsd-codegen-trace] bun.build.cli:argv:begin");
+    console.error(config_cli.join("\n"));
+    console.error("[freebsd-codegen-trace] bun.build.cli:argv:end");
+  }
+
+  const out = useNodeSpawnForBundler
+    ? spawnSync(config_cli[0], config_cli.slice(1), {
+        cwd: process.cwd(),
+        env: process.env,
+        stdio: ["ignore", "inherit", "pipe"],
+      })
+    : Bun.spawnSync({
+        cmd: config_cli,
+        cwd: process.cwd(),
+        env: process.env,
+        stdio: ["ignore", "inherit", "inherit"],
+      });
+  const bundlerExitCode = useNodeSpawnForBundler ? out.status : out.exitCode;
+  trace("bun.build.cli:done", { exitCode: bundlerExitCode, useNodeSpawnForBundler, batchIndex });
+  if (bundlerExitCode !== 0) {
+    const stderrText = out.stderr && out.stderr.length > 0 ? Buffer.from(out.stderr).toString("utf8").trim() : "";
+    if (stderrText.length > 0) {
+      console.error(stderrText);
+    }
+    console.error("bundle-modules.ts: child bun build failed");
+    process.exit(bundlerExitCode ?? 1);
+  }
+}
+
+if (stage0BundlerBatchSize > 0 && bundledEntryPoints.length > stage0BundlerBatchSize) {
+  trace("bun.build.cli:batches", {
+    totalEntryPoints: bundledEntryPoints.length,
+    batchSize: stage0BundlerBatchSize,
+  });
+  for (let i = 0; i < bundledEntryPoints.length; i += stage0BundlerBatchSize) {
+    await runBundlerCli(
+      bundledEntryPoints.slice(i, i + stage0BundlerBatchSize),
+      Math.floor(i / stage0BundlerBatchSize),
+    );
+  }
+} else {
+  await runBundlerCli(bundledEntryPoints);
 }
 
 mark("Bundle modules");

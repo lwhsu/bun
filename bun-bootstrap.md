@@ -3776,3 +3776,58 @@ Actions performed:
 - Current stage0 may still print `Linux x64` in `--version` output (`Bun v0.0.0 (...) Linux x64`) even when running on FreeBSD.
 - This is a legacy stage0 reporting/path issue and is not currently a bootstrap blocker.
 - Keep as a separate cleanup item after C-strict runtime stability is solved.
+
+## 2026-02-22: Phase C-strict deep dive (stage0 `bundle-modules.ts` with no Node fallback)
+
+### Key finding (updated)
+
+- The remaining `C-strict` blocker is not just child process spawning.
+- On FreeBSD legacy stage0, `bundle-modules.ts` fails in the **bundler entrypoint handling path** for a subset of generated temp modules:
+  - path strings are corrupted (entrypoint path runs into `var __b0;` content)
+  - manifests as `FileNotFound: failed to open entry point directory: ...\n\nvar __b0;\n/`
+
+### What changed in `src/codegen/bundle-modules.ts` (why / how)
+
+- Added a FreeBSD stage0 path that uses **in-process `Bun.build(...)`** instead of child `bun build` CLI.
+  - Why: legacy stage0 `Bun.spawn*`/`bun build` CLI path is unstable and can corrupt multi-entry invocations.
+  - Scope: FreeBSD + stage0 only (`Bun.version === "0.0.0"`).
+- Added `BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE` support (default `16` for stage0).
+  - For debugging, `=1` isolates failures to a single entrypoint deterministically.
+- Added trace fields (`entrypoint0`, alias/remap logs) gated by `BUN_FREEBSD_CODEGEN_TRACE=1`.
+  - Why: identify exact failing module without re-deriving batch index mappings.
+
+### Bundler-time alias workaround (current strategy)
+
+- Preprocess-time aliasing caused legacy stage0 hangs during the preprocessing loop.
+- Current workaround aliases **only known-bad entrypoints** immediately before single-entry `Bun.build(...)`, then remaps outputs back.
+  - This avoids destabilizing the preprocessing phase.
+  - It also avoids `fs.copyFileSync()` because legacy FreeBSD stage0 can hit an internal `TODO called!` there; text read/write helpers are used instead.
+
+### Confirmed bad entrypoints (so far) and status
+
+- `internal/perf_hooks/monitorEventLoopDelay.ts`
+  - Failing batch (single-entry API mode): `29`
+  - Fixed by bundler-time alias (`29.ts`)
+- `internal/streams/end-of-stream.ts`
+  - Failing batch: `47`
+  - Fixed by bundler-time alias (`eos.ts`)
+- `internal/streams/lazy_transform.ts`
+  - Next failing batch after the above fixes: `49`
+  - Alias added (`lazy.ts`), pending rerun validation
+
+### Evidence (latest run pattern)
+
+- Command used:
+  - `BUN_FREEBSD_CODEGEN_TRACE=1 BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE=1 build/freebsd-bootstrap/stage0/bun --no-install run src/codegen/bundle-modules.ts --debug=OFF build/release`
+- Observed:
+  - batch `29` alias+build+remap success
+  - batch `47` alias+build+remap success
+  - next failure moved to batch `49` (`internal/streams/lazy_transform.ts`)
+
+### Why this is documented (upstream review context)
+
+- These aliases are a bootstrap survival workaround for a legacy stage0 FreeBSD bug, not a desirable long-term behavior change.
+- The comments and trace logs are intentionally explicit so the workaround can be:
+  - reviewed,
+  - narrowed further,
+  - or removed once a deeper legacy bundler root cause is identified.
