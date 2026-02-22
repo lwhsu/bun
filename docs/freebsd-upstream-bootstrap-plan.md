@@ -834,7 +834,23 @@ Why bundler-time aliasing instead of preprocess-time aliasing:
 
 - `internal/perf_hooks/monitorEventLoopDelay.ts` -> alias `29.ts`
 - `internal/streams/end-of-stream.ts` -> alias `eos.ts`
-- `internal/streams/lazy_transform.ts` -> alias `lazy.ts` (added; validate in next rerun)
+- `internal/streams/lazy_transform.ts` -> alias `lazy.ts`
+- `internal/streams/native-readable.ts` -> alias `s51.ts` (promoted from auto-retry)
+- `node/_http_server.ts` -> alias `s76.ts` (promoted from auto-retry)
+- `node/assert.strict.ts` -> alias `s84.ts` (promoted from auto-retry)
+
+### Explicit alias vs auto-retry behavior (important)
+
+- The generic auto-retry is useful and remains enabled for unknown cases.
+- However, some entries show a "retry-poisoning" pattern:
+  - first `Bun.build()` attempt fails with path corruption (expected signature)
+  - alias retry in the same stage0 process hangs before alias `Bun.build()` starts
+- For those entries, we promote them to the explicit alias list so the first attempt already uses
+  the alias path and avoids poisoning the process.
+
+This keeps the workaround auditable:
+- generic behavior covers new cases automatically
+- explicit list documents exceptions where retry-in-place is unstable
 
 ### Repro command used for isolation
 

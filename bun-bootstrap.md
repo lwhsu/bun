@@ -3812,8 +3812,17 @@ Actions performed:
   - Failing batch: `47`
   - Fixed by bundler-time alias (`eos.ts`)
 - `internal/streams/lazy_transform.ts`
-  - Next failing batch after the above fixes: `49`
-  - Alias added (`lazy.ts`), pending rerun validation
+  - Failing batch: `49`
+  - Fixed by bundler-time alias (`lazy.ts`)
+- `internal/streams/native-readable.ts`
+  - Failing batch: `51`
+  - Auto-retry alias path can poison the current stage0 process; promoted to explicit alias (`s51.ts`)
+- `node/_http_server.ts`
+  - Failing batch: `76`
+  - Same retry-poisoning pattern; promoted to explicit alias (`s76.ts`)
+- `node/assert.strict.ts`
+  - Failing batch: `84`
+  - Same retry-poisoning pattern; promoted to explicit alias (`s84.ts`)
 
 ### Evidence (latest run pattern)
 
@@ -3822,7 +3831,20 @@ Actions performed:
 - Observed:
   - batch `29` alias+build+remap success
   - batch `47` alias+build+remap success
-  - next failure moved to batch `49` (`internal/streams/lazy_transform.ts`)
+  - batch `49` alias+build+remap success
+  - batch `51` explicit alias+build+remap success
+  - stage0 run advanced into `node/_http_*` and `node/assert.strict.ts`
+  - next retry-poisoning failures observed and promoted to explicit aliases at batches `76` and `84`
+
+### Explicit vs auto alias policy (current)
+
+- Keep a generic auto-retry for the known corruption signature:
+  - `failed to open entry point directory ... var __b0;`
+- If the process hangs after the failed first attempt and before the retry alias build starts,
+  promote that module to the explicit alias list (first-attempt alias).
+- Why:
+  - some legacy stage0 failures appear to poison the process state, making retry-in-place unreliable.
+  - explicit first-attempt aliasing avoids the poisoned path while preserving a small, reviewable list.
 
 ### Why this is documented (upstream review context)
 

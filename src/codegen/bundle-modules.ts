@@ -149,6 +149,9 @@ const stage0AliasedModuleBaseNames: Record<string, string> = {
   "internal/perf_hooks/monitorEventLoopDelay.ts": "29.ts",
   "internal/streams/end-of-stream.ts": "eos.ts",
   "internal/streams/lazy_transform.ts": "lazy.ts",
+  "internal/streams/native-readable.ts": "s51.ts",
+  "node/_http_server.ts": "s76.ts",
+  "node/assert.strict.ts": "s84.ts",
 };
 trace("preprocess:start");
 for (let i = 0; i < nativeStartIndex; i++) {
@@ -324,17 +327,17 @@ const stage0BundlerBatchSize =
       )
     : 0;
 
-function runBundlerCli(entryPoints: string[], batchIndex?: number) {
+async function runBundlerCli(entryPoints: string[], batchIndex?: number) {
   const useStage0BunBuildAPI = isFreeBSD && isStage0Bun;
   if (useStage0BunBuildAPI) {
-    let bundlerEntryPoints = entryPoints;
-    let aliasedEntrypointOutputPath: string | undefined;
-    if (entryPoints.length === 1) {
-      const original = entryPoints[0];
-      const rel = original.slice(TMP_DIR.length + 1);
-      const aliasBase = stage0AliasedModuleBaseNames[rel];
-      if (aliasBase) {
-        const aliasPath = path.join(TMP_DIR, path.dirname(rel), aliasBase);
+    const runStage0BuildOnce = async (opts?: { aliasBase?: string; aliasReason?: string }) => {
+      let bundlerEntryPoints = entryPoints;
+      let aliasedEntrypointOutputPath: string | undefined;
+
+      if (entryPoints.length === 1 && opts?.aliasBase) {
+        const original = entryPoints[0];
+        const rel = original.slice(TMP_DIR.length + 1);
+        const aliasPath = path.join(TMP_DIR, path.dirname(rel), opts.aliasBase);
         // Copy just before the single-entry Bun.build() call to avoid the preprocess-stage hangs seen
         // when legacy stage0 writes these alias paths during the preprocessing loop.
         // Use text read/write instead of fs.copyFileSync(): legacy FreeBSD stage0 can hit an internal
@@ -353,36 +356,36 @@ function runBundlerCli(entryPoints: string[], batchIndex?: number) {
         writeFileCompatSync(aliasPath, aliasedSourceText);
         bundlerEntryPoints = [aliasPath];
         aliasedEntrypointOutputPath = rel.replace(/\.ts$/, ".js");
-        trace("bun.build.api:entrypoint-alias", { original, aliasPath, batchIndex });
+        trace("bun.build.api:entrypoint-alias", { original, aliasPath, batchIndex, reason: opts.aliasReason });
       }
-    }
 
-    trace("bun.build.api:start", {
-      entryPoints: bundlerEntryPoints.length,
-      entrypoint0: bundlerEntryPoints.length === 1 ? bundlerEntryPoints[0] : undefined,
-      batchIndex,
-      stage0BundlerBatchSize,
-    });
-    return Bun.build({
-      entrypoints: bundlerEntryPoints,
-      outdir: path.join(TMP_DIR, "modules_out"),
-      root: TMP_DIR,
-      target: "bun",
-      external: builtinModules,
-      define: {
-        ...define,
-        IS_BUN_DEVELOPMENT: String(!!debug),
-        __intrinsic__debug: debug ? "$debug_log_enabled" : "false",
-      },
-      minify: debug ? false : { syntax: true },
-      keepNames: !debug,
-    }).then(result => {
+      trace("bun.build.api:start", {
+        entryPoints: bundlerEntryPoints.length,
+        entrypoint0: bundlerEntryPoints.length === 1 ? bundlerEntryPoints[0] : undefined,
+        batchIndex,
+        stage0BundlerBatchSize,
+      });
+      const result = await Bun.build({
+        entrypoints: bundlerEntryPoints,
+        outdir: path.join(TMP_DIR, "modules_out"),
+        root: TMP_DIR,
+        target: "bun",
+        external: builtinModules,
+        define: {
+          ...define,
+          IS_BUN_DEVELOPMENT: String(!!debug),
+          __intrinsic__debug: debug ? "$debug_log_enabled" : "false",
+        },
+        minify: debug ? false : { syntax: true },
+        keepNames: !debug,
+      });
       trace("bun.build.api:done", {
         success: result.success,
         outputs: result.outputs?.length ?? 0,
         logs: result.logs?.length ?? 0,
         batchIndex,
       });
+
       if (result.success && aliasedEntrypointOutputPath && bundlerEntryPoints[0] !== entryPoints[0]) {
         // Bun.build() emits to the alias output path; remap the artifact back to the canonical module
         // path so the existing postprocess loop and generated registry logic remain unchanged.
@@ -410,13 +413,41 @@ function runBundlerCli(entryPoints: string[], batchIndex?: number) {
           );
         }
       }
-      if (result.success) return;
+      return result;
+    };
+
+    const explicitAliasBase =
+      entryPoints.length === 1 ? stage0AliasedModuleBaseNames[entryPoints[0].slice(TMP_DIR.length + 1)] : undefined;
+    let result = await runStage0BuildOnce(
+      explicitAliasBase ? { aliasBase: explicitAliasBase, aliasReason: "known-bad-entrypoint" } : undefined,
+    );
+
+    // FreeBSD legacy stage0 can corrupt some entrypoint paths on a small subset of modules.
+    // If a single-entry build fails with the known "failed to open entry point directory ... var __b0"
+    // signature, retry once with a short deterministic alias path to keep Phase C bootstrap moving.
+    if (!result.success && entryPoints.length === 1 && !explicitAliasBase) {
+      const joinedLogs = (result.logs ?? []).map(String).join("\n");
+      const looksLikeEntrypointPathCorruption =
+        joinedLogs.includes("failed to open entry point directory:") && joinedLogs.includes("var __b0;");
+      if (looksLikeEntrypointPathCorruption) {
+        const autoAliasBase = `s${String(batchIndex ?? 0)}.ts`;
+        trace("bun.build.api:entrypoint-alias-auto-retry", {
+          entrypoint: entryPoints[0],
+          autoAliasBase,
+          batchIndex,
+        });
+        result = await runStage0BuildOnce({ aliasBase: autoAliasBase, aliasReason: "auto-retry-path-corruption" });
+      }
+    }
+
+    if (!result.success) {
       for (const log of result.logs ?? []) {
         console.error(log);
       }
       console.error("bundle-modules.ts: Bun.build API failed");
       process.exit(1);
-    });
+    }
+    return;
   }
 
   const config_cli = makeBundlerCli(entryPoints);
