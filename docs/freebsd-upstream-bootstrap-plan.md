@@ -388,6 +388,12 @@ Latest checkpoint (2026-02-22):
 3. Watcher coverage currently fails on FreeBSD:
    - `test/js/node/watch/fs.watch.test.ts` shows widespread timeout failures and did not complete cleanly in the timed run.
    - This is now a prioritized Phase D/E follow-up item.
+4. Narrowing progress:
+   - File-level watch path now passes targeted check:
+     - `test/js/node/watch/fs.watch.test.ts -t "should emit 'change' event when file is modified"` passed.
+   - Directory-watch path still fails:
+     - `test/js/node/watch/fs.watch.test.ts -t "add file/folder to folder"` timed out.
+   - Interpretation: FreeBSD kqueue registration for files is fixed, but directory event propagation/filename mapping remains unresolved.
 
 How to do it:
 

@@ -3283,3 +3283,34 @@ Actions performed:
 
 - Core runtime, spawn, and shell are in good shape for this checkpoint.
 - FreeBSD watcher behavior remains a major open runtime parity gap and should be treated as a Phase D/E priority.
+
+## 2026-02-22: fs.watch root-cause narrowing and partial fix
+
+### Root-cause identified
+
+- `src/Watcher.zig` only registered kqueue watch entries behind `Environment.isMac` conditions in key paths.
+- On FreeBSD this meant:
+  - `fs.watch(file)` and `fs.watch(dir)` were created, but no kqueue registration occurred for those paths.
+  - Result: broad timeout failures in `test/js/node/watch/fs.watch.test.ts`.
+
+### Patch applied
+
+- Updated `src/Watcher.zig` kqueue registration guards to include FreeBSD where appropriate:
+  - file registration path (`appendFileAssumeCapacity`)
+  - directory registration path (`appendDirectoryAssumeCapacity`)
+  - lazy file watch open path in `addFileByPathSlow` for FreeBSD (uses `openA(..., 0, 0)`)
+- Did **not** change `requires_file_descriptors` (left mac-only) to avoid enabling unrelated `O_EVTONLY` compile paths on FreeBSD.
+
+### Verification after rebuild
+
+- Minimal repros:
+  - `fs.watch(file)` now receives event (`FILE_EVENT change a.txt`)
+  - `fs.watch(dir)` still times out (no event)
+- Targeted tests:
+  - `test/js/node/watch/fs.watch.test.ts -t "should emit 'change' event when file is modified"` => pass
+  - `test/js/node/watch/fs.watch.test.ts -t "add file/folder to folder"` => fail (timeout)
+
+### Current interpretation
+
+- File-level watcher path is now functional on FreeBSD.
+- Directory-change propagation (especially filename reporting for directory events) remains broken and is likely the dominant cause of remaining `fs.watch` suite failures.
