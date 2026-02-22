@@ -328,6 +328,11 @@ const stage0BundlerBatchSize =
           16,
       )
     : 0;
+const stage0PreferFirstAttemptAliasForSingleEntry =
+  isFreeBSD &&
+  isStage0Bun &&
+  stage0BundlerBatchSize === 1 &&
+  process.env.BUN_FREEBSD_STAGE0_DISABLE_ALIAS_ALL_SINGLE_ENTRY !== "1";
 
 async function runBundlerCli(entryPoints: string[], batchIndex?: number) {
   const useStage0BunBuildAPI = isFreeBSD && isStage0Bun;
@@ -420,14 +425,22 @@ async function runBundlerCli(entryPoints: string[], batchIndex?: number) {
 
     const explicitAliasBase =
       entryPoints.length === 1 ? stage0AliasedModuleBaseNames[entryPoints[0].slice(TMP_DIR.length + 1)] : undefined;
+    const defaultSingleEntryAliasBase =
+      !explicitAliasBase && entryPoints.length === 1 && stage0PreferFirstAttemptAliasForSingleEntry
+        ? `s${String(batchIndex ?? 0)}.ts`
+        : undefined;
     let result = await runStage0BuildOnce(
-      explicitAliasBase ? { aliasBase: explicitAliasBase, aliasReason: "known-bad-entrypoint" } : undefined,
+      explicitAliasBase
+        ? { aliasBase: explicitAliasBase, aliasReason: "known-bad-entrypoint" }
+        : defaultSingleEntryAliasBase
+          ? { aliasBase: defaultSingleEntryAliasBase, aliasReason: "single-entry-stage0-default" }
+          : undefined,
     );
 
     // FreeBSD legacy stage0 can corrupt some entrypoint paths on a small subset of modules.
     // If a single-entry build fails with the known "failed to open entry point directory ... var __b0"
     // signature, retry once with a short deterministic alias path to keep Phase C bootstrap moving.
-    if (!result.success && entryPoints.length === 1 && !explicitAliasBase) {
+    if (!result.success && entryPoints.length === 1 && !explicitAliasBase && !defaultSingleEntryAliasBase) {
       const joinedLogs = (result.logs ?? []).map(String).join("\n");
       const looksLikeEntrypointPathCorruption =
         joinedLogs.includes("failed to open entry point directory:") && joinedLogs.includes("var __b0;");

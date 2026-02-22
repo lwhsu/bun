@@ -854,6 +854,16 @@ This keeps the workaround auditable:
 - generic behavior covers new cases automatically
 - explicit list documents exceptions where retry-in-place is unstable
 
+### Batch-1 acceleration mode (current local workaround)
+
+- For the stage0 isolation run (`BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE=1`), the current branch now
+  defaults to first-attempt aliasing for single-entry builds (FreeBSD stage0 only).
+- Rationale:
+  - avoids repeated failed-first-attempt poisoning before auto-retry
+  - significantly reduces manual promotion churn while preserving traceability
+- Opt-out (for debugging parity):
+  - `BUN_FREEBSD_STAGE0_DISABLE_ALIAS_ALL_SINGLE_ENTRY=1`
+
 ### Repro command used for isolation
 
 ```bash
