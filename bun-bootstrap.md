@@ -3552,3 +3552,36 @@ Actions performed:
   - `8d7d58606bfe8e6cf7aa8fc65940436a4eb99ee5`
 - Canonical legacy worktree path:
   - `/home/lwhsu/killme/bun/build/freebsd-bootstrap/legacy-worktree`
+
+## 2026-02-22: Additional Phase E process/stream/child_process slices pass (controlled invocation)
+
+### Controlled invocation pattern used
+
+- To avoid repo-local `.env` contamination when validating compatibility behavior, run from `/tmp` with a minimal environment:
+  - `env -i PATH=/home/lwhsu/killme/bun/build/release:/bin:/usr/bin:/usr/local/bin HOME=/home/lwhsu TMPDIR=/tmp SHELL=/bin/sh /home/lwhsu/killme/bun/build/release/bun test <absolute-test-file>`
+
+### Additional `node/process` slices (pass)
+
+- `test/js/node/process/process-on.test.ts` => `3 pass / 0 fail`
+- `test/js/node/process/process-nexttick.test.js` => `7 pass / 0 fail`
+- `test/js/node/process/process-args.test.js` => `1 pass / 0 fail`
+- `test/js/node/process/stdin/stdin-fixtures.test.ts` => `5 pass / 0 fail`
+- `test/js/node/process/call-constructor.test.js` => `2 pass / 0 fail`
+- `test/js/node/process/dlopen-duplicate-load.test.ts` => `2 pass / 0 fail`
+- `test/js/node/process/dlopen-non-object-exports.test.ts` => `3 pass / 0 fail`
+
+### Additional `node/stream` slices (pass)
+
+- `test/js/node/stream/node-stream-uint8array.test.ts` => `5 pass / 0 fail`
+- `test/js/node/stream/node-stream.test.js` => `36 pass / 1 skip / 5 todo / 0 fail`
+
+### Additional `node/child_process` slices (pass)
+
+- `test/js/node/child_process/child-process-exec.test.ts` => `11 pass / 0 fail`
+- `test/js/node/child_process/child-process-stdio.test.js` => `5 pass / 0 fail`
+
+### `process.test.js` status (`detect-libc` test dependency blocker)
+
+- `test/js/node/process/process.test.js` is still blocked in the current local test environment if `detect-libc` is not installed.
+- The file imports `detect-libc` at top level; when the package is missing, the file aborts before running any actual `process` assertions.
+- This is tracked as a test-environment dependency/setup blocker, not currently a confirmed FreeBSD runtime regression.

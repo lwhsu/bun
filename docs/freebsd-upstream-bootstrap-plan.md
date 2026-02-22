@@ -430,6 +430,23 @@ Latest checkpoint (2026-02-22):
      - set `SHELL=/bin/sh` for clean-env runs
    - Notes:
      - earlier `spawn(..., { env })` failure was caused by Bun loading the repo `.env` (cwd-dependent), not by FreeBSD child_process runtime behavior.
+10. Additional Node `child_process` slices also pass on FreeBSD (controlled invocation from `/tmp`):
+   - `test/js/node/child_process/child-process-exec.test.ts` => `11 pass / 0 fail`
+   - `test/js/node/child_process/child-process-stdio.test.js` => `5 pass / 0 fail`
+11. Additional Node `process` and `stream` slices pass on FreeBSD:
+   - `test/js/node/process/process-on.test.ts` => `3 pass / 0 fail`
+   - `test/js/node/process/process-nexttick.test.js` => `7 pass / 0 fail`
+   - `test/js/node/process/process-args.test.js` => `1 pass / 0 fail`
+   - `test/js/node/process/stdin/stdin-fixtures.test.ts` => `5 pass / 0 fail`
+   - `test/js/node/process/call-constructor.test.js` => `2 pass / 0 fail`
+   - `test/js/node/process/dlopen-duplicate-load.test.ts` => `2 pass / 0 fail`
+   - `test/js/node/process/dlopen-non-object-exports.test.ts` => `3 pass / 0 fail`
+   - `test/js/node/stream/node-stream-uint8array.test.ts` => `5 pass / 0 fail`
+   - `test/js/node/stream/node-stream.test.js` => `36 pass / 1 skip / 5 todo / 0 fail`
+12. `test/js/node/process/process.test.js` remains blocked by missing local test dependency, not a confirmed FreeBSD runtime bug:
+   - Top-level import requires `detect-libc`; if absent locally, the file aborts before tests execute.
+   - `detect-libc` is declared in `test/package.json`.
+   - Treat this as a test-environment setup blocker until test deps are installed for that slice.
 
 How to do it:
 
