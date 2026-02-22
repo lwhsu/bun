@@ -3619,3 +3619,20 @@ Actions performed:
 
 - `test/js/node/util/util.test.js` => `192 pass / 0 fail`
 - `test/js/node/os/os.test.js` => `52 pass / 0 fail`
+
+## 2026-02-22: `node:dns` and `node:net` slices pass (Phase E progress)
+
+### Validation
+
+- `test/js/node/dns/node-dns.test.js` => `66 pass / 0 fail`
+- `test/js/node/net/node-net.test.ts` => `31 pass / 1 skip / 0 fail`
+- `test/js/node/net/node-net-server.test.ts` => `18 pass / 0 fail`
+
+### FreeBSD-specific finding (wildcard connect semantics)
+
+- On FreeBSD, connecting a client socket to `0.0.0.0` is not a valid remote destination (Node on FreeBSD also fails, e.g. `ENETUNREACH`).
+- Some `node:net` tests assumed wildcard bind address (`0.0.0.0`) is directly connectable by clients.
+- Adjusted tests for FreeBSD portability:
+  - keep server bind assertions (`address.address === "0.0.0.0"`)
+  - use loopback (`127.0.0.1`) for client connects on FreeBSD in `node-net.test.ts`
+  - in `node-net-server.test.ts`, accept FreeBSD wildcard-connect failure for the `Bun.connect({ hostname: "0.0.0.0" })` check while preserving the bind regression assertion

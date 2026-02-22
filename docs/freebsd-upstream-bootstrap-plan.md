@@ -459,6 +459,13 @@ Latest checkpoint (2026-02-22):
    - Test updates:
      - include `freebsd` / `FreeBSD` in `platform` / `type` expectations
      - allow passwd-based `userInfo()` values when `USER` / `SHELL` are unset in controlled runs
+14. `node:dns` and `node:net` focused slices pass on FreeBSD:
+   - `test/js/node/dns/node-dns.test.js` => `66 pass / 0 fail`
+   - `test/js/node/net/node-net.test.ts` => `31 pass / 1 skip / 0 fail`
+   - `test/js/node/net/node-net-server.test.ts` => `18 pass / 0 fail`
+   - FreeBSD portability note:
+     - client connect to `0.0.0.0` is not a valid remote destination on FreeBSD (Node on FreeBSD also fails)
+     - tests were adjusted to preserve server bind assertions while using loopback for client connects / accepting FreeBSD wildcard-connect failure in the Bun-specific check
 
 How to do it:
 
