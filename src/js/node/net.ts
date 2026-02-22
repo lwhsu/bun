@@ -243,10 +243,16 @@ const SocketHandlers: SocketHandler = {
       // will be handled in onConnectEnd
       return;
     }
+    if (!success) {
+      // Do not emit "secureConnect" for failed handshakes (timeout/close before
+      // TLS completion). Error/close paths should report the failure instead.
+      return;
+    }
 
     self._securePending = false;
     self.secureConnecting = false;
     self._secureEstablished = !!success;
+    self.connecting = false;
 
     self.emit("secure", self);
     self.alpnProtocol = socket.alpnProtocol;
@@ -404,6 +410,7 @@ const ServerHandlers: SocketHandler<NetSocket> = {
     self._securePending = false;
     self.secureConnecting = false;
     self._secureEstablished = !!success;
+    self.connecting = false;
     self.servername = socket.getServername();
     const server = self.server!;
     self.alpnProtocol = socket.alpnProtocol;
@@ -553,10 +560,16 @@ const SocketHandlers2: SocketHandler<NonNullable<import("node:net").Socket["_han
       // will be handled in onConnectEnd
       return;
     }
+    if (!success) {
+      // Do not emit "secureConnect" for failed handshakes (timeout/close before
+      // TLS completion). Error/close paths should report the failure instead.
+      return;
+    }
 
     self._securePending = false;
     self.secureConnecting = false;
     self._secureEstablished = !!success;
+    self.connecting = false;
 
     self.emit("secure", self);
     self.alpnProtocol = socket.alpnProtocol;

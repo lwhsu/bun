@@ -628,6 +628,35 @@ Exit criteria:
 2. Expand/record the Phase E gate beyond current passing slices (process/fs/watch/spawn coverage continues to improve; use controlled invocation to avoid repo `.env` contamination in compatibility checks).
 3. Start Phase F patch-stack split (build/bootstrap/runtime/docs series), with the `rmdir` errno shim isolated for later replacement.
 
+### Phase E progress update (2026-02-22, TLS)
+
+Completed a substantial `node:tls` slice on `build/release/bun` using controlled `/tmp` invocation.
+
+Passing coverage now includes:
+
+1. `node-tls-connect`
+2. `node-tls-server`
+3. `node-tls-context`
+4. `node-tls-cert`
+5. `node-tls-create-secure-context-args`
+6. `node-tls-no-cipher-match-error`
+7. `node-tls-rootcertificates-immutable`
+8. `node-tls-socket-allow-half-open-option`
+9. `node-tls-upgrade`
+10. `renegotiation`
+11. `fetch-tls-cert` (pass/todo-only)
+12. `test-node-extra-ca-certs`
+13. `test-use-system-ca`
+
+FreeBSD/runtime fixes added during this phase:
+
+1. `src/js/node/net.ts`: do not emit `secureConnect` / run `checkServerIdentity()` when TLS handshake callback reports `success === false`; also ensure `connecting = false` before `secureConnect` in the second TLS handshake handler.
+2. `src/bun.js/api/bun/socket/tls_socket_functions.zig`: `getPeerCertificate(true)` now falls back safely by trying `SSL_get_peer_certificate()` first, then chain access.
+
+Tracked non-runtime blocker:
+
+1. `test/js/node/tls/node-tls-internals.test.ts` currently fails in `build/release/bun` because `bun:internal-for-testing` is not exposed (`ENOENT reading "bun:internal-for-testing"`). Treat separately from FreeBSD TLS parity.
+
 ## 4.1 Clean Checkout Reproduction (Current Branch)
 
 This is the current reproducible flow for a clean checkout of this branch.

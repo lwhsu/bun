@@ -3672,3 +3672,42 @@ Actions performed:
 - `node-http-connect.node.mts` imports `proxy` (`test/package.json` declares it, but local test deps are not fully installed)
 - `node-http-uaf-fixture.ts` imports `express` (`test/package.json` declares it, but local test deps are not fully installed)
 - These are tracked as local test-environment setup blockers, not confirmed FreeBSD runtime regressions.
+
+## 2026-02-22: `node:tls` focused slices mostly pass; fix TLS false-success handshake path (Phase E progress)
+
+### FreeBSD/runtime fixes applied
+
+- `src/js/node/net.ts`
+  - TLS handshake handlers now return early when `success === false` (except the existing `ECONNRESET` path), preventing:
+    - erroneous `checkServerIdentity(...)` calls on missing certs
+    - incorrect `secureConnect` emission after timeout/early-close
+  - Set `self.connecting = false` in the second TLS handshake handler before `secureConnect`, fixing callback-form `tls.connect(..., cb)` reads of `socket.remotePort`.
+- `src/bun.js/api/bun/socket/tls_socket_functions.zig`
+  - `getPeerCertificate(true)` now first tries `SSL_get_peer_certificate()` before chain fallback.
+  - This fixes client-side cases where the leaf certificate exists but `SSL_get_peer_cert_chain()` is empty.
+
+### Validation (controlled invocation, `build/release/bun`)
+
+- `test/js/node/tls/node-tls-connect.test.ts` => `24 pass / 1 skip / 0 fail`
+- `test/js/node/tls/node-tls-server.test.ts` => pass
+- `test/js/node/tls/node-tls-context.test.ts` => pass
+- `test/js/node/tls/node-tls-cert.test.ts` => pass (with upstream `todo` cases remaining `todo`)
+- `test/js/node/tls/node-tls-create-secure-context-args.test.ts` => pass
+- `test/js/node/tls/node-tls-no-cipher-match-error.test.ts` => pass
+- `test/js/node/tls/node-tls-rootcertificates-immutable.test.ts` => pass
+- `test/js/node/tls/node-tls-socket-allow-half-open-option.test.ts` => pass
+- `test/js/node/tls/node-tls-upgrade.test.ts` => pass
+- `test/js/node/tls/renegotiation.test.ts` => pass
+- `test/js/node/tls/fetch-tls-cert.test.ts` => pass/todo-only
+- `test/js/node/tls/test-node-extra-ca-certs.test.ts` => pass
+- `test/js/node/tls/test-use-system-ca.test.ts` => pass
+- `test/js/node/tls/test-system-ca-https.test.ts` => skipped in this environment
+- `test/js/node/tls/node-tls-namedpipes.test.ts` => skipped
+
+### Remaining TLS-related blocker (release-build test mode)
+
+- `test/js/node/tls/node-tls-internals.test.ts` fails at module load with:
+  - `ENOENT reading "bun:internal-for-testing"`
+- Verified independently:
+  - `build/release/bun -e 'import "bun:internal-for-testing"'` fails with the same `ENOENT`
+- This is tracked as a release-build/internal-test-module exposure issue, not a confirmed FreeBSD TLS runtime regression.
