@@ -846,6 +846,7 @@ Why bundler-time aliasing instead of preprocess-time aliasing:
 - `node/stream.promises.ts` -> alias `s116.ts` (promoted from auto-retry)
 - `node/timers.promises.ts` -> alias `s120.ts` (promoted from auto-retry)
 - `node/trace_events.ts` -> alias `s123.ts` (promoted from auto-retry)
+- `thirdparty/vercel_fetch.ts` -> alias `s135.ts` (promoted from auto-retry)
 
 ### Explicit alias vs auto-retry behavior (important)
 
@@ -859,6 +860,9 @@ Why bundler-time aliasing instead of preprocess-time aliasing:
 This keeps the workaround auditable:
 - generic behavior covers new cases automatically
 - explicit list documents exceptions where retry-in-place is unstable
+- latest known late-stage retry-poisoning case was `thirdparty/vercel_fetch.ts` (batch `135`),
+  which hung after auto-retry alias file write and before alias `Bun.build()` start; it is now
+  promoted to explicit first-attempt alias `s135.ts`.
 
 ### Batch-1 acceleration mode (current local workaround)
 

@@ -160,6 +160,7 @@ const stage0AliasedModuleBaseNames: Record<string, string> = {
   "node/stream.promises.ts": "s116.ts",
   "node/timers.promises.ts": "s120.ts",
   "node/trace_events.ts": "s123.ts",
+  "thirdparty/vercel_fetch.ts": "s135.ts",
 };
 trace("preprocess:start");
 for (let i = 0; i < nativeStartIndex; i++) {
