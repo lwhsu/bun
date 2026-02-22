@@ -139,7 +139,24 @@ export function readableStreamToText(stream: ReadableStream): Promise<string> {
   // decoding reproduces the corruption on these buffers. Decode via Buffer for now.
   if (process.platform === "freebsd") {
     const decodeBytes = bytes => Buffer.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).toString();
-    return Promise.$resolve().then(() => Bun.readableStreamToBytes(stream)).then(decodeBytes);
+    const bytesResult = stream.bytes();
+    const cleanup = () => {
+      stream.$reader = undefined;
+      $readableStreamCloseIfPossible(stream);
+    };
+    if ($isPromise(bytesResult)) {
+      return bytesResult
+        .then(bytes => {
+          cleanup();
+          return decodeBytes(bytes);
+        })
+        .catch(e => {
+          cleanup();
+          return Promise.$reject(e);
+        });
+    }
+    cleanup();
+    return Promise.$resolve(decodeBytes(bytesResult));
   }
 
   const result = $tryUseReadableStreamBufferedFastPath(stream, "text");

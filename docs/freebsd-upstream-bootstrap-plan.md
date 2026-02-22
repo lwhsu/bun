@@ -414,6 +414,7 @@ Latest checkpoint (2026-02-22):
    - Key finding: subprocess `stdout.bytes()` data is correct, but `TextDecoder.decode(bytes)` corrupts the first byte on affected FreeBSD outputs containing later Unicode text.
    - Current workaround: FreeBSD `ReadableStream.prototype.text()` decodes via `Buffer.from(bytes).toString()` instead of `TextDecoder`.
    - Follow-up: investigate/fix the underlying FreeBSD `TextDecoder` behavior and remove the workaround before upstreaming if possible.
+   - Validation follow-up: `process-stdin.test.ts` also passes after mirroring stream cleanup (`stream.$reader = undefined` + `$readableStreamCloseIfPossible(stream)`) in the FreeBSD workaround path.
 9. Node `child_process` broad slice passes on FreeBSD with controlled invocation:
    - `test/js/node/child_process/child_process.test.ts` => `30 pass / 1 todo / 0 fail`
    - Required invocation hygiene:

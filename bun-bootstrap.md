@@ -3523,3 +3523,23 @@ Actions performed:
 
 - The underlying issue appears to be FreeBSD-specific `TextDecoder` behavior on these `stdout.bytes()` buffers.
 - Keep the `ReadableStream.text()` FreeBSD workaround for local bootstrap confidence, but track a deeper fix in the text decoding path for upstreaming.
+
+## 2026-02-22: Follow-up on FreeBSD `ReadableStream.text()` workaround (`process-stdin` semantics)
+
+### Regression check and fix
+
+- After the initial FreeBSD `ReadableStream.text()` workaround (`Buffer.from(bytes).toString()`), `process-stdio.test.ts` passed but `process-stdin.test.ts` exposed a behavior regression:
+  - `new Response(proc.stdout).text()` left the stream locked
+  - subsequent `await proc.stdout.text()` failed with `ERR_INVALID_STATE` (`ReadableStream is locked`)
+- Root cause:
+  - FreeBSD fallback path consumed via `stream.bytes()` but did not mirror the normal cleanup sequence that clears the temporary reader state and closes the stream when appropriate.
+- Fix:
+  - Added FreeBSD fallback cleanup in `src/js/builtins/ReadableStream.ts` after bytes-based decode:
+    - `stream.$reader = undefined`
+    - `$readableStreamCloseIfPossible(stream)`
+
+### Validation
+
+- `build/release/bun test test/js/node/process/process-stdio.test.ts` => `9 pass / 0 fail`
+- `build/release/bun test test/js/node/process/process-stdin.test.ts` => `6 pass / 0 fail`
+- `build/release/bun test test/js/node/process/process-stdio-invalid-utf16.test.ts` => `24 pass / 0 fail`
