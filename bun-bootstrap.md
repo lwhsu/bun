@@ -3870,6 +3870,21 @@ Actions performed:
   - retry-poisoning failures promoted to explicit aliases at batches `76`, `84`, `87`, `92`, `102`, `112`, `115`, `116`, `120`, and `123`
   - additional late-stage retry-poisoning failures at batches `135` (`thirdparty/vercel_fetch.ts`) and `137`
     (`internal-for-testing.ts`) promoted to explicit aliases (`s135.ts`, `s137.ts`)
+  - full module batch pass completed (`batchIndex 0..137`, `Bundle modules (...)`)
+  - new blocker moved to postbuild builtin-functions step (`Bake.ts` in `tmp_functions`)
+  - error signature matches the same legacy stage0 entrypoint corruption pattern (`failed to open entry point directory ... var __b0;`)
+
+### New C-strict blocker (postbuild builtin functions)
+
+- After `bundle-modules.ts` finishes the module pass and postprocess phase, it calls the builtin-functions
+  bundling path (`src/codegen/bundle-functions.ts`).
+- Stage0 FreeBSD hit the same entrypoint corruption signature while processing `Bake.ts` under
+  `build/release/tmp_functions`.
+- Mitigation added:
+  - `src/codegen/bundle-functions.ts` now retries failed stage0 FreeBSD `Bun.build()` calls with a
+    short alias tmp filename when the legacy corruption signature is detected.
+  - This path is simpler than module aliasing because builtin-functions reads the output text directly,
+    so no output remap is needed.
 
 ### Explicit vs auto alias policy (current)
 

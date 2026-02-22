@@ -890,3 +890,16 @@ build/freebsd-bootstrap/stage0/bun --no-install run src/codegen/bundle-modules.t
 ```
 
 This is intentionally slow, but it gives deterministic evidence (`batchIndex`, `entrypoint0`) and is the best current path to finish `C-strict` while preserving a reviewable audit trail.
+
+### Follow-on blocker after module batch completion (postbuild builtin functions)
+
+- With the explicit alias list extended through `batch 137`, the stage0 FreeBSD run now completes the
+  full module bundling pass (`batchIndex 0..137`) and reaches `bundle-modules` postbuild.
+- New blocker: builtin-functions bundling (`src/codegen/bundle-functions.ts`) fails on `Bake.ts` in
+  `tmp_functions` with the same legacy stage0 entrypoint corruption signature:
+  `failed to open entry point directory ... var __b0;`
+- Current mitigation (bootstrap-only, stage0 FreeBSD scoped):
+  - `bundle-functions.ts` retries a failed `Bun.build()` with a short alias tmp filename when the
+    corruption signature is detected.
+  - No output remap is required in this path because builtin-functions consumes `build.outputs[0].text()`
+    directly.

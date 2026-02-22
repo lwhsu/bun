@@ -39,6 +39,25 @@ const SRC_DIR = path.join(import.meta.dir, "../js/builtins");
 let CMAKE_BUILD_ROOT: string | undefined;
 let CODEGEN_DIR = "";
 let TMP_DIR = "";
+let freebsdStage0FunctionAliasCounter = 0;
+
+const isFreeBSDStage0 = process.platform === "freebsd" && Bun.version === "0.0.0";
+
+function buildLogsContainLegacyStage0EntrypointCorruption(logs: readonly any[]) {
+  return logs.some(log => {
+    try {
+      const text =
+        typeof log?.message === "string"
+          ? log.message
+          : typeof log?.toString === "function"
+            ? String(log)
+            : JSON.stringify(log);
+      return text.includes("failed to open entry point directory") && text.includes("var __b0;");
+    } catch {
+      return false;
+    }
+  });
+}
 
 function ensureBuildPaths() {
   if (CMAKE_BUILD_ROOT) return;
@@ -296,12 +315,24 @@ $$capture_start$$(${fn.async ? "async " : ""}${
 `,
     );
     await Bun.sleep(1);
-    const build = await Bun.build({
+    let build = await Bun.build({
       entrypoints: [tmpFile],
       define,
       target: "bun",
       minify: { syntax: true, whitespace: false, keepNames: true },
     });
+    if (!build.success && isFreeBSDStage0 && buildLogsContainLegacyStage0EntrypointCorruption(build.logs)) {
+      // Legacy FreeBSD stage0 can corrupt some tmp_functions entrypoint paths. Retry with a short
+      // alias path to avoid the corruption without changing source content.
+      const aliasTmpFile = path.join(TMP_DIR, `.bf${freebsdStage0FunctionAliasCounter++}.ts`);
+      await Bun.write(aliasTmpFile, await Bun.file(tmpFile).text());
+      build = await Bun.build({
+        entrypoints: [aliasTmpFile],
+        define,
+        target: "bun",
+        minify: { syntax: true, whitespace: false, keepNames: true },
+      });
+    }
     // TODO: Wait a few versions before removing this
     if (!build.success) {
       throw new AggregateError(build.logs, "Failed bundling builtin function " + fn.name + " from " + basename + ".ts");
