@@ -3656,3 +3656,19 @@ Actions performed:
 - `test/js/node/http/node-http-transfer-encoding.test.ts` => `1 pass / 0 fail`
 - `test/js/node/http/node-http-backpressure.test.ts` => `3 pass / 0 fail` (includes long `INT_MAX` / `>INT_MAX` backpressure cases, ~45s total)
 - `test/js/node/http/node-http.test.ts` => `74 pass / 1 skip / 0 fail`
+- `test/js/node/http/node-http-backpressure-max.test.ts` => `1 pass / 0 fail` (long run, ~50s)
+- `test/js/node/http/node-http-primoridals.test.ts` => `1 pass / 0 fail`
+- `test/js/node/http/node-http-with-ws.test.ts` => `2 pass / 0 fail`
+- `test/js/node/http/node-fetch.test.js` => `11 pass / 0 fail`
+- `test/js/node/http/node-fetch-cjs.test.js` => `1 pass / 0 fail`
+- `test/js/node/http/node-fetch-primordials.test.ts` => `1 pass / 0 fail`
+- `test/js/node/http/node-http-connect.test.ts` => core tests pass, but compatibility subtests blocked by missing `proxy` package in local test deps
+- `test/js/node/http/node-http-proxy-url.test.ts` => pass (including spawned node/bun compatibility checks)
+- `test/js/node/http/node-http-maxHeaderSize.test.ts` => pass
+- `test/js/node/http/node-http-uaf.test.ts` => partial pass; one fixture blocked by missing `express` package in local test deps
+
+### `node:http` local test dependency blockers
+
+- `node-http-connect.node.mts` imports `proxy` (`test/package.json` declares it, but local test deps are not fully installed)
+- `node-http-uaf-fixture.ts` imports `express` (`test/package.json` declares it, but local test deps are not fully installed)
+- These are tracked as local test-environment setup blockers, not confirmed FreeBSD runtime regressions.

@@ -483,6 +483,19 @@ Latest checkpoint (2026-02-22):
    - `node-http-backpressure.test.ts` => `3 pass / 0 fail`
      - includes long `INT_MAX` / `>INT_MAX` backpressure cases (completed successfully on FreeBSD)
    - `node-http.test.ts` => `74 pass / 1 skip / 0 fail`
+   - additional HTTP coverage passes:
+     - `node-http-backpressure-max.test.ts` => `1 pass / 0 fail`
+     - `node-http-primoridals.test.ts` => `1 pass / 0 fail`
+     - `node-http-with-ws.test.ts` => `2 pass / 0 fail`
+     - `node-fetch.test.js` => `11 pass / 0 fail`
+     - `node-fetch-cjs.test.js` => `1 pass / 0 fail`
+     - `node-fetch-primordials.test.ts` => `1 pass / 0 fail`
+     - `node-http-proxy-url.test.ts` => pass (including compatibility checks spawning Node and Bun)
+     - `node-http-maxHeaderSize.test.ts` => pass
+   - local test dependency blockers (not yet treated as FreeBSD runtime regressions):
+     - `node-http-connect.test.ts` compatibility subtests require package `proxy` (imported by `node-http-connect.node.mts`)
+     - `node-http-uaf.test.ts` one fixture requires package `express` (`node-http-uaf-fixture.ts`)
+     - both packages are declared in `test/package.json`, but not present in the current local test dependency setup
 
 How to do it:
 
