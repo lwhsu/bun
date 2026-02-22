@@ -158,6 +158,7 @@ const stage0AliasedModuleBaseNames: Record<string, string> = {
   "node/readline.promises.ts": "s112.ts",
   "node/stream.consumers.ts": "s115.ts",
   "node/stream.promises.ts": "s116.ts",
+  "node/timers.promises.ts": "s120.ts",
 };
 trace("preprocess:start");
 for (let i = 0; i < nativeStartIndex; i++) {

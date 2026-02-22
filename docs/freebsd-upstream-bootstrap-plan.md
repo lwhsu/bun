@@ -844,6 +844,7 @@ Why bundler-time aliasing instead of preprocess-time aliasing:
 - `node/readline.promises.ts` -> alias `s112.ts` (promoted from auto-retry)
 - `node/stream.consumers.ts` -> alias `s115.ts` (promoted from auto-retry)
 - `node/stream.promises.ts` -> alias `s116.ts` (promoted from auto-retry)
+- `node/timers.promises.ts` -> alias `s120.ts` (promoted from auto-retry)
 
 ### Explicit alias vs auto-retry behavior (important)
 
