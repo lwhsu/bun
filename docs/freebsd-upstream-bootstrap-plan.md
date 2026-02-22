@@ -392,6 +392,11 @@ Latest checkpoint (2026-02-22):
    - FreeBSD directory-event fallback rescans directories when kqueue provides no child names.
    - `fs.promises.watch()` async iterator race (lost wakeup) was fixed.
    - Current FreeBSD fallback includes a compatibility workaround (extra synthetic directory event per fallback entry) that should be revisited before upstreaming.
+5. Next runtime blocker (post-watcher):
+   - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` has a reproducible FreeBSD failure in:
+     - `ReadableStream with large data`
+   - Isolates to single large stdin chunk path (1MB one-shot enqueue), while chunked 1MB variant passes.
+   - This is now the next Phase D/E priority after watcher stabilization.
 
 How to do it:
 
@@ -400,6 +405,7 @@ How to do it:
 3. Run selected Node fs/watch and Bun shell tests.
 4. Capture pass/fail and skips into `bun-bootstrap.md` with command lines.
 5. Mark temporary compatibility workarounds explicitly (what is acceptable for local bootstrap vs. what must be refined before upstream).
+6. Promote new blockers discovered during expanded slices (for example, large single-chunk `spawn` stdin ReadableStream) into the Phase D/E priority list with isolation repro.
 
 How to reproduce:
 

@@ -3342,3 +3342,37 @@ Actions performed:
 
 - The FreeBSD directory fallback currently uses a compatibility-oriented synthetic duplicate event emission.
 - This is effective for the current suite and unblocks Phase E progress, but should be revisited before upstreaming to reduce behavioral distortion and replace with a more principled FreeBSD kqueue strategy if possible.
+
+## 2026-02-22: Next Phase E blocker after watcher pass (spawn stdin ReadableStream large single chunk)
+
+### New failing test slice (broader Phase E follow-up)
+
+- Command:
+  - `build/release/bun test test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
+- Result:
+  - `19 pass`, `1 todo`, `1 fail`, `1 error`
+  - failing case: `spawn stdin ReadableStream > ReadableStream with large data`
+  - observed symptoms:
+    - test times out after 5000ms
+    - dangling child process killed by test harness
+    - output mismatch/truncation reported in non-isolated run
+
+### Isolation check
+
+- Command:
+  - `build/release/bun test test/js/bun/spawn/spawn-stdin-readable-stream.test.ts -t "ReadableStream with large data"`
+- Result:
+  - reproduces in isolation (timeout + dangling process)
+
+### Current interpretation
+
+- Failure is specific to the "single large chunk" stdin ReadableStream path (1MB string in one enqueue).
+- Neighbor case `ReadableStream with very large chunked data` (1MB total, chunked) passes.
+- This points to a likely FreeBSD-specific issue in large write / backpressure / stream-close handling for process stdin when `stdin` is a ReadableStream.
+
+### Next debugging direction
+
+- Inspect `ReadableStream -> FileSink -> process stdin` path (`src/bun.js/webcore/FileSink.zig`) for:
+  - partial-write handling on large single chunks
+  - end/close sequencing after pending writes
+  - pipe backpressure interaction with spawned child stdio on FreeBSD
