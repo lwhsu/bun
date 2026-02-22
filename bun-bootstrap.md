@@ -3409,3 +3409,16 @@ Actions performed:
   - single-chunk `Uint8Array` at `1 MiB` sometimes delivered `512 KiB` in the probe
   - string single-chunk cases in the same matrix passed after the fix
 - This is not currently covered by the Bun test file (which uses large single-chunk string and chunked binary variants), but should be tracked as a follow-up runtime correctness check.
+
+### Additional spawn coverage after FileSink fix
+
+- `build/release/bun test test/js/bun/spawn/spawn-stdin-readable-stream-edge-cases.test.ts`
+  - result: `13 pass / 1 todo / 0 fail`
+  - added new regression case:
+    - `ReadableStream with very long single Uint8Array chunk` (1 MiB)
+    - passes on FreeBSD after the FileSink accounting fix
+- `build/release/bun test test/js/bun/spawn/spawn-stdin-readable-stream-integration.test.ts`
+  - result: `5 pass / 0 fail`
+- `build/release/bun test test/js/bun/spawn/spawn.test.ts`
+  - result: `108 pass / 5 skip / 0 fail`
+  - long hang-stress and close-handling matrices completed successfully

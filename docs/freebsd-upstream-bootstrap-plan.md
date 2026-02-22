@@ -396,6 +396,11 @@ Latest checkpoint (2026-02-22):
    - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` failure in `ReadableStream with large data` is fixed by `FileSink` pending-write accounting corrections.
    - Full file now passes (`20 pass / 1 todo / 0 fail`) on FreeBSD.
    - Residual follow-up (not currently in this Bun test file): ad hoc probe still shows a possible single-chunk `Uint8Array` 1 MiB truncation edge case; keep this as a runtime correctness follow-up item.
+6. Expanded spawn coverage after FileSink fix:
+   - `spawn-stdin-readable-stream.test.ts` passes (`20 pass / 1 todo / 0 fail`)
+   - `spawn-stdin-readable-stream-edge-cases.test.ts` passes (`13 pass / 1 todo / 0 fail`)
+   - `spawn-stdin-readable-stream-integration.test.ts` passes (`5 pass / 0 fail`)
+   - `spawn.test.ts` passes (`108 pass / 5 skip / 0 fail`)
 
 How to do it:
 
