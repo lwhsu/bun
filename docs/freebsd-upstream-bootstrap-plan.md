@@ -379,6 +379,13 @@ Goal: define and execute a FreeBSD confidence gate before upstreaming.
 
 Status: **In progress**.
 
+Baseline commits for reproducibility (current local workspace snapshot):
+
+1. Current worktree (full build / Phase D/E runtime validation):
+   - `d3719dfedaaec39f33d8245d6a42f8ec6be5e711`
+2. Canonical legacy worktree (stage0 cold-start bootstrap):
+   - `8d7d58606bfe8e6cf7aa8fc65940436a4eb99ee5`
+
 Latest checkpoint (2026-02-22):
 
 1. `build/release/bun` smoke checks pass (`--version`, arithmetic, `node:fs` import).

@@ -3543,3 +3543,12 @@ Actions performed:
 - `build/release/bun test test/js/node/process/process-stdio.test.ts` => `9 pass / 0 fail`
 - `build/release/bun test test/js/node/process/process-stdin.test.ts` => `6 pass / 0 fail`
 - `build/release/bun test test/js/node/process/process-stdio-invalid-utf16.test.ts` => `24 pass / 0 fail`
+
+## Reproducibility Baseline (current local checkpoint)
+
+- Current worktree commit (main FreeBSD porting/runtime validation tree):
+  - `d3719dfedaaec39f33d8245d6a42f8ec6be5e711`
+- Canonical legacy worktree commit (cold-start stage0 bootstrap tree):
+  - `8d7d58606bfe8e6cf7aa8fc65940436a4eb99ee5`
+- Canonical legacy worktree path:
+  - `/home/lwhsu/killme/bun/build/freebsd-bootstrap/legacy-worktree`
