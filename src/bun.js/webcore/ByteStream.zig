@@ -396,12 +396,21 @@ pub fn drain(this: *@This()) bun.ByteList {
 
 pub fn toAnyBlob(this: *@This()) ?Blob.Any {
     if (this.has_received_last_chunk) {
-        const buffer = this.buffer;
+        var buffer = this.buffer;
         this.buffer = .{
             .allocator = bun.default_allocator,
             .items = &.{},
             .capacity = 0,
         };
+        if (this.offset > 0 and this.offset <= buffer.items.len) {
+            if (this.offset == buffer.items.len) {
+                buffer.items.len = 0;
+            } else {
+                std.mem.copyForwards(u8, buffer.items[0 .. buffer.items.len - this.offset], buffer.items[this.offset..]);
+                buffer.items.len -= this.offset;
+            }
+        }
+        this.offset = 0;
         this.done = true;
         this.pending.result.deinit();
         this.pending.result = .{ .done = {} };

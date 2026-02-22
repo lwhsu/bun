@@ -3487,3 +3487,39 @@ Actions performed:
   - From repo root, `env -i ... build/release/bun -e 'console.log(JSON.stringify(process.env))'` shows those `.env` values.
   - From `/tmp`, the same command (absolute bun path) shows only the explicitly provided env vars.
 - Therefore the `child_process.ts` `spawn(..., { env })` failure was a local invocation artifact, not a FreeBSD runtime child_process bug.
+
+## 2026-02-22: `test/js/node/process/process-stdio.test.ts` passes on FreeBSD (Phase E milestone)
+
+### Starting point
+
+- `process-stdio` had 3 consistent failures on FreeBSD (`process.stdin - read/resume/close`).
+- Symptom: `stdout.text()` corrupted the first byte only when the output contained later Unicode text.
+  - Example: `"Get Emoji..."` became `"�et Emoji..."`.
+
+### Root cause findings
+
+- The subprocess pipe bytes were correct.
+  - `await p.stdout.bytes()` returned correct byte content.
+- The corruption reproduced in JS decoding paths using `TextDecoder`.
+  - `new TextDecoder("utf-8", { ignoreBOM: true }).decode(await p.stdout.bytes())` produced the same first-byte corruption.
+- `Buffer.from(bytes).toString()` decoded the same bytes correctly.
+- Therefore this blocker was not a subprocess read truncation issue; it was a FreeBSD runtime decoding issue affecting the `ReadableStream.text()` path for these buffers.
+
+### Fix applied
+
+- `src/js/builtins/ReadableStream.ts`
+  - Added a FreeBSD fallback for `ReadableStream.prototype.text()` (direct and non-direct paths):
+    - read bytes first
+    - decode via `Buffer.from(bytes).toString()` instead of `TextDecoder`
+- This is a compatibility workaround to unblock FreeBSD bootstrap/validation while the underlying FreeBSD `TextDecoder` behavior is investigated.
+
+### Validation
+
+- Timed subprocess repro now returns correct text with Unicode content.
+- `build/release/bun test test/js/node/process/process-stdio.test.ts`
+  - result: `9 pass / 0 fail`
+
+### Follow-up note (upstream-quality)
+
+- The underlying issue appears to be FreeBSD-specific `TextDecoder` behavior on these `stdout.bytes()` buffers.
+- Keep the `ReadableStream.text()` FreeBSD workaround for local bootstrap confidence, but track a deeper fix in the text decoding path for upstreaming.

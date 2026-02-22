@@ -409,7 +409,12 @@ Latest checkpoint (2026-02-22):
    - Current compatibility workaround:
      - `node:fs` / `node:fs/promises` `rmdir` normalize `EREMOTE` to `ENOTEMPTY` on FreeBSD in JS wrappers.
      - This is a temporary compatibility layer pending a proper FreeBSD errno table split (Bun currently aliases FreeBSD to Linux errno tables).
-8. Node `child_process` broad slice passes on FreeBSD with controlled invocation:
+8. Node `process-stdio` broad slice passes on FreeBSD after `ReadableStream.text()` FreeBSD compatibility workaround:
+   - `test/js/node/process/process-stdio.test.ts` => `9 pass / 0 fail`
+   - Key finding: subprocess `stdout.bytes()` data is correct, but `TextDecoder.decode(bytes)` corrupts the first byte on affected FreeBSD outputs containing later Unicode text.
+   - Current workaround: FreeBSD `ReadableStream.prototype.text()` decodes via `Buffer.from(bytes).toString()` instead of `TextDecoder`.
+   - Follow-up: investigate/fix the underlying FreeBSD `TextDecoder` behavior and remove the workaround before upstreaming if possible.
+9. Node `child_process` broad slice passes on FreeBSD with controlled invocation:
    - `test/js/node/child_process/child_process.test.ts` => `30 pass / 1 todo / 0 fail`
    - Required invocation hygiene:
      - run from outside repo root (or otherwise avoid the repo-local `.env` file)
