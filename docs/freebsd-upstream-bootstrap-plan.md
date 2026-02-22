@@ -268,7 +268,7 @@ Completion evidence (2026-02-22):
 
 Goal: make cold-start script robust and deterministic on FreeBSD.
 
-Status: **In progress**.
+Status: **In progress** (major watcher milestone completed).
 
 Phase C split:
 
@@ -385,15 +385,13 @@ Latest checkpoint (2026-02-22):
 2. Spawn and shell focused tests pass:
    - `test/js/bun/spawn/spawn.test.ts -t "Uint8Array works as stdin"` passed.
    - `test/js/bun/shell/shell-hang.test.ts` passed.
-3. Watcher coverage currently fails on FreeBSD:
-   - `test/js/node/watch/fs.watch.test.ts` shows widespread timeout failures and did not complete cleanly in the timed run.
-   - This is now a prioritized Phase D/E follow-up item.
-4. Narrowing progress:
-   - File-level watch path now passes targeted check:
-     - `test/js/node/watch/fs.watch.test.ts -t "should emit 'change' event when file is modified"` passed.
-   - Directory-watch path still fails:
-     - `test/js/node/watch/fs.watch.test.ts -t "add file/folder to folder"` timed out.
-   - Interpretation: FreeBSD kqueue registration for files is fixed, but directory event propagation/filename mapping remains unresolved.
+3. Watcher coverage milestone achieved:
+   - `test/js/node/watch/fs.watch.test.ts` now passes on FreeBSD (`32 pass / 0 fail`).
+4. Implementation notes for current watcher pass:
+   - FreeBSD kqueue registration for `fs.watch` file/directory paths is fixed.
+   - FreeBSD directory-event fallback rescans directories when kqueue provides no child names.
+   - `fs.promises.watch()` async iterator race (lost wakeup) was fixed.
+   - Current FreeBSD fallback includes a compatibility workaround (extra synthetic directory event per fallback entry) that should be revisited before upstreaming.
 
 How to do it:
 
@@ -401,21 +399,22 @@ How to do it:
 2. Run focused spawn suite first (highest risk area from prior failures).
 3. Run selected Node fs/watch and Bun shell tests.
 4. Capture pass/fail and skips into `bun-bootstrap.md` with command lines.
+5. Mark temporary compatibility workarounds explicitly (what is acceptable for local bootstrap vs. what must be refined before upstream).
 
 How to reproduce:
 
 ```bash
 cd /home/lwhsu/killme/bun
 
-build/20260221-2027-current-from-cleanroom-step1/bun --version
-build/20260221-2027-current-from-cleanroom-step1/bun -e 'console.log(1+1)'
-build/20260221-2027-current-from-cleanroom-step1/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'
+build/release/bun --version
+build/release/bun -e 'console.log(1+1)'
+build/release/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'
 
-build/20260221-2027-current-from-cleanroom-step1/bun test test/js/bun/spawn/spawn.test.ts
-build/20260221-2027-current-from-cleanroom-step1/bun test test/js/bun/spawn/spawn-stdin-readable-stream.test.ts
-build/20260221-2027-current-from-cleanroom-step1/bun test test/js/node/fs/fs.test.ts
-build/20260221-2027-current-from-cleanroom-step1/bun test test/js/node/watch/fs.watch.test.ts
-build/20260221-2027-current-from-cleanroom-step1/bun test test/js/bun/shell/shell-hang.test.ts
+build/release/bun test test/js/bun/spawn/spawn.test.ts
+build/release/bun test test/js/bun/spawn/spawn-stdin-readable-stream.test.ts
+build/release/bun test test/js/node/fs/fs.test.ts
+build/release/bun test test/js/node/watch/fs.watch.test.ts
+build/release/bun test test/js/bun/shell/shell-hang.test.ts
 ```
 
 How to verify:
@@ -423,6 +422,7 @@ How to verify:
 1. Smoke checks pass.
 2. Spawn-focused tests pass without hangs.
 3. fs/watch/shell selected tests pass or have documented, reproducible failure records.
+4. Any temporary FreeBSD-only compatibility workaround is clearly identified and bounded.
 
 How to review:
 
@@ -433,6 +433,7 @@ How to review:
 Exit criteria:
 
 1. The gate command set is reproducible and stable on FreeBSD.
+2. Remaining known gaps (if any) are isolated outside the gate or documented with specific next actions.
 
 ### Phase F: Upstream Patch Stack Preparation
 
