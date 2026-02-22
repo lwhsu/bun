@@ -3732,3 +3732,47 @@ Actions performed:
 - `test/js/node/zlib/zlib.kMaxLength.global.test.js` => `8 pass / 0 fail` (fixed)
 - `test/js/node/zlib/zlib.test.js` + `deflate-streaming.test.ts` + `bytesWritten.test.ts` + `zlib.kMaxLength.global.test.js`
   - Result: `390 pass / 2 skip / 0 fail`
+
+## 2026-02-22: Phase C-strict revisit (stage0 no-fallback progress and remaining blocker)
+
+### What improved
+
+- `src/codegen/bundle-modules.ts` no longer forces the FreeBSD stage0 tee-write (`spawnSync("/usr/bin/tee", ...)`) path by default.
+- The tee-write fallback is now opt-in only via:
+  - `BUN_FREEBSD_FORCE_TEE_WRITE=1`
+- This unblocks stage0 preprocessing for `bundle-modules.ts` and allows the script to progress to the bundler invocation.
+
+### Current C-strict blocker (narrowed)
+
+- Legacy stage0 `bun build` still crashes on FreeBSD (`SIGSEGV`), which blocks full no-fallback mode.
+- Minimal repro:
+  - `build/freebsd-bootstrap/stage0/bun build /tmp/stage0-bunbuild-cli/in.ts --target bun --outdir /tmp/stage0-bunbuild-cli/out`
+- `lldb` shows the crash in the legacy bundler worker thread path:
+  - `src.bundler.bundle_v2.ParseTask.callback` (thread #2)
+- Legacy stage0 subprocess APIs are also unstable on FreeBSD (`Bun.spawn`, `Bun.spawnSync`, `node:child_process.spawnSync` can crash), so script-level spawn fallbacks are not sufficient to complete C-strict.
+
+### Legacy worktree patch tracking policy (formalized)
+
+- Treat `build/freebsd-bootstrap/legacy-worktree` as disposable/rebuildable.
+- Track intentional legacy source changes as patch files under `scripts/patches/`.
+- Replay those changes only through `scripts/bootstrap-freebsd.sh` (`apply_patch_if_needed()`), with guard conditions.
+- Do not track generated legacy files (`*.lut.h`, `WebCoreJSBuiltins.*`, `ZigGeneratedClasses.*`) as persistent patch artifacts.
+- Classify each legacy patch as:
+  - bootstrap-only compatibility, or
+  - runtime correctness candidate to compare against the current tree.
+
+### New/updated legacy patch artifacts (for current C-strict debugging)
+
+- Updated:
+  - `scripts/patches/freebsd-stage0-waiter-thread-default.patch` (Zig 0.13 compatibility: `std.time.sleep`)
+- Added:
+  - `scripts/patches/freebsd-stage0-cache-null-slice.patch`
+  - `scripts/patches/freebsd-stage0-bundler-parse-recover.patch`
+- Hooked into:
+  - `scripts/bootstrap-freebsd.sh` (`patch_legacy_worktree_for_freebsd()`)
+
+### Note on stage0 version string platform label
+
+- Current stage0 may still print `Linux x64` in `--version` output (`Bun v0.0.0 (...) Linux x64`) even when running on FreeBSD.
+- This is a legacy stage0 reporting/path issue and is not currently a bootstrap blocker.
+- Keep as a separate cleanup item after C-strict runtime stability is solved.

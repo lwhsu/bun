@@ -1,0 +1,17 @@
+diff --git src/cache.zig src/cache.zig
+index b82e2e10b7..ea91e5870d 100644
+--- src/cache.zig
++++ src/cache.zig
+@@ -50,7 +50,11 @@ pub const Fs = struct {
+ 
+         pub fn deinit(entry: *Entry, allocator: std.mem.Allocator) void {
+             if (entry.contents.len > 0) {
+-                allocator.free(entry.contents);
++                // Defensive FreeBSD stage0 workaround: tolerate malformed cache
++                // entries where len > 0 but ptr == null.
++                if (@intFromPtr(entry.contents.ptr) != 0) {
++                    allocator.free(entry.contents);
++                }
+                 entry.contents = "";
+             }
+         }

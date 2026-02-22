@@ -275,6 +275,16 @@ Phase C split:
 1. **C-basic: completed** (deterministic bootstrap + idempotent rerun + compiler-switch rebuild succeeded).
 2. **C-strict: in progress** (full no-fallback mode still blocked by stage0 runtime behavior).
 
+Current C-strict status (2026-02-22):
+
+1. `stage0` runtime preprocessing for `src/codegen/bundle-modules.ts` no longer stalls by default on FreeBSD.
+   - `src/codegen/bundle-modules.ts` was adjusted so the FreeBSD tee-write compatibility path is opt-in (`BUN_FREEBSD_FORCE_TEE_WRITE=1`) instead of forced for all stage0 runs.
+2. Legacy stage0 `bun build` remains the blocker for full no-fallback mode.
+   - Repro: `${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun build <input.ts> --target bun --outdir <dir>` crashes with `SIGSEGV`.
+   - `bundle-modules.ts` in no-fallback mode depends on this stage0 bundler path, so Phase C strict cannot exit yet.
+3. Legacy stage0 subprocess APIs are also unstable on FreeBSD (`Bun.spawn`, `Bun.spawnSync`, `node:child_process.spawnSync` can crash), so script-level spawn fallbacks are not a complete workaround.
+4. Legacy stage0 crash debugging work is tracked as replayable patch files under `scripts/patches/` (not as ad-hoc edits in the legacy worktree).
+
 How to do it:
 
 1. Keep `scripts/bootstrap-freebsd.sh` as the only supported entrypoint.
@@ -316,6 +326,16 @@ How to review:
 4. Confirm legacy WebKit package reproducibility:
    - same commit metadata (`BUN_WEBKIT_VERSION`) is not sufficient by itself
    - compare archive fingerprints (`libJavaScriptCore.a`, `libWTF.a`) when behavior diverges.
+
+Legacy patch tracking policy (required for reproducibility):
+
+1. Treat `build/freebsd-bootstrap/legacy-worktree` as disposable.
+2. Any intentional legacy source modification must be exported into `scripts/patches/freebsd-stage0-*.patch` immediately.
+3. `scripts/bootstrap-freebsd.sh` must apply each patch idempotently via `apply_patch_if_needed()` with a guard condition.
+4. Do not track generated legacy files (`*.lut.h`, `WebCoreJSBuiltins.*`, `ZigGeneratedClasses.*`) as patch artifacts.
+5. Classify each legacy patch in notes/logs:
+   - bootstrap-only compatibility patch
+   - runtime correctness candidate to compare against current tree
 
 Exit criteria:
 

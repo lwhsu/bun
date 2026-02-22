@@ -27,7 +27,8 @@ const CMAKE_BUILD_ROOT = process.argv[3];
 const traceEnabled = process.env.BUN_FREEBSD_CODEGEN_TRACE === "1";
 // On FreeBSD, direct self-host codegen uses Bun's bundler path (not the node fallback path).
 // For internal module parity with the node/esbuild runner, force CommonJS bundle output.
-const forceCJSFormat = process.platform === "freebsd" || process.env.BUN_FREEBSD_CODEGEN_FORCE_CJS === "1";
+const forceCJSFormat =
+  (process.platform === "freebsd" && Bun.version !== "0.0.0") || process.env.BUN_FREEBSD_CODEGEN_FORCE_CJS === "1";
 const trace = (...args: any[]) => {
   if (!traceEnabled) return;
   console.error("[freebsd-codegen-trace]", ...args);
@@ -76,7 +77,10 @@ globalThis.requireTransformer = requireTransformer;
 const verbose = Bun.env.VERBOSE ? console.log : () => {};
 const isFreeBSD = process.platform === "freebsd";
 const isStage0Bun = typeof Bun !== "undefined" && Bun.version === "0.0.0";
-const useSpawnWriteCompat = isFreeBSD && (isStage0Bun || process.env.BUN_FREEBSD_FORCE_TEE_WRITE === "1");
+// Stage0 on FreeBSD can deadlock in node:child_process spawnSync() during codegen.
+// Keep the tee-based path as an opt-in escape hatch, but default to fs writes now
+// that the canonical stage0 runtime passes node:fs checks.
+const useSpawnWriteCompat = isFreeBSD && process.env.BUN_FREEBSD_FORCE_TEE_WRITE === "1";
 
 function ensureDirSync(dirPath: string) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -286,23 +290,29 @@ const config_cli = [
 ];
 verbose("running: ", config_cli);
 trace("bun.build.cli:start", { args: config_cli.length });
-const out = Bun.spawnSync({
-  cmd: config_cli,
-  cwd: process.cwd(),
-  env: process.env,
-  stdio: ["ignore", "inherit", "inherit"],
-});
-trace("bun.build.cli:done", { exitCode: out.exitCode });
-if (out.exitCode !== 0) {
-  const stderrText =
-    out.stderr && out.stderr.length > 0
-      ? Buffer.from(out.stderr).toString("utf8").trim()
-      : "";
+const useNodeSpawnForBundler =
+  isFreeBSD && isStage0Bun && process.env.BUN_FREEBSD_STAGE0_USE_NODE_SPAWN_BUNDLER === "1";
+const out = useNodeSpawnForBundler
+  ? spawnSync(config_cli[0], config_cli.slice(1), {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ["ignore", "inherit", "pipe"],
+    })
+  : Bun.spawnSync({
+      cmd: config_cli,
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+const bundlerExitCode = useNodeSpawnForBundler ? out.status : out.exitCode;
+trace("bun.build.cli:done", { exitCode: bundlerExitCode, useNodeSpawnForBundler });
+if (bundlerExitCode !== 0) {
+  const stderrText = out.stderr && out.stderr.length > 0 ? Buffer.from(out.stderr).toString("utf8").trim() : "";
   if (stderrText.length > 0) {
     console.error(stderrText);
   }
   console.error("bundle-modules.ts: child bun build failed");
-  process.exit(out.exitCode ?? 1);
+  process.exit(bundlerExitCode ?? 1);
 }
 
 mark("Bundle modules");

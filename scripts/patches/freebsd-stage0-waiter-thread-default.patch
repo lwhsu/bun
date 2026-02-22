@@ -18,7 +18,7 @@
 +            } else if (comptime Environment.isFreeBSD) {
 +                // Poll waitpid(WNOHANG) at a short interval instead of relying on
 +                // SIGCHLD routing to a specific waiter thread.
-+                std.Thread.sleep(1 * std.time.ns_per_ms);
++                std.time.sleep(1 * std.time.ns_per_ms);
              } else {
                  var mask = std.posix.empty_sigset;
 +                _ = std.c.sigaddset(&mask, std.posix.SIG.CHLD);

@@ -418,6 +418,28 @@ patch_legacy_worktree_for_freebsd() {
     apply_patch_if_needed "${zig_freebsd_patch}" "FreeBSD legacy zig stdlib freebsd declarations patch"
   fi
 
+  local cache_file="${LEGACY_WORKTREE}/src/cache.zig"
+  local cache_null_slice_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-cache-null-slice.patch"
+  if [[ -f "${cache_file}" ]] \
+    && grep -q 'allocator.free(entry.contents);' "${cache_file}"; then
+    if [[ ! -f "${cache_null_slice_patch}" ]]; then
+      echo "error: missing patch file: ${cache_null_slice_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${cache_null_slice_patch}" "FreeBSD legacy cache null-slice guard patch"
+  fi
+
+  local bundler_parse_file="${LEGACY_WORKTREE}/src/bundler/bundle_v2.zig"
+  local bundler_parse_recover_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-bundler-parse-recover.patch"
+  if [[ -f "${bundler_parse_file}" ]] \
+    && ! grep -q 're-reading file after malformed cache entry' "${bundler_parse_file}"; then
+    if [[ ! -f "${bundler_parse_recover_patch}" ]]; then
+      echo "error: missing patch file: ${bundler_parse_recover_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${bundler_parse_recover_patch}" "FreeBSD legacy bundler parse cache-recover patch"
+  fi
+
 }
 
 generate_legacy_codegen_files() {

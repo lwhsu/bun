@@ -1,0 +1,31 @@
+diff --git src/bundler/bundle_v2.zig src/bundler/bundle_v2.zig
+index 8236337f24..2100272bfe 100644
+--- src/bundler/bundle_v2.zig
++++ src/bundler/bundle_v2.zig
+@@ -2864,6 +2864,26 @@ pub const ParseTask = struct {
+ 
+         errdefer if (task.contents_or_fd == .fd) entry.deinit(allocator);
+ 
++        if (comptime Environment.isFreeBSD) {
++            if (entry.contents.len > 0 and @intFromPtr(entry.contents.ptr) == 0) {
++                // Legacy stage0 FreeBSD can occasionally surface a malformed cache
++                // entry from readFileWithAllocator (len > 0, null ptr). Re-read the
++                // file directly before handing contents to the parser.
++                const recovered = std.fs.cwd().readFileAlloc(allocator, file_path.text, std.math.maxInt(usize)) catch |err| {
++                    const source = &Logger.Source.initEmptyFile(log.msgs.allocator.dupe(u8, file_path.text) catch unreachable);
++                    log.addErrorFmt(
++                        source,
++                        Logger.Loc.Empty,
++                        allocator,
++                        "{s} re-reading file after malformed cache entry: {}",
++                        .{ @errorName(err), bun.fmt.quote(file_path.text) },
++                    ) catch {};
++                    return err;
++                };
++                entry.contents = recovered;
++            }
++        }
++
+         const will_close_file_descriptor = task.contents_or_fd == .fd and !entry.fd.isStdio() and this.ctx.bun_watcher == null;
+         if (will_close_file_descriptor) {
+             _ = entry.closeFD();
