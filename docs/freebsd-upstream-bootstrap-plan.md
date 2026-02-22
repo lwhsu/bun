@@ -74,13 +74,30 @@ Current status at 2026-02-22:
    - `BUN_FREEBSD_NPM_INSTALL=1`
 2. Verified by building target `bun-bindgen-v2` in a fresh build directory.
 3. Full no-fallback (`BUN_FREEBSD_BINDGENV2_NODE=0`, `BUN_FREEBSD_CODEGEN_NODE=0`, `BUN_FREEBSD_NPM_INSTALL=0`) is still blocked by stage0 runtime issues:
-   - `bundle-modules.ts` deadlock under stage0
+   - legacy stage0 `bun build` crashes (`SIGSEGV`) in bundler parser worker (`src.bundler.bundle_v2.ParseTask.callback`)
+   - stage0 subprocess APIs on FreeBSD are unstable (`Bun.spawn*`, `node:child_process.spawnSync`) and cannot be used as a reliable script-level workaround
    - `bindgen.ts` functional mismatch under stage0
 4. Latest crash narrowing for install path:
    - stage0 `bun install` core backtrace points at `src.sys.File.toSource` during lockfile workspace parsing (`Package.processWorkspaceName*`).
 5. 2026-02-22 update:
    - Legacy stage0 with `build-obj-safe` plus FreeBSD `read`-based file-read path no longer crashes on `bun install --frozen-lockfile`.
    - This narrows remaining no-fallback work to stage0 codegen/runtime behavior rather than install lockfile parsing.
+
+## 2.3 Pre-Upstream Cleanup Queue (Non-Critical but Important)
+
+Use this section for tasks that are not blocking bootstrap/runtime correctness, but should be tracked and preferably resolved before upstream submission.
+
+Current items:
+
+1. Legacy stage0 version/platform reporting shows `Linux x64` on FreeBSD.
+   - Example output: `Bun v0.0.0 (<legacy-hash>) Linux x64`
+   - Impact: confusing logs/repro reports; not currently a bootstrap blocker.
+   - Desired outcome: stage0 reports FreeBSD correctly (or clearly identifies the legacy bootstrap target semantics).
+2. Review temporary FreeBSD compatibility workarounds and mark upstream intent explicitly.
+   - Example categories:
+     - acceptable bootstrap-only workaround (legacy patch set)
+     - temporary current-tree compatibility shim to replace later
+3. Re-check release-build-only test exposure issues (e.g. `bun:internal-for-testing`) and classify separately from FreeBSD runtime parity.
 
 ## 2.2 Current Stage0 Build Design (How It Works Today)
 
