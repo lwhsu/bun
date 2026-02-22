@@ -3838,6 +3838,9 @@ Actions performed:
 - `node/stream.consumers.ts`
   - Failing batch: `115`
   - Same retry-poisoning pattern; promoted to explicit alias (`s115.ts`)
+- `node/stream.promises.ts`
+  - Failing batch: `116`
+  - Same retry-poisoning pattern; promoted to explicit alias (`s116.ts`)
 
 ### Evidence (latest run pattern)
 
@@ -3850,7 +3853,7 @@ Actions performed:
   - batch `51` explicit alias+build+remap success
   - stage0 run advanced into `node/_http_*` and `node/assert.strict.ts`
   - stage0 run advanced past batch `88` into `node/*` compatibility modules
-  - retry-poisoning failures promoted to explicit aliases at batches `76`, `84`, `87`, `92`, `102`, `112`, and `115`
+  - retry-poisoning failures promoted to explicit aliases at batches `76`, `84`, `87`, `92`, `102`, `112`, `115`, and `116`
 
 ### Explicit vs auto alias policy (current)
 
