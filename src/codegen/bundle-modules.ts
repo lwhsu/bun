@@ -152,6 +152,7 @@ const stage0AliasedModuleBaseNames: Record<string, string> = {
   "internal/streams/native-readable.ts": "s51.ts",
   "node/_http_server.ts": "s76.ts",
   "node/assert.strict.ts": "s84.ts",
+  "node/child_process.ts": "s87.ts",
 };
 trace("preprocess:start");
 for (let i = 0; i < nativeStartIndex; i++) {
