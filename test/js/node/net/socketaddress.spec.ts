@@ -86,7 +86,14 @@ describe("SocketAddress constructor", () => {
   it.each([Symbol.for("ipv4"), function ipv4() {}, { family: "ipv4" }, "ipv1", "ip"])(
     "given an invalid family, throws ERR_INVALID_ARG_VALUE",
     (family: any) => {
-      expect(() => new SocketAddress({ family })).toThrowWithCode(Error, "ERR_INVALID_ARG_VALUE");
+      let err: any;
+      try {
+        new SocketAddress({ family });
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(Error);
+      expect(err?.code).toBe("ERR_INVALID_ARG_VALUE");
     },
   );
 

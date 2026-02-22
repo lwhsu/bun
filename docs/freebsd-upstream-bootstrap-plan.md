@@ -463,9 +463,18 @@ Latest checkpoint (2026-02-22):
    - `test/js/node/dns/node-dns.test.js` => `66 pass / 0 fail`
    - `test/js/node/net/node-net.test.ts` => `31 pass / 1 skip / 0 fail`
    - `test/js/node/net/node-net-server.test.ts` => `18 pass / 0 fail`
+   - additional coverage:
+     - `dns-lookup-keepalive.test.ts` => `1 pass / 0 fail`
+     - `double-connect.test.ts` => `1 pass / 0 fail` (stale `.failing` marker removed)
+     - `socketaddress.spec.ts` => `66 pass / 1 skip / 0 fail`
+     - `node-net-allowHalfOpen.test.js` => `2 pass / 0 fail`
+     - `server.spec.ts` => `38 pass / 3 skip / 0 fail`
+     - `handle-leak.test.ts` stress run completes with stable RSS (non-standard "0 tests" summary but exits cleanly)
    - FreeBSD portability note:
      - client connect to `0.0.0.0` is not a valid remote destination on FreeBSD (Node on FreeBSD also fails)
      - tests were adjusted to preserve server bind assertions while using loopback for client connects / accepting FreeBSD wildcard-connect failure in the Bun-specific check
+   - Test-harness note:
+     - `socketaddress.spec.ts` uses `createTest()` from `node-harness`; its `expect` object lacks `.toThrowWithCode`, so invalid-family assertions were rewritten to explicit `try/catch` + `err.code` checks.
 
 How to do it:
 

@@ -3627,6 +3627,12 @@ Actions performed:
 - `test/js/node/dns/node-dns.test.js` => `66 pass / 0 fail`
 - `test/js/node/net/node-net.test.ts` => `31 pass / 1 skip / 0 fail`
 - `test/js/node/net/node-net-server.test.ts` => `18 pass / 0 fail`
+- `test/js/node/dns/dns-lookup-keepalive.test.ts` => `1 pass / 0 fail`
+- `test/js/node/net/double-connect.test.ts` => `1 pass / 0 fail` (stale `.failing` marker removed)
+- `test/js/node/net/socketaddress.spec.ts` => `66 pass / 1 skip / 0 fail`
+- `test/js/node/net/node-net-allowHalfOpen.test.js` => `2 pass / 0 fail`
+- `test/js/node/net/server.spec.ts` => `38 pass / 3 skip / 0 fail`
+- `test/js/node/net/handle-leak.test.ts` => stress run completes (RSS remains flat; non-standard output, exits cleanly)
 
 ### FreeBSD-specific finding (wildcard connect semantics)
 
@@ -3636,3 +3642,6 @@ Actions performed:
   - keep server bind assertions (`address.address === "0.0.0.0"`)
   - use loopback (`127.0.0.1`) for client connects on FreeBSD in `node-net.test.ts`
   - in `node-net-server.test.ts`, accept FreeBSD wildcard-connect failure for the `Bun.connect({ hostname: "0.0.0.0" })` check while preserving the bind regression assertion
+- Additional test maintenance:
+  - `double-connect.test.ts` no longer needs `.failing`
+  - `socketaddress.spec.ts` invalid-family checks use a harness-compatible error-code assertion (its `createTest()` expect object does not provide `.toThrowWithCode`)
