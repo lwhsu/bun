@@ -3376,3 +3376,36 @@ Actions performed:
   - partial-write handling on large single chunks
   - end/close sequencing after pending writes
   - pipe backpressure interaction with spawned child stdio on FreeBSD
+
+## 2026-02-22: spawn stdin ReadableStream large-data blocker fixed (Phase E progress)
+
+### Root cause and fix
+
+- Root cause was in `src/bun.js/webcore/FileSink.zig` pending-write accounting:
+  - `pending.consumed` was overwritten in `onWrite()` pending callbacks instead of accumulated.
+  - `end()` / `endFromJS()` pending branches also failed to add the already-written pending amount to `pending.consumed`.
+- This caused truncated stdin delivery for large single-chunk `ReadableStream` writes in some write-splitting patterns on FreeBSD.
+
+### Patch summary
+
+- `src/bun.js/webcore/FileSink.zig`
+  - changed `pending.consumed = amount` to `pending.consumed += amount` in `onWrite()` pending paths
+  - added `pending.consumed += pending_written` in `end()` pending path
+  - added `pending.consumed += pending_written` in `endFromJS()` pending path
+
+### Validation
+
+- Isolated Bun test:
+  - `build/release/bun test test/js/bun/spawn/spawn-stdin-readable-stream.test.ts -t "ReadableStream with large data"`
+  - pass
+- Full file:
+  - `build/release/bun test test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
+  - result: `20 pass / 1 todo / 0 fail`
+
+### Extra manual matrix (not part of Bun test suite)
+
+- A standalone probe of single-chunk payload sizes improved significantly after the fix.
+- Residual anomaly still observed in ad hoc script:
+  - single-chunk `Uint8Array` at `1 MiB` sometimes delivered `512 KiB` in the probe
+  - string single-chunk cases in the same matrix passed after the fix
+- This is not currently covered by the Bun test file (which uses large single-chunk string and chunked binary variants), but should be tracked as a follow-up runtime correctness check.
