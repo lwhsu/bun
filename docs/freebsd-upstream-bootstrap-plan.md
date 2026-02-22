@@ -475,6 +475,14 @@ Latest checkpoint (2026-02-22):
      - tests were adjusted to preserve server bind assertions while using loopback for client connects / accepting FreeBSD wildcard-connect failure in the Bun-specific check
    - Test-harness note:
      - `socketaddress.spec.ts` uses `createTest()` from `node-harness`; its `expect` object lacks `.toThrowWithCode`, so invalid-family assertions were rewritten to explicit `try/catch` + `err.code` checks.
+15. `node:http` focused slices pass on FreeBSD:
+   - `client-timeout-error.test.ts` => `2 pass / 0 fail`
+   - `numeric-header.test.ts` => `1 pass / 0 fail`
+   - `node-http-parser.test.ts` => `9 pass / 0 fail`
+   - `node-http-transfer-encoding.test.ts` => `1 pass / 0 fail`
+   - `node-http-backpressure.test.ts` => `3 pass / 0 fail`
+     - includes long `INT_MAX` / `>INT_MAX` backpressure cases (completed successfully on FreeBSD)
+   - `node-http.test.ts` => `74 pass / 1 skip / 0 fail`
 
 How to do it:
 

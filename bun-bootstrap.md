@@ -3645,3 +3645,14 @@ Actions performed:
 - Additional test maintenance:
   - `double-connect.test.ts` no longer needs `.failing`
   - `socketaddress.spec.ts` invalid-family checks use a harness-compatible error-code assertion (its `createTest()` expect object does not provide `.toThrowWithCode`)
+
+## 2026-02-22: `node:http` focused slices pass (Phase E progress)
+
+### Validation
+
+- `test/js/node/http/client-timeout-error.test.ts` => `2 pass / 0 fail`
+- `test/js/node/http/numeric-header.test.ts` => `1 pass / 0 fail`
+- `test/js/node/http/node-http-parser.test.ts` => `9 pass / 0 fail`
+- `test/js/node/http/node-http-transfer-encoding.test.ts` => `1 pass / 0 fail`
+- `test/js/node/http/node-http-backpressure.test.ts` => `3 pass / 0 fail` (includes long `INT_MAX` / `>INT_MAX` backpressure cases, ~45s total)
+- `test/js/node/http/node-http.test.ts` => `74 pass / 1 skip / 0 fail`
