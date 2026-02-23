@@ -4059,3 +4059,35 @@ Actions performed:
 ### Status
 
 - Replay validation rerun pending after legacy cache isolation fix.
+
+## 2026-02-24: Phase C replayability validation (fresh legacy worktree) - rerun result (`session 22462`)
+
+### Result
+
+- Fresh replay validation did **not** complete end-to-end yet.
+- It progressed into strict no-fallback codegen, then failed on known legacy stage0 codegen/runtime blockers.
+- Important positive result:
+  - `build/freebsd-bootstrap/stage0/bun install --frozen-lockfile` completed in the replay run, confirming
+    the exported legacy `extract_tarball.zig` cache-move fallback patch is effective when replayed.
+
+### What replay proved
+
+1. Fresh legacy worktree recreation + patch replay works (including newly exported `extract_tarball` fix).
+2. Legacy stage0 package-manager install path is reproducible from patchset (no dependence on local untracked
+   legacy edits for this fix).
+3. The remaining replay failure is now the strict stage0 codegen layer, not stage0 rebuild/install.
+
+### Replay failure details
+
+1. `src/codegen/bake-codegen.ts` under legacy stage0:
+   - crashed with `panic(main thread): Segmentation fault at address 0x80`
+2. `src/codegen/bundle-modules.ts` under legacy stage0:
+   - failed in preprocess with malformed content-fragment `File not found` paths
+   - `bundle-modules.ts: Bun.build API failed`
+
+### Interpretation
+
+- `session 22462` was interrupted/ended after exposing the older strict stage0 codegen blockers, but this was
+  enough to validate the replay patchset wiring and the exported legacy install fix.
+- Next replay attempt should not be a blind rerun. It should first include the later strict-stage0 codegen
+  workarounds already developed in the current tree (`bundle-modules.ts`, `bake-codegen.ts`, etc.).

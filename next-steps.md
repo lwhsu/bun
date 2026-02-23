@@ -34,7 +34,10 @@ Current note:
 1. The legacy `src/install/extract_tarball.zig` cache-move fallback fix has been exported and wired.
 2. Replay validation exposed malformed patch headers in some legacy debug patches; fixed and replay now reaches stage0 build.
 3. Replay validation exposed stale `~/.cache/zig` dependency during legacy `identifier-cache`; bootstrap now forces legacy Zig caches under `${BUN_FREEBSD_BOOTSTRAP_DIR}/legacy-zig-cache`.
-4. Next action: rerun fresh replay validation and confirm full strict bootstrap completes end-to-end.
+4. Replay rerun (`session 22462`) confirmed patch replay + stage0 install path fixes, but failed in strict
+   stage0 codegen (`bake-codegen.ts` crash, `bundle-modules.ts` preprocess corruption).
+5. Next action: carry the later strict-stage0 codegen workarounds into the replay path/current checkpoint,
+   then rerun fresh replay validation to confirm full strict bootstrap completes end-to-end.
 
 ### 2. Phase E Gate (formalize and rerun)
 
