@@ -36,8 +36,22 @@ if [[ -z "${FINAL_TARGET}" ]]; then
     FINAL_TARGET="bun"
   fi
 fi
-CURRENT_ZIG="${BUN_FREEBSD_CURRENT_ZIG:-zig}"
+CURRENT_ZIG="${BUN_FREEBSD_CURRENT_ZIG:-}"
+if [[ -z "${CURRENT_ZIG}" ]]; then
+  # Current Bun tree requires the Oven Zig fork. Prefer the locally-built stage3 binary if present
+  # so strict bootstrap reruns do not accidentally use /usr/local/bin/zig.
+  OVEN_ZIG_STAGE3_DEFAULT="${BOOTSTRAP_DIR}/oven-zig/build-freebsd/stage3/bin/zig"
+  if [[ -x "${OVEN_ZIG_STAGE3_DEFAULT}" ]]; then
+    CURRENT_ZIG="${OVEN_ZIG_STAGE3_DEFAULT}"
+  else
+    CURRENT_ZIG="zig"
+  fi
+fi
 CURRENT_ZIG_LIB_DIR="${BUN_FREEBSD_CURRENT_ZIG_LIB_DIR:-}"
+CFG_FREEBSD_BINDGENV2_NODE="${BUN_FREEBSD_BINDGENV2_NODE:-1}"
+CFG_FREEBSD_GENERATE_CLASSES_NODE="${BUN_FREEBSD_GENERATE_CLASSES_NODE:-1}"
+CFG_FREEBSD_CODEGEN_NODE="${BUN_FREEBSD_CODEGEN_NODE:-1}"
+CFG_FREEBSD_NPM_INSTALL="${BUN_FREEBSD_NPM_INSTALL:-1}"
 LEGACY_MAKE_JOBS="${BUN_FREEBSD_MAKE_JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || echo 1)}"
 LEGACY_BUILD_OBJ_TARGET="${BUN_FREEBSD_LEGACY_BUILD_OBJ_TARGET:-build-obj-safe}"
 
@@ -873,10 +887,11 @@ if ! user_supplied_current_webkit_path "$@"; then
 fi
 
 echo "[bootstrap] configuring current tree"
-BUN_FREEBSD_BINDGENV2_NODE=1 \
-BUN_FREEBSD_GENERATE_CLASSES_NODE=1 \
-BUN_FREEBSD_CODEGEN_NODE=1 \
-BUN_FREEBSD_NPM_INSTALL=1 \
+echo "[bootstrap] FreeBSD fallback toggles: bindgenv2=${CFG_FREEBSD_BINDGENV2_NODE} generate_classes=${CFG_FREEBSD_GENERATE_CLASSES_NODE} codegen=${CFG_FREEBSD_CODEGEN_NODE} npm_install=${CFG_FREEBSD_NPM_INSTALL}"
+BUN_FREEBSD_BINDGENV2_NODE="${CFG_FREEBSD_BINDGENV2_NODE}" \
+BUN_FREEBSD_GENERATE_CLASSES_NODE="${CFG_FREEBSD_GENERATE_CLASSES_NODE}" \
+BUN_FREEBSD_CODEGEN_NODE="${CFG_FREEBSD_CODEGEN_NODE}" \
+BUN_FREEBSD_NPM_INSTALL="${CFG_FREEBSD_NPM_INSTALL}" \
 cmake \
   -S "${ROOT_DIR}" \
   -B "${BUILD_DIR}" \
@@ -890,7 +905,76 @@ cmake \
   "$@"
 
 echo "[bootstrap] building ${FINAL_TARGET} (${BUILD_TYPE})"
-cmake --build "${BUILD_DIR}" --target "${FINAL_TARGET}"
+if [[ "${CFG_FREEBSD_NPM_INSTALL}" == "0" ]]; then
+  # FreeBSD stage0 no-fallback mode: some codegen targets (e.g. cppbind.ts) can run before Ninja's
+  # root `bun install` edge, but still depend on root node_modules entries. Preinstall once here with
+  # stage0 to make the build graph deterministic while keeping the package-manager path on stage0.
+  #
+  # Legacy FreeBSD stage0 package-manager/runtime can leave transitive @lezer/* deps only reachable
+  # through nested symlinks under @lezer/cpp, but the same stage0 resolver used by cppbind.ts fails
+  # to follow that path. We repair top-level symlinks after install so cppbind.ts can run without
+  # Node fallback while we keep investigating the underlying resolver bug.
+  echo "[bootstrap] preinstalling root dependencies with stage0 (no-fallback npm install mode)"
+  (
+    cd "${ROOT_DIR}"
+    "${STAGE0_BIN}" install --frozen-lockfile
+
+    mkdir -p node_modules/@lezer
+    for lezer_pkg in common highlight lr; do
+      lezer_store="$(echo "node_modules/.bun/@lezer+${lezer_pkg}@"* 2>/dev/null | awk '{print $1}')"
+      if [[ -d "${lezer_store}/node_modules/@lezer/${lezer_pkg}" ]]; then
+        ln -sfn "../.bun/$(basename "${lezer_store}")/node_modules/@lezer/${lezer_pkg}" "node_modules/@lezer/${lezer_pkg}"
+      fi
+    done
+  )
+fi
+
+if [[ "${CFG_FREEBSD_CODEGEN_NODE}" == "0" ]]; then
+  # Legacy FreeBSD stage0 can hang during teardown when bundle-modules.ts is launched by Ninja even
+  # after it successfully generates all outputs. Running it once standalone avoids the in-Ninja exit
+  # hang and leaves fresh outputs that Ninja can reuse.
+  echo "[bootstrap] pregenerating bundled JS modules with stage0 (strict no-fallback codegen mode)"
+  (
+    cd "${ROOT_DIR}"
+    local_codegen_build_root="${BUILD_DIR}"
+    if [[ "${local_codegen_build_root}" == "${ROOT_DIR}/"* ]]; then
+      local_codegen_build_root="${local_codegen_build_root#${ROOT_DIR}/}"
+    fi
+    BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE="${BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE:-1}" \
+    BUN_FREEBSD_CODEGEN_TRACE="${BUN_FREEBSD_CODEGEN_TRACE:-1}" \
+    "${STAGE0_BIN}" --no-install run "./src/codegen/bundle-modules.ts" --debug=OFF "${local_codegen_build_root}"
+  )
+fi
+
+build_parallel_arg=()
+if [[ "${CFG_FREEBSD_CODEGEN_NODE}" == "0" ]]; then
+  # Legacy FreeBSD stage0 codegen can deadlock when Ninja launches multiple stage0 codegen scripts
+  # concurrently (bundle-modules.ts + hash-table/jssink generators). Serialize the build in strict
+  # no-fallback mode until the underlying multi-process stage0 deadlock is fixed.
+  build_parallel_arg=(--parallel "${BUN_FREEBSD_STRICT_BUILD_JOBS:-1}")
+fi
+
+BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE="${BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE:-1}" \
+BUN_FREEBSD_CODEGEN_TRACE="$(
+  if [[ "${CFG_FREEBSD_CODEGEN_NODE}" == "0" ]]; then
+    # Legacy FreeBSD stage0 bundle-modules.ts still has a timing-sensitive deadlock in no-trace mode.
+    # Trace logging changes scheduling enough for the known no-fallback path to complete reliably.
+    # Keep this as a bootstrap workaround until the underlying stage0 deadlock is fixed.
+    echo "${BUN_FREEBSD_CODEGEN_TRACE:-1}"
+  else
+    echo "${BUN_FREEBSD_CODEGEN_TRACE:-0}"
+  fi
+)" \
+BUN_FREEBSD_STAGE0_SKIP_DUPLICATE_BUNDLE_MODULES="$(
+  if [[ "${CFG_FREEBSD_CODEGEN_NODE}" == "0" ]]; then
+    # We already executed bundle-modules.ts standalone just above in strict no-fallback mode.
+    # The duplicate Ninja invocation is only a teardown-hang hazard on legacy FreeBSD stage0.
+    echo "1"
+  else
+    echo "${BUN_FREEBSD_STAGE0_SKIP_DUPLICATE_BUNDLE_MODULES:-0}"
+  fi
+)" \
+cmake --build "${BUILD_DIR}" --target "${FINAL_TARGET}" "${build_parallel_arg[@]}"
 
 echo "[bootstrap] complete"
 echo "  stage0: ${STAGE0_BIN}"

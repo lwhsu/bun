@@ -285,22 +285,27 @@ Completion evidence (2026-02-22):
 
 Goal: make cold-start script robust and deterministic on FreeBSD.
 
-Status: **In progress** (major watcher milestone completed).
+Status: **Completed** (strict no-fallback bootstrap succeeds on FreeBSD).
 
 Phase C split:
 
 1. **C-basic: completed** (deterministic bootstrap + idempotent rerun + compiler-switch rebuild succeeded).
-2. **C-strict: in progress** (full no-fallback mode still blocked by stage0 runtime behavior).
+2. **C-strict: completed** (full no-fallback mode now succeeds with documented stage0 workarounds).
 
-Current C-strict status (2026-02-22):
+Current C-strict status (2026-02-23):
 
-1. `stage0` runtime preprocessing for `src/codegen/bundle-modules.ts` no longer stalls by default on FreeBSD.
-   - `src/codegen/bundle-modules.ts` was adjusted so the FreeBSD tee-write compatibility path is opt-in (`BUN_FREEBSD_FORCE_TEE_WRITE=1`) instead of forced for all stage0 runs.
-2. Legacy stage0 `bun build` remains the blocker for full no-fallback mode.
-   - Repro: `${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun build <input.ts> --target bun --outdir <dir>` crashes with `SIGSEGV`.
-   - `bundle-modules.ts` in no-fallback mode depends on this stage0 bundler path, so Phase C strict cannot exit yet.
-3. Legacy stage0 subprocess APIs are also unstable on FreeBSD (`Bun.spawn`, `Bun.spawnSync`, `node:child_process.spawnSync` can crash), so script-level spawn fallbacks are not a complete workaround.
-4. Legacy stage0 crash debugging work is tracked as replayable patch files under `scripts/patches/` (not as ad-hoc edits in the legacy worktree).
+1. Full strict no-fallback bootstrap now succeeds end-to-end:
+   - `BUN_FREEBSD_BINDGENV2_NODE=0`
+   - `BUN_FREEBSD_CODEGEN_NODE=0`
+   - `BUN_FREEBSD_NPM_INSTALL=0`
+   - `./scripts/bootstrap-freebsd.sh`
+2. Key blockers resolved to reach this point:
+   - legacy stage0 package install cache move failures (`rename` / directory fallback)
+   - `bundle-modules.ts` no-fallback stage0 bundler/runtime failures (alias/retry workarounds)
+   - duplicate Ninja `bundle-modules.ts` teardown hang (skip duplicate after standalone pregen)
+   - stage0 `bindgen.ts` generated `GeneratedBindings.{cpp,zig}` missing anonymous typedef coverage
+3. Legacy stage0 crash debugging / compatibility work remains tracked as replayable patch files under
+   `scripts/patches/` (not as ad-hoc edits in the legacy worktree).
 
 How to do it:
 
@@ -334,6 +339,12 @@ How to verify:
 5. Stage0 runtime gate passes:
    - `${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun -e 'import fs from "node:fs"; console.log(typeof fs.readFile)'`
 6. Note for reviewers: `zig build-obj` can take around 15 minutes with high CPU before finishing.
+7. Strict mode (Phase C exit gate) currently relies on documented FreeBSD stage0 workarounds in:
+   - `scripts/bootstrap-freebsd.sh`
+   - `src/codegen/bundle-modules.ts`
+   - `src/codegen/bindgen.ts`
+   - `src/codegen/bake-codegen.ts`
+   - `src/codegen/create-hash-table.ts`
 
 How to review:
 

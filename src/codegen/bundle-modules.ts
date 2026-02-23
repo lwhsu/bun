@@ -78,6 +78,23 @@ globalThis.requireTransformer = requireTransformer;
 const verbose = Bun.env.VERBOSE ? console.log : () => {};
 const isFreeBSD = process.platform === "freebsd";
 const isStage0Bun = typeof Bun !== "undefined" && Bun.version === "0.0.0";
+
+if (isFreeBSD && isStage0Bun) {
+  // In strict FreeBSD bootstrap mode we already run bundle-modules.ts once standalone before Ninja.
+  // The duplicate Ninja invocation can hang in legacy stage0 teardown. Let bootstrap-freebsd.sh mark
+  // that second invocation so we can exit immediately and reuse the pregenerated outputs.
+  if (process.env.BUN_FREEBSD_STAGE0_SKIP_DUPLICATE_BUNDLE_MODULES === "1") {
+    console.error("[freebsd-stage0] skipping duplicate bundle-modules.ts after standalone pregen");
+    process.reallyExit(0);
+  }
+
+  // The legacy FreeBSD stage0 runtime can hang after all async work is complete but before
+  // process teardown finishes (especially when invoked by Ninja). Force a clean exit on
+  // `beforeExit` once the event loop drains.
+  process.once("beforeExit", () => {
+    process.reallyExit(0);
+  });
+}
 // Stage0 on FreeBSD can deadlock in node:child_process spawnSync() during codegen.
 // Keep the tee-based path as an opt-in escape hatch, but default to fs writes now
 // that the canonical stage0 runtime passes node:fs checks.
@@ -150,8 +167,12 @@ const stage0AliasedModuleBaseNames: Record<string, string> = {
   "internal/streams/end-of-stream.ts": "eos.ts",
   "internal/streams/lazy_transform.ts": "lazy.ts",
   "internal/streams/native-readable.ts": "s51.ts",
+  "internal/url.ts": "s63.ts",
+  "internal/util/inspect.ts": "s66.ts",
   "internal-for-testing.ts": "s137.ts",
   "node/_http_server.ts": "s76.ts",
+  "node/_http2_upgrade.ts": "s70.ts",
+  "node/_stream_passthrough.ts": "s78.ts",
   "node/assert.strict.ts": "s84.ts",
   "node/child_process.ts": "s87.ts",
   "node/diagnostics_channel.ts": "s92.ts",
@@ -332,15 +353,17 @@ const stage0BundlerBatchSize =
   isFreeBSD && isStage0Bun
     ? Math.max(
         1,
-        Number.parseInt(process.env.BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE || "16", 10) ||
-          16,
+        Number.parseInt(process.env.BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE || "1", 10) || 1,
       )
     : 0;
 const stage0PreferFirstAttemptAliasForSingleEntry =
   isFreeBSD &&
   isStage0Bun &&
   stage0BundlerBatchSize === 1 &&
-  process.env.BUN_FREEBSD_STAGE0_DISABLE_ALIAS_ALL_SINGLE_ENTRY !== "1";
+  // Disabled by default: broad first-attempt aliasing improved some retry-poisoning cases but also
+  // introduced stage0 deadlocks in full no-fallback bootstrap runs. Keep the safer explicit-alias +
+  // corruption-signature auto-retry path as the default and make alias-all opt-in for debugging.
+  process.env.BUN_FREEBSD_STAGE0_ENABLE_ALIAS_ALL_SINGLE_ENTRY === "1";
 
 async function runBundlerCli(entryPoints: string[], batchIndex?: number) {
   const useStage0BunBuildAPI = isFreeBSD && isStage0Bun;
@@ -359,6 +382,71 @@ async function runBundlerCli(entryPoints: string[], batchIndex?: number) {
         // TODO path in copyFileSync even though plain file reads/writes are stable.
         trace("bun.build.api:entrypoint-alias-prepare", { original, aliasPath, batchIndex, step: "mkdir" });
         ensureDirSync(path.dirname(aliasPath));
+        if (isFreeBSD && isStage0Bun && !fs.existsSync(aliasPath)) {
+          // Legacy FreeBSD stage0 can hang on some alias file writes. Prefer a hardlink when
+          // possible so Bun.build() still sees a short alias path without copying file contents.
+          try {
+            fs.linkSync(original, aliasPath);
+            trace("bun.build.api:entrypoint-alias-prepare", { original, aliasPath, batchIndex, step: "hardlink" });
+          } catch {
+            // Fall back to the copy/write path below.
+          }
+        }
+        if (fs.existsSync(aliasPath)) {
+          bundlerEntryPoints = [aliasPath];
+          aliasedEntrypointOutputPath = rel.replace(/\.ts$/, ".js");
+          trace("bun.build.api:entrypoint-alias", { original, aliasPath, batchIndex, reason: opts.aliasReason });
+          trace("bun.build.api:start", {
+            entryPoints: bundlerEntryPoints.length,
+            entrypoint0: bundlerEntryPoints.length === 1 ? bundlerEntryPoints[0] : undefined,
+            batchIndex,
+            stage0BundlerBatchSize,
+          });
+          const result = await Bun.build({
+            entrypoints: bundlerEntryPoints,
+            outdir: path.join(TMP_DIR, "modules_out"),
+            root: TMP_DIR,
+            target: "bun",
+            external: builtinModules,
+            define: {
+              ...define,
+              IS_BUN_DEVELOPMENT: String(!!debug),
+              __intrinsic__debug: debug ? "$debug_log_enabled" : "false",
+            },
+            minify: debug ? false : { syntax: true },
+            keepNames: !debug,
+          });
+          trace("bun.build.api:done", {
+            success: result.success,
+            outputs: result.outputs?.length ?? 0,
+            logs: result.logs?.length ?? 0,
+            batchIndex,
+          });
+
+          if (result.success && aliasedEntrypointOutputPath && bundlerEntryPoints[0] !== entryPoints[0]) {
+            const aliasRelJs = bundlerEntryPoints[0].slice(TMP_DIR.length + 1).replace(/\.ts$/, ".js");
+            const outdir = path.join(TMP_DIR, "modules_out");
+            const aliasOutput = path.join(outdir, aliasRelJs);
+            const canonicalOutput = path.join(outdir, aliasedEntrypointOutputPath);
+            if (fs.existsSync(aliasOutput)) {
+              ensureDirSync(path.dirname(canonicalOutput));
+              writeFileCompatSync(canonicalOutput, readUtf8CompatSync(aliasOutput));
+              trace("bun.build.api:entrypoint-alias-remap", { aliasOutput, canonicalOutput, batchIndex, mode: "copy" });
+            } else if (fs.existsSync(canonicalOutput)) {
+              trace("bun.build.api:entrypoint-alias-remap", {
+                aliasOutput,
+                canonicalOutput,
+                batchIndex,
+                mode: "canonical-already-exists",
+              });
+            } else {
+              throw new Error(
+                `stage0 alias remap failed: missing both alias output '${aliasOutput}' and canonical output '${canonicalOutput}'`,
+              );
+            }
+          }
+          return result;
+        }
         trace("bun.build.api:entrypoint-alias-prepare", { original, aliasPath, batchIndex, step: "read" });
         const aliasedSourceText = readUtf8CompatSync(original);
         trace("bun.build.api:entrypoint-alias-prepare", {
@@ -368,7 +456,26 @@ async function runBundlerCli(entryPoints: string[], batchIndex?: number) {
           step: "write",
           bytes: aliasedSourceText.length,
         });
-        writeFileCompatSync(aliasPath, aliasedSourceText);
+        // Legacy FreeBSD stage0 can hang in some alias-file writes after repeated retries/reruns.
+        // Reuse an existing identical alias file when present to avoid unnecessary writes.
+        let shouldWriteAlias = true;
+        if (fs.existsSync(aliasPath)) {
+          try {
+            shouldWriteAlias = readUtf8CompatSync(aliasPath) !== aliasedSourceText;
+          } catch {
+            shouldWriteAlias = true;
+          }
+        }
+        if (shouldWriteAlias) {
+          writeFileCompatSync(aliasPath, aliasedSourceText);
+        } else {
+          trace("bun.build.api:entrypoint-alias-prepare", {
+            original,
+            aliasPath,
+            batchIndex,
+            step: "reuse-existing",
+          });
+        }
         bundlerEntryPoints = [aliasPath];
         aliasedEntrypointOutputPath = rel.replace(/\.ts$/, ".js");
         trace("bun.build.api:entrypoint-alias", { original, aliasPath, batchIndex, reason: opts.aliasReason });
@@ -538,8 +645,8 @@ const outputs = new Map();
 
 for (const entrypoint of bundledEntryPoints) {
   const file_path = entrypoint.slice(TMP_DIR.length + 1).replace(/\.ts$/, ".js");
-  const file = Bun.file(path.join(TMP_DIR, "modules_out", file_path));
-  const output = await file.text();
+  if (traceEnabled) trace("bundle-modules:postbuild:item:start", { file_path });
+  const output = readUtf8CompatSync(path.join(TMP_DIR, "modules_out", file_path));
   const cjsWrapped = output.includes("// @bun @bun-cjs");
   const normalizedOutput = cjsWrapped
     ? output
@@ -582,7 +689,8 @@ for (const entrypoint of bundledEntryPoints) {
 
   const outputPath = path.join(JS_DIR, file_path);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, captured);
+  writeFileCompatSync(outputPath, captured);
+  if (traceEnabled) trace("bundle-modules:postbuild:item:done", { file_path });
   outputs.set(file_path.replace(".js", ""), captured);
 }
 

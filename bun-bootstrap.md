@@ -3975,3 +3975,44 @@ Actions performed:
   `C-strict` progress.
 - Remaining `C-strict` work is now the **full no-fallback bootstrap validation** (`BUN_FREEBSD_*_NODE=0`)
   through the complete bootstrap path, not this specific codegen script runtime.
+
+## 2026-02-23: Phase C-strict complete (full no-fallback bootstrap `rerun26`)
+
+### Result
+
+- Full strict no-fallback bootstrap succeeded end-to-end on FreeBSD:
+  - `BUN_FREEBSD_BINDGENV2_NODE=0`
+  - `BUN_FREEBSD_CODEGEN_NODE=0`
+  - `BUN_FREEBSD_NPM_INSTALL=0`
+  - `./scripts/bootstrap-freebsd.sh`
+- Final output:
+  - `build/release/bun`
+- Script tail confirmed:
+  - `Build Summary: 5/5 steps succeeded`
+  - `obj success`
+  - `[6/6] Linking CXX executable bun-profile`
+  - `[bootstrap] complete`
+
+### Final blockers resolved in the last stretch
+
+1. Wrong current-tree Zig picked during strict rerun:
+   - `scripts/bootstrap-freebsd.sh` now auto-prefers local Oven Zig stage3
+     (`build/freebsd-bootstrap/oven-zig/build-freebsd/stage3/bin/zig`) when available.
+2. Duplicate Ninja `bundle-modules.ts` invocation hang:
+   - strict mode now pre-generates `bundle-modules.ts` once standalone
+   - duplicate Ninja invocation is skipped via FreeBSD stage0 env gate
+     (`BUN_FREEBSD_STAGE0_SKIP_DUPLICATE_BUNDLE_MODULES=1`)
+3. Stage0 `bindgen.ts` generated output gaps:
+   - added FreeBSD stage0 fallback emission for reachable anonymous typedefs in `GeneratedBindings.cpp`
+     and `GeneratedBindings.zig`
+   - added FreeBSD stage0 shim aliases for missing named Zig typedefs in generated module structs
+     (`BracesOptions`, `StringWidthOptions`, `UserInfoOptions`, `Formatter`)
+
+### Smoke verification after `rerun26`
+
+- Stage0:
+  - `build/freebsd-bootstrap/stage0/bun --version` => `0.0.0`
+  - `build/freebsd-bootstrap/stage0/bun -e 'import fs from "node:fs"; ...'` => `freebsd x64 true`
+- Final:
+  - `build/release/bun --version` => `1.3.10`
+  - `build/release/bun -e 'console.log(process.platform, process.arch, 1+1)'` => `freebsd x64 2`
