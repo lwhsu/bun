@@ -31,7 +31,10 @@ Tasks:
 
 Current note:
 
-1. The legacy `src/install/extract_tarball.zig` cache-move fallback fix has been exported and wired; validate by rerunning the strict bootstrap path.
+1. The legacy `src/install/extract_tarball.zig` cache-move fallback fix has been exported and wired.
+2. Replay validation exposed malformed patch headers in some legacy debug patches; fixed and replay now reaches stage0 build.
+3. Replay validation exposed stale `~/.cache/zig` dependency during legacy `identifier-cache`; bootstrap now forces legacy Zig caches under `${BUN_FREEBSD_BOOTSTRAP_DIR}/legacy-zig-cache`.
+4. Next action: rerun fresh replay validation and confirm full strict bootstrap completes end-to-end.
 
 ### 2. Phase E Gate (formalize and rerun)
 

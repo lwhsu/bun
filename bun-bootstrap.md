@@ -4016,3 +4016,46 @@ Actions performed:
 - Final:
   - `build/release/bun --version` => `1.3.10`
   - `build/release/bun -e 'console.log(process.platform, process.arch, 1+1)'` => `freebsd x64 2`
+
+## 2026-02-24: Phase C replayability validation (fresh legacy worktree) - progress
+
+### Goal
+
+- Validate that Phase C-strict can be replayed from:
+  - fresh legacy worktree
+  - missing stage0 binary
+  - replayed `scripts/patches/*` set
+
+### What was done
+
+1. Removed:
+   - `build/freebsd-bootstrap/legacy-worktree`
+   - `build/freebsd-bootstrap/stage0/bun`
+2. Re-ran strict bootstrap (`BUN_FREEBSD_*_NODE=0`) to force legacy stage0 rebuild from patchset.
+3. Exported and wired legacy `src/install/extract_tarball.zig` fix into:
+   - `scripts/patches/freebsd-stage0-extract-tarball-cache-move.patch`
+4. Fixed malformed patch headers in replayed legacy debug patches (missing `a/`/`b/` prefixes):
+   - `freebsd-stage0-cache-null-slice.patch`
+   - `freebsd-stage0-bundler-parse-recover.patch`
+   - `freebsd-stage0-extract-tarball-cache-move.patch`
+
+### Findings
+
+1. Fresh replay successfully reached and applied the legacy debug-era patches:
+   - cache null-slice guard
+   - bundler parse cache-recover
+   - extract_tarball cache move fallback
+2. New reproducibility blocker found during `identifier-cache`:
+   - Zig 0.13 legacy build used stale `~/.cache/zig` state and failed:
+   - `ld.lld: cannot open ... libcompiler_rt.a: No such file or directory`
+
+### Fix applied
+
+1. `scripts/bootstrap-freebsd.sh` now forces legacy stage0 build steps to use bootstrap-local Zig caches:
+   - `${BUN_FREEBSD_BOOTSTRAP_DIR}/legacy-zig-cache/local`
+   - `${BUN_FREEBSD_BOOTSTRAP_DIR}/legacy-zig-cache/global`
+2. This avoids dependence on mutable `~/.cache/zig` state during replay validation.
+
+### Status
+
+- Replay validation rerun pending after legacy cache isolation fix.

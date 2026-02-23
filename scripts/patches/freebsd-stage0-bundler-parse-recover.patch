@@ -1,7 +1,7 @@
-diff --git src/bundler/bundle_v2.zig src/bundler/bundle_v2.zig
+diff --git a/src/bundler/bundle_v2.zig b/src/bundler/bundle_v2.zig
 index 8236337f24..2100272bfe 100644
---- src/bundler/bundle_v2.zig
-+++ src/bundler/bundle_v2.zig
+--- a/src/bundler/bundle_v2.zig
++++ b/src/bundler/bundle_v2.zig
 @@ -2864,6 +2864,26 @@ pub const ParseTask = struct {
  
          errdefer if (task.contents_or_fd == .fd) entry.deinit(allocator);

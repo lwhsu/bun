@@ -1,7 +1,7 @@
-diff --git src/cache.zig src/cache.zig
+diff --git a/src/cache.zig b/src/cache.zig
 index b82e2e10b7..ea91e5870d 100644
---- src/cache.zig
-+++ src/cache.zig
+--- a/src/cache.zig
++++ b/src/cache.zig
 @@ -50,7 +50,11 @@ pub const Fs = struct {
  
          pub fn deinit(entry: *Entry, allocator: std.mem.Allocator) void {

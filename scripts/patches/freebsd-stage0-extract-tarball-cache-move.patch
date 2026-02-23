@@ -1,7 +1,7 @@
-diff --git src/install/extract_tarball.zig src/install/extract_tarball.zig
+diff --git a/src/install/extract_tarball.zig b/src/install/extract_tarball.zig
 index da159b0d56..da64b12959 100644
---- src/install/extract_tarball.zig
-+++ src/install/extract_tarball.zig
+--- a/src/install/extract_tarball.zig
++++ b/src/install/extract_tarball.zig
 @@ -21,6 +21,41 @@ const w = std.os.windows;
  
  const ExtractTarball = @This();
