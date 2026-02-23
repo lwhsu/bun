@@ -1,0 +1,113 @@
+diff --git src/install/extract_tarball.zig src/install/extract_tarball.zig
+index da159b0d56..da64b12959 100644
+--- src/install/extract_tarball.zig
++++ src/install/extract_tarball.zig
+@@ -21,6 +21,41 @@ const w = std.os.windows;
+ 
+ const ExtractTarball = @This();
+ 
++fn moveDirTreeSlowMaybe(from_parent: std.fs.Dir, from_rel_z: [:0]const u8, to_parent: std.fs.Dir, to_rel_z: [:0]const u8) !void {
++    const from_rel = bun.span(from_rel_z);
++    const to_rel = bun.span(to_rel_z);
++
++    // FreeBSD stage0 bootstrap fallback: package cache entries are directories.
++    // `moveFileZSlowMaybe()` is file-only and fails with EISDIR for package trees.
++    // Copy the directory tree and then delete the source directory.
++    try to_parent.makePath(to_rel);
++
++    var src_dir = try from_parent.openDir(from_rel, .{ .iterate = true });
++    defer src_dir.close();
++
++    var dst_dir = try to_parent.openDir(to_rel, .{});
++    defer dst_dir.close();
++
++    var walker = try src_dir.walk(default_allocator);
++    defer walker.deinit();
++
++    var link_buf: [bun.MAX_PATH_BYTES]u8 = undefined;
++
++    while (try walker.next()) |entry| {
++        switch (entry.kind) {
++            .directory => try dst_dir.makePath(bun.span(entry.path)),
++            .file => try src_dir.copyFile(bun.span(entry.path), dst_dir, bun.span(entry.path), .{}),
++            .sym_link => {
++                const target = try entry.dir.readLink(bun.span(entry.basename), &link_buf);
++                try dst_dir.symLink(target, bun.span(entry.path), .{});
++            },
++            else => {},
++        }
++    }
++
++    try from_parent.deleteTree(from_rel);
++}
++
+ name: strings.StringOrTinyString,
+ resolution: Resolution,
+ cache_dir: std.fs.Dir,
+@@ -443,7 +478,23 @@ fn extract(this: *const ExtractTarball, tgz_bytes: []const u8) !Install.ExtractD
+             }
+         }
+ 
+-        if (bun.sys.renameatConcurrently(
++        if (Environment.isFreeBSD) {
++            // Bootstrap-only FreeBSD stage0 workaround: `renameatConcurrently()` can report success
++            // here but the destination cache dir is not actually materialized for later verification.
++            // Use a simpler direct rename path and fall back to slow move on any rename error.
++            if (bun.sys.renameat(bun.toFD(tmpdir.fd), src, bun.toFD(cache_dir.fd), folder_name).asErr()) |rename_err| {
++                moveDirTreeSlowMaybe(tmpdir, src, cache_dir, folder_name) catch |move_err| {
++                    this.package_manager.log.addErrorFmt(
++                        null,
++                        logger.Loc.Empty,
++                        this.package_manager.allocator,
++                        "moving \"{s}\" to cache dir failed: {}\n  rename err: {}\n  From: {s}\n    To: {s}",
++                        .{ name, move_err, rename_err, tmpname, folder_name },
++                    ) catch unreachable;
++                    return error.InstallFailed;
++                };
++            }
++        } else if (bun.sys.renameatConcurrently(
+             bun.toFD(tmpdir.fd),
+             src,
+             bun.toFD(cache_dir.fd),
+@@ -463,15 +514,32 @@ fn extract(this: *const ExtractTarball, tgz_bytes: []const u8) !Install.ExtractD
+ 
+     // We return a resolved absolute absolute file path to the cache dir.
+     // To get that directory, we open the directory again.
+-    var final_dir = bun.openDir(cache_dir, folder_name) catch |err| {
+-        this.package_manager.log.addErrorFmt(
+-            null,
+-            logger.Loc.Empty,
+-            this.package_manager.allocator,
+-            "failed to verify cache dir for \"{s}\": {s}",
+-            .{ name, @errorName(err) },
+-        ) catch unreachable;
+-        return error.InstallFailed;
++    var final_dir = open_final_cache_dir: {
++        if (Environment.isFreeBSD) {
++            // FreeBSD legacy stage0 can observe a short ENOENT window here right after the
++            // rename/move-fallback path completes. Retry briefly so cache verification does
++            // not fail spuriously during bootstrap installs.
++            var retry: usize = 0;
++            while (retry < 100) : (retry += 1) {
++                if (bun.openDir(cache_dir, folder_name)) |dir| {
++                    break :open_final_cache_dir dir;
++                } else |err| {
++                    if (err != error.ENOENT) break;
++                }
++                std.time.sleep(10 * std.time.ns_per_ms);
++            }
++        }
++
++        break :open_final_cache_dir bun.openDir(cache_dir, folder_name) catch |err| {
++            this.package_manager.log.addErrorFmt(
++                null,
++                logger.Loc.Empty,
++                this.package_manager.allocator,
++                "failed to verify cache dir for \"{s}\": {s}\n  folder_name: {s}\n  tmpname: {s}",
++                .{ name, @errorName(err), folder_name, tmpname },
++            ) catch unreachable;
++            return error.InstallFailed;
++        };
+     };
+     defer final_dir.close();
+     // and get the fd path

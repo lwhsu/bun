@@ -454,6 +454,17 @@ patch_legacy_worktree_for_freebsd() {
     apply_patch_if_needed "${bundler_parse_recover_patch}" "FreeBSD legacy bundler parse cache-recover patch"
   fi
 
+  local extract_tarball_file="${LEGACY_WORKTREE}/src/install/extract_tarball.zig"
+  local extract_tarball_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-extract-tarball-cache-move.patch"
+  if [[ -f "${extract_tarball_file}" ]] \
+    && ! grep -q 'moveDirTreeSlowMaybe' "${extract_tarball_file}"; then
+    if [[ ! -f "${extract_tarball_patch}" ]]; then
+      echo "error: missing patch file: ${extract_tarball_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${extract_tarball_patch}" "FreeBSD legacy extract_tarball cache move fallback patch"
+  fi
+
 }
 
 generate_legacy_codegen_files() {

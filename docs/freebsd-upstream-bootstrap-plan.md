@@ -160,12 +160,16 @@ Behavior:
 
 1. Current-tree CMake configure receives:
    - `-DBUN_EXECUTABLE=${BUN_FREEBSD_BOOTSTRAP_DIR}/stage0/bun`
-2. Current-tree configure/build currently forces FreeBSD Node fallbacks in bootstrap script:
-   - `BUN_FREEBSD_BINDGENV2_NODE=1`
-   - `BUN_FREEBSD_GENERATE_CLASSES_NODE=1`
-   - `BUN_FREEBSD_CODEGEN_NODE=1`
-   - `BUN_FREEBSD_NPM_INSTALL=1`
-3. Final binary is then built in `${BUN_FREEBSD_BUILD_DIR}`.
+2. Current-tree configure/build fallback behavior is controlled by env toggles in `scripts/bootstrap-freebsd.sh`:
+   - `BUN_FREEBSD_BINDGENV2_NODE`
+   - `BUN_FREEBSD_GENERATE_CLASSES_NODE`
+   - `BUN_FREEBSD_CODEGEN_NODE`
+   - `BUN_FREEBSD_NPM_INSTALL`
+3. Phase C-strict (`rerun26`) confirmed full no-fallback bootstrap works with:
+   - `BUN_FREEBSD_BINDGENV2_NODE=0`
+   - `BUN_FREEBSD_CODEGEN_NODE=0`
+   - `BUN_FREEBSD_NPM_INSTALL=0`
+4. Final binary is then built in `${BUN_FREEBSD_BUILD_DIR}`.
 
 ## 3. Full Roadmap
 
@@ -672,9 +676,11 @@ Exit criteria:
 
 ## 4. Immediate Next Steps (Execution Order)
 
-1. Resolve remaining out-of-workspace detached legacy worktrees in `/home/lwhsu/tmp` (Phase B closure).
-2. Expand/record the Phase E gate beyond current passing slices (process/fs/watch/spawn coverage continues to improve; use controlled invocation to avoid repo `.env` contamination in compatibility checks).
-3. Start Phase F patch-stack split (build/bootstrap/runtime/docs series), with the `rmdir` errno shim isolated for later replacement.
+1. Close replayability gaps in the Phase C path (export legacy-worktree fixes into `scripts/patches/` and verify rebuild from patchset).
+2. Refresh and freeze a Phase E gate on the `b4099d80af` strict-bootstrap checkpoint (re-run key slices, record outcomes).
+3. Finish high-priority Pre-Upstream Cleanup Queue items (workaround classification, stale doc cleanup, release-build test exposure classification).
+4. Continue Phase D cleanup of temporary compatibility shims (label keep/replace/bootstrap-only).
+5. Start Phase F patch-stack split only after D/E gate and cleanup queue are stable.
 
 ### Phase E progress update (2026-02-22, TLS)
 
