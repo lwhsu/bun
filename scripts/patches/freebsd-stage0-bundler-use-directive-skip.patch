@@ -1,0 +1,21 @@
+diff --git a/src/bundler/bundle_v2.zig b/src/bundler/bundle_v2.zig
+index 2100272bfe..209b0199b9 100644
+--- a/src/bundler/bundle_v2.zig
++++ b/src/bundler/bundle_v2.zig
+@@ -2880,7 +2880,15 @@ pub const ParseTask = struct {
+         const is_empty = entry.contents.len == 0 or (entry.contents.len < 33 and strings.trim(entry.contents, " \n\r").len == 0);
+ 
+         const use_directive = if (!is_empty and bundler.options.react_server_components)
+-            UseDirective.parse(entry.contents)
++            blk: {
++                if (comptime Environment.isFreeBSD) {
++                    // Bootstrap-only workaround: legacy FreeBSD stage0 parser worker can crash in
++                    // UseDirective parsing on malformed cached contents. RSC directives are not
++                    // needed for the stage0 codegen scripts we bundle during bootstrap.
++                    break :blk @as(@TypeOf(UseDirective.parse(entry.contents)), .none);
++                }
++                break :blk UseDirective.parse(entry.contents);
++            }
+         else
+             .none;
+ 

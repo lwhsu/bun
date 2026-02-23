@@ -1,0 +1,30 @@
+diff --git a/src/fs.zig b/src/fs.zig
+index 2092ddf24b..00a68daa06 100644
+--- a/src/fs.zig
++++ b/src/fs.zig
+@@ -1514,6 +1514,25 @@ pub const PathName = struct {
+             return Fs.PathName.init(self.dir).base;
+         }
+ 
++        if (comptime Environment.isFreeBSD) {
++            // Bootstrap-only workaround: legacy FreeBSD stage0 can occasionally leak malformed
++            // basename fragments (including path separators or content snippets). Keep symbol-name
++            // generation alive by truncating to a conservative identifier seed.
++            if (strings.includes(self.base, "/")) {
++                var end: usize = 0;
++                while (end < self.base.len and self.base[end] != '/' and self.base[end] != '\n' and self.base[end] != '\r') : (end += 1) {}
++                if (end > 0) return self.base[0..end];
++                return "unknown";
++            }
++            var i: usize = 0;
++            while (i < self.base.len) : (i += 1) {
++                if (self.base[i] == '\n' or self.base[i] == '\r') {
++                    if (i > 0) return self.base[0..i];
++                    return "unknown";
++                }
++            }
++        }
++
+         if (comptime Environment.allow_assert) {
+             bun.assert(!strings.includes(self.base, "/"));
+         }

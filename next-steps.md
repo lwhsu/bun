@@ -38,6 +38,14 @@ Current note:
    stage0 codegen (`bake-codegen.ts` crash, `bundle-modules.ts` preprocess corruption).
 5. Next action: carry the later strict-stage0 codegen workarounds into the replay path/current checkpoint,
    then rerun fresh replay validation to confirm full strict bootstrap completes end-to-end.
+6. Replay debugging update:
+   - the apparent legacy `zig build-obj` "hang" was a false positive when watching the parent `zig build obj`
+     process; monitor the child `zig build-obj ... --listen=-` process instead.
+   - current replay blocker remains legacy stage0 `bundle-modules.ts` batch-0 crash (`bun/ffi.ts`,
+     `panic: Segmentation fault at address 0x1C0`).
+7. Immediate next action (replay path):
+   - continue lldb-guided patching of legacy `src/bundler/bundle_v2.zig` (`ParseTask.callback` / `run_`)
+     until the batch-0 `bun/ffi.ts` repro passes, then rerun fresh strict replay validation end-to-end.
 
 ### 2. Phase E Gate (formalize and rerun)
 

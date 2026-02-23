@@ -4091,3 +4091,46 @@ Actions performed:
   enough to validate the replay patchset wiring and the exported legacy install fix.
 - Next replay attempt should not be a blind rerun. It should first include the later strict-stage0 codegen
   workarounds already developed in the current tree (`bundle-modules.ts`, `bake-codegen.ts`, etc.).
+
+## 2026-02-24: Replay debugging update - legacy stage0 `bundle-modules.ts` batch-0 crash still present
+
+### What was done
+
+1. Continued fresh replay blocker isolation on legacy stage0 `bundle-modules.ts` (`batchIndex: 0`, `bun/ffi.ts`).
+2. Installed debug-symbol Zig 0.13 package (`/home/lwhsu/killme/zig-0.13.0-dbg.pkg`) to diagnose an apparent
+   `zig build-obj` "hang".
+3. Attached `lldb` to the parent `zig build obj` process and captured a symbolized backtrace.
+4. Traced the actual child-process chain during legacy `build-obj-safe`:
+   - parent `zig build obj` waits in `process.Child.spawnAndWait()`
+   - cache helper binary (`.../legacy-zig-cache/.../build`) waits on child
+   - actual compiler child `zig build-obj ... --listen=-` remains CPU-bound (`~99%`)
+5. Rebuilt legacy stage0 successfully after correcting the monitoring interpretation, then relinked and reran:
+   - `build/freebsd-bootstrap/stage0/bun --no-install run ./src/codegen/bundle-modules.ts --debug=OFF build/release`
+
+### Findings
+
+1. The repeated "Zig deadlock" diagnosis was incorrect for this case:
+   - the *parent* `zig build obj` process was idle because it was waiting on a child compiler process
+   - the actual child compiler (`zig build-obj ...`) was still running normally
+2. Symbolized `lldb` evidence (debug Zig):
+   - parent stack in `main.cmdBuild()` -> `process.Child.spawnAndWait()` -> `process.Child.wait()`
+   - confirms this was a wait-on-child state, not a compiler thread-pool deadlock
+3. After successful rebuild + relink, the stage0 repro still crashes at the same strict pregen point:
+   - `bundle-modules.ts`
+   - `batchIndex: 0`
+   - `entrypoint0: build/release/tmp_modules/bun/ffi.ts`
+   - `panic: Segmentation fault at address 0x1C0`
+
+### Experiments attempted (not yet successful)
+
+1. Reduced the local legacy `bundle_v2.zig` experiment back to the replay patch baseline
+   (`parse-recover` + `UseDirective` workaround), then added a minimal bootstrap-only hashbang target bypass.
+2. Result:
+   - legacy `build-obj-safe` still compiles successfully
+   - stage0 batch-0 repro still crashes at `0x1C0`
+
+### Status
+
+- Replay validation remains blocked on legacy stage0 parser crash in `bundle-modules.ts` batch 0.
+- The compiler-build monitoring issue is now understood and should not be treated as a hang unless the *child*
+  `zig build-obj` process becomes idle/stuck.

@@ -455,6 +455,27 @@ patch_legacy_worktree_for_freebsd() {
     apply_patch_if_needed "${bundler_parse_recover_patch}" "FreeBSD legacy bundler parse cache-recover patch"
   fi
 
+  local bundler_use_directive_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-bundler-use-directive-skip.patch"
+  if [[ -f "${bundler_parse_file}" ]] \
+    && ! grep -q 'UseDirective parsing on malformed cached contents' "${bundler_parse_file}"; then
+    if [[ ! -f "${bundler_use_directive_patch}" ]]; then
+      echo "error: missing patch file: ${bundler_use_directive_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${bundler_use_directive_patch}" "FreeBSD legacy bundler UseDirective skip patch"
+  fi
+
+  local fs_file="${LEGACY_WORKTREE}/src/fs.zig"
+  local fs_pathname_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-fs-pathname-sanitize.patch"
+  if [[ -f "${fs_file}" ]] \
+    && ! grep -q 'basename fragments (including path separators or content snippets)' "${fs_file}"; then
+    if [[ ! -f "${fs_pathname_patch}" ]]; then
+      echo "error: missing patch file: ${fs_pathname_patch}" >&2
+      exit 1
+    fi
+    apply_patch_if_needed "${fs_pathname_patch}" "FreeBSD legacy fs PathName sanitize patch"
+  fi
+
   local extract_tarball_file="${LEGACY_WORKTREE}/src/install/extract_tarball.zig"
   local extract_tarball_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-extract-tarball-cache-move.patch"
   if [[ -f "${extract_tarball_file}" ]] \
