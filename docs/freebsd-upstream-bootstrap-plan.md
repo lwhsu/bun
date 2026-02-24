@@ -514,6 +514,10 @@ Additional Phase E expansion progress (current branch):
 - `test/js/node/url` passes (`186 pass / 2 skip / 9 todo / 0 fail`)
 - `test/js/node/crypto` passes (`789 pass / 22 skip / 1 todo / 0 fail`)
 - `test/js/node/child_process` broader directory run is mostly green with invocation hygiene (avoid repo-root `.env`, set `PATH`), with remaining issues classified separately.
+- Initial package-manager/install slice checks pass:
+  - `lockfile-only.test.ts`
+  - `bun-install-pathname-trailing-slash.test.ts`
+- `bun-workspaces.test.ts` is locally blocked by missing `verdaccio` test dependency (environment setup), not yet classified as a FreeBSD runtime issue.
      - set `SHELL=/bin/sh` for clean-env runs
    - Notes:
      - earlier `spawn(..., { env })` failure was caused by Bun loading the repo `.env` (cwd-dependent), not by FreeBSD child_process runtime behavior.

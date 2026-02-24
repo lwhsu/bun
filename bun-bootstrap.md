@@ -4429,3 +4429,14 @@ Fresh strict replay validation completes end-to-end:
 - Net effect:
   - Phase E expansion coverage increased substantially after the core gate without introducing new
     actionable FreeBSD runtime regressions in these two Node compatibility areas.
+
+### Phase E expansion: package-manager/install slices (initial)
+
+- `test/cli/install/lockfile-only.test.ts`:
+  - `2 pass / 0 fail`
+- `test/cli/install/bun-install-pathname-trailing-slash.test.ts`:
+  - `1 pass / 0 fail`
+- `test/cli/install/bun-workspaces.test.ts`:
+  - blocked in local test environment by missing dependency:
+    - `Cannot find module 'verdaccio/bin/verdaccio' from '/home/lwhsu/killme/bun/test/harness.ts'`
+  - classified as test-environment dependency gap, not a confirmed FreeBSD runtime failure.

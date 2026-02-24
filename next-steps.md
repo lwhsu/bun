@@ -115,6 +115,8 @@ Priority areas:
      - `test/js/node/crypto/*` (`789 pass / 22 skip / 1 todo / 0 fail`)
    - Next target slices:
      - selected package-manager/install flows on FreeBSD (`bun install`, workspace edge cases)
+       - initial slices green: `lockfile-only`, `bun-install-pathname-trailing-slash`
+       - `bun-workspaces` currently blocked by missing local `verdaccio` test dependency
      - additional Node slices with runtime/process/file-system interaction (e.g. more `child_process` cases run outside repo root)
 
 3. Re-run / freeze Phase E core gate summary after watcher fix
