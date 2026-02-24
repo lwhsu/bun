@@ -517,7 +517,10 @@ Additional Phase E expansion progress (current branch):
 - Initial package-manager/install slice checks pass:
   - `lockfile-only.test.ts`
   - `bun-install-pathname-trailing-slash.test.ts`
+- Additional local install/link coverage passes:
+  - `bun-link.test.ts`
 - `bun-workspaces.test.ts` is locally blocked by missing `verdaccio` test dependency (environment setup), not yet classified as a FreeBSD runtime issue.
+- `isolated-install.test.ts` and `bun-lock.test.ts` are also locally blocked by the same missing `verdaccio` dependency.
      - set `SHELL=/bin/sh` for clean-env runs
    - Notes:
      - earlier `spawn(..., { env })` failure was caused by Bun loading the repo `.env` (cwd-dependent), not by FreeBSD child_process runtime behavior.

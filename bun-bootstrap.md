@@ -4440,3 +4440,12 @@ Fresh strict replay validation completes end-to-end:
   - blocked in local test environment by missing dependency:
     - `Cannot find module 'verdaccio/bin/verdaccio' from '/home/lwhsu/killme/bun/test/harness.ts'`
   - classified as test-environment dependency gap, not a confirmed FreeBSD runtime failure.
+- Additional local/self-contained install coverage:
+  - `test/cli/install/bun-link.test.ts` => `4 pass / 0 fail`
+- Additional install files currently blocked by the same local `verdaccio` dependency gap:
+  - `test/cli/install/isolated-install.test.ts`
+  - `test/cli/install/bun-lock.test.ts`
+
+- Current package-manager slice takeaway:
+  - FreeBSD runtime is behaving well on self-contained install/link/lockfile-path tests.
+  - Broader install/workspace coverage needs the local `verdaccio` test dependency available to continue.

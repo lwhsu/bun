@@ -116,7 +116,8 @@ Priority areas:
    - Next target slices:
      - selected package-manager/install flows on FreeBSD (`bun install`, workspace edge cases)
        - initial slices green: `lockfile-only`, `bun-install-pathname-trailing-slash`
-       - `bun-workspaces` currently blocked by missing local `verdaccio` test dependency
+       - `bun-link` also green
+       - `bun-workspaces`, `isolated-install`, `bun-lock` currently blocked by missing local `verdaccio` test dependency
      - additional Node slices with runtime/process/file-system interaction (e.g. more `child_process` cases run outside repo root)
 
 3. Re-run / freeze Phase E core gate summary after watcher fix
