@@ -4134,3 +4134,41 @@ Actions performed:
 - Replay validation remains blocked on legacy stage0 parser crash in `bundle-modules.ts` batch 0.
 - The compiler-build monitoring issue is now understood and should not be treated as a hang unless the *child*
   `zig build-obj` process becomes idle/stuck.
+
+## 2026-02-24: Replay debugging progress - `bun/ffi.ts` batch-0 crash removed, next blocker reached
+
+### What was done
+
+1. Continued replay-path debugging in legacy `build/freebsd-bootstrap/legacy-worktree/src/bundler/bundle_v2.zig`.
+2. Added bootstrap-only FreeBSD legacy stage0 chunk-path sanitization at the chunk disk-write boundary.
+3. Iterated sanitization to remove embedded newline/whitespace fragments in corrupted chunk names.
+4. Added a FreeBSD legacy stage0 fallback path (under validation) for chunk writes when
+   `NodeFS.writeFileWithPathBuffer(...)` returns `ENOENT`.
+
+### Findings
+
+1. The original batch-0 (`bun/ffi.ts`) failure signature changed step-by-step:
+   - `writing chunk "bun/\\n\\nvar .js"`
+   - `writing chunk "bun/var .js"`
+   - `writing chunk "bun/var.js"`
+   - `writing chunk "var.js"`
+2. This proves the failure moved past the earlier parser/lexer crashes and into a narrower chunk-output naming
+   / write-path issue in legacy stage0.
+3. Fresh replay stage0 `bundle-modules.ts` now progresses far beyond `batchIndex: 0`:
+   - confirmed through `batchIndex: 46`
+   - then hangs at `batchIndex: 47` on the known alias path:
+     `internal/streams/end-of-stream.ts` -> alias `eos.ts`
+
+### Current blocker
+
+- Fresh replay stage0 `bundle-modules.ts` no-fallback run now stalls at:
+  - `batchIndex: 47`
+  - `entrypoint-alias: internal/streams/end-of-stream.ts` (`eos.ts`)
+- This is a major improvement over the prior deterministic batch-0 (`bun/ffi.ts`) crash/failure blocker.
+
+### Notes
+
+1. Several rebuild/relink/repro loops initially retested stale binaries because new legacy fallback patches hit
+   Zig 0.13 compile issues (`pointless discard`, `Dir.chmod` signature mismatch). These were corrected.
+2. Replay debugging should now shift from batch-0 parser/chunk corruption to the batch-47 alias-stage hang path,
+   while preserving the `bun/ffi.ts` progress in the replay patchset.

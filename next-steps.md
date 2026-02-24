@@ -43,9 +43,13 @@ Current note:
      process; monitor the child `zig build-obj ... --listen=-` process instead.
    - current replay blocker remains legacy stage0 `bundle-modules.ts` batch-0 crash (`bun/ffi.ts`,
      `panic: Segmentation fault at address 0x1C0`).
-7. Immediate next action (replay path):
-   - continue lldb-guided patching of legacy `src/bundler/bundle_v2.zig` (`ParseTask.callback` / `run_`)
-     until the batch-0 `bun/ffi.ts` repro passes, then rerun fresh strict replay validation end-to-end.
+7. Immediate replay milestone reached:
+   - `bun/ffi.ts` batch-0 blocker is no longer the first failure in fresh replay stage0 `bundle-modules.ts`
+     (repro now progresses through batch 46).
+8. Immediate next action (replay path):
+   - debug/fix the next replay stage0 `bundle-modules.ts` hang at `batchIndex: 47`
+     (`internal/streams/end-of-stream.ts` alias `eos.ts`)
+   - after that reproducer advances, rerun fresh strict replay validation end-to-end.
 
 ### 2. Phase E Gate (formalize and rerun)
 
