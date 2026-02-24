@@ -178,8 +178,8 @@ Priority areas:
    - validated with TextDecoder repros + `process-stdio.test.ts` + `process-stdin.test.ts`
 2. Keep Phase E core gate as regression floor while touching D-classified areas
 3. Execute next P0/P1 cleanup target after P0-1
-   - `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier (attempted once; still required before
-     `FileSink` cleanup)
+   - `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier (attempted twice, including after `FileSink`
+     cleanup; still required)
    - `src/bun.js/webcore/FileSink.zig` FreeBSD completion-order branch (cleanup completed; targeted tests green)
-   - next retry: `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier on top of current `FileSink` change
-   - then: `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround
+   - next: `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround
+   - later retry: `src/js/internal/streams/readable.ts` flush-barrier after additional child-side stdio pipeline fixes

@@ -831,6 +831,39 @@ Conclusion:
    - `src/js/internal/streams/readable.ts` flush-barrier (`dest.end()`)
    - with the same targeted regression floor and focused chunked relay repro.
 
+#### P0-2 Cleanup Retry (after `FileSink` cleanup): flush-barrier still required
+
+Status: **Retried after `FileSink` cleanup; workaround still required (kept)**.
+
+What was tested:
+
+1. Removed the FreeBSD `useFreeBSDStdioFlushBarrier` branch in `src/js/internal/streams/readable.ts` again, this time
+   after the `FileSink` completion-order defer branch had already been removed.
+2. Rebuilt and reran:
+   - focused 16x64KB stdin->stdout relay repro
+   - `test/js/node/process/process-stdio.test.ts`
+   - `test/js/node/process/process-stdin.test.ts`
+   - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
+
+Results:
+
+1. Focused relay repro passed (`COUNT=1048576`)
+2. `process-stdio.test.ts` passed
+3. `process-stdin.test.ts` passed
+4. `spawn-stdin-readable-stream.test.ts` regressed again:
+   - `ReadableStream with large data` timeout/failure
+   - `ReadableStream with very large chunked data` truncation
+   - observed truncation example: `983040 / 1048576`
+
+Conclusion:
+
+1. Removing the `FileSink` FreeBSD completion-order defer branch was a valid cleanup, but it is not sufficient to
+   eliminate the higher-level stdin->stdio flush-barrier workaround.
+2. The `Readable.prototype.pipe()` FreeBSD stdio flush-barrier remains required on the current branch and has been
+   restored.
+3. The remaining race is further narrowed to behavior above/beyond the removed `FileSink` defer branch; future cleanup
+   work should target the child-side stdio pipeline/exit ordering more directly.
+
 How to reproduce:
 
 ```bash

@@ -4743,3 +4743,27 @@ Fresh strict replay validation completes end-to-end:
 - Next step:
   - reattempt removal of the higher-level `Readable.prototype.pipe()` stdin->stdio flush-barrier (`dest.end()`)
     with the same targeted regression floor and focused chunked relay repro.
+
+### Phase D P0-2 cleanup retry (after `FileSink` cleanup): flush-barrier still required
+
+- Retried removing the FreeBSD `useFreeBSDStdioFlushBarrier` branch in `src/js/internal/streams/readable.ts` after the
+  `FileSink` completion-order defer branch had been removed and validated.
+- Rebuilt (`BUN_FREEBSD_CODEGEN_NODE=1` path) and reran:
+  - focused 16x64KB stdin->stdout relay repro
+  - `test/js/node/process/process-stdio.test.ts`
+  - `test/js/node/process/process-stdin.test.ts`
+  - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
+- Results:
+  - focused relay repro passed: `COUNT=1048576`
+  - `process-stdio.test.ts` passed
+  - `process-stdin.test.ts` passed
+  - `spawn-stdin-readable-stream.test.ts` regressed again:
+    - `ReadableStream with large data` failed/timed out
+    - `ReadableStream with very large chunked data` failed
+    - observed truncation: `983040 / 1048576`
+- Restored the `Readable.prototype.pipe()` FreeBSD stdio flush-barrier workaround and rebuilt.
+- Revalidated after restore:
+  - `./build/release/bun test test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail`
+- Conclusion:
+  - removing the `FileSink` FreeBSD completion-order defer branch was a valid cleanup, but it is not sufficient to
+    remove the higher-level `Readable.prototype.pipe()` flush-barrier workaround yet.
