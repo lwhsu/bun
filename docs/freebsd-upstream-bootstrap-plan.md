@@ -737,6 +737,46 @@ Recommended next cleanup target (current branch evidence):
 1. `src/bun.js/webcore/encoding.zig` + `src/js/builtins/ReadableStream.ts` pair (investigate together)
    - Reason: both relate to the same Unicode/text-decoding symptom cluster and may share root cause.
 
+#### P0-1 Progress Update: TextDecoder / `ReadableStream.text()` Unicode corruption
+
+Status: **Resolved on current branch (native fix landed; JS fallback removed)**.
+
+What was fixed:
+
+1. Root cause was not the `ReadableStream` JS path itself and not the `encoding.zig` ownership workaround.
+2. The actual bug was in `src/string/immutable/unicode.zig`:
+   - `toUTF16AllocMaybeBuffered(...)` initialized its scan loop with `non_ascii = 0`
+   - when a UTF-8 string started with ASCII and later contained non-ASCII, the decoder incorrectly treated byte 0 as a non-ASCII sequence
+   - result: first character became `U+FFFD` while the rest decoded correctly
+3. Fix:
+   - initialize the scan loop with `strings.firstNonASCII(remaining)` instead of `0`
+
+Why this matches the observed symptom:
+
+1. ASCII-only strings were unaffected (`toUTF16AllocMaybeBuffered` returned `null` early).
+2. Strings starting with a non-ASCII code point decoded correctly.
+3. Strings starting with ASCII but containing later UTF-8 multibyte sequences were corrupted at the first character.
+
+Cleanup result:
+
+1. Removed the FreeBSD-specific `ReadableStream.text()` JS fallback in `src/js/builtins/ReadableStream.ts`
+   - no more `Buffer.from(bytes).toString()` workaround in the builtin path
+
+Validation performed:
+
+1. Plain TextDecoder repros (literal `Uint8Array`) now decode correctly for mixed ASCII+UTF-8 cases.
+2. Subprocess stdout repro now decodes correctly via:
+   - `new TextDecoder().decode(bytes)`
+   - `await p.stdout.text()`
+3. Tests:
+   - `test/js/node/process/process-stdio.test.ts` => pass
+   - `test/js/node/process/process-stdin.test.ts` => pass
+
+Impact on prioritization:
+
+1. `src/js/builtins/ReadableStream.ts` FreeBSD decode fallback can be removed from the active P0 queue (done on branch).
+2. `src/bun.js/webcore/encoding.zig` remains a tracked temporary shim (`Pass 5`) but is no longer the primary suspected cause of this TextDecoder bug.
+
 How to reproduce:
 
 ```bash

@@ -1251,7 +1251,7 @@ pub fn toUTF16AllocMaybeBuffered(
     const start = if (output.items.len > 0) first_non_ascii else 0;
     var remaining = bytes[start..];
 
-    var non_ascii: ?u32 = 0;
+    var non_ascii: ?u32 = strings.firstNonASCII(remaining);
     while (non_ascii) |i| : (non_ascii = strings.firstNonASCII(remaining)) {
         {
             const end = output.items.len;

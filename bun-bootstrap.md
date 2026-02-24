@@ -4677,3 +4677,32 @@ Fresh strict replay validation completes end-to-end:
 - Updated `next-steps.md` to start executing the first prioritized cleanup target:
   - investigate `src/bun.js/webcore/encoding.zig` + `src/js/builtins/ReadableStream.ts` together under the existing
     process-stdio Unicode repros and Phase E core-gate regression floor.
+
+### Phase D P0-1 completed: root-cause fix for TextDecoder first-byte corruption + remove `ReadableStream.text()` fallback
+
+- Reproduced the FreeBSD Unicode corruption more narrowly and found the pattern:
+  - `TextDecoder.decode()` corrupted the first byte **only** when a string began with ASCII and later contained a
+    multi-byte UTF-8 sequence (e.g. `"A😀B"` -> `"�😀B"`).
+  - ASCII-only strings and strings starting with non-ASCII decoded correctly.
+- This disproved the earlier `ReadableStream`-specific hypothesis and pointed to the UTF-8 decoder implementation.
+- Root cause found in `src/string/immutable/unicode.zig`:
+  - `toUTF16AllocMaybeBuffered(...)` initialized the non-ASCII scan loop with `0` instead of
+    `strings.firstNonASCII(remaining)`.
+  - On FreeBSD (`use_simdutf = false`), this caused the decoder to treat the first ASCII byte as a non-ASCII sequence
+    whenever a later non-ASCII byte existed, producing `U+FFFD` at position 0.
+- Fix applied:
+  - initialize `non_ascii` with `strings.firstNonASCII(remaining)`
+- Cleanup completed on top of the fix:
+  - removed the FreeBSD `ReadableStream.text()` JS fallback (`Buffer.from(bytes).toString()`) from
+    `src/js/builtins/ReadableStream.ts`
+- Validation after rebuild:
+  - plain `TextDecoder` repros (`Get Emoji 😀`, `A😀B`, `AB😀`) decode correctly
+  - subprocess stdout repro:
+    - `new TextDecoder().decode(bytes)` correct
+    - `await p.stdout.text()` correct (without JS fallback)
+  - tests:
+    - `test/js/node/process/process-stdio.test.ts` => pass
+    - `test/js/node/process/process-stdin.test.ts` => pass
+- Notes:
+  - I briefly tested two speculative fixes in `encoding.zig` and `TextDecoder.zig`, confirmed they were no-ops for this
+    bug, and reverted them before landing the real fix in `unicode.zig`.

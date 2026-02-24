@@ -172,12 +172,12 @@ Priority areas:
 
 ### Phase D immediate focus (updated)
 
-1. Execute Phase D cleanup priority P0-1
-   - investigate `src/bun.js/webcore/encoding.zig` and `src/js/builtins/ReadableStream.ts` together
-   - test whether a root-cause fix in encoding removes/reduces the `ReadableStream.text()` Buffer fallback
-   - document exact repros and rollback criteria before changing behavior
+1. Phase D P0-1 completed (TextDecoder / `ReadableStream.text()` Unicode corruption)
+   - root cause fixed in `src/string/immutable/unicode.zig` (`toUTF16AllocMaybeBuffered` scan-loop init)
+   - removed FreeBSD `ReadableStream.text()` JS fallback in `src/js/builtins/ReadableStream.ts`
+   - validated with TextDecoder repros + `process-stdio.test.ts` + `process-stdin.test.ts`
 2. Keep Phase E core gate as regression floor while touching D-classified areas
-3. Queue next P0/P1 cleanup targets after P0-1 result
+3. Execute next P0/P1 cleanup target after P0-1
    - `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier
    - `src/bun.js/webcore/FileSink.zig` FreeBSD completion-order branch
    - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround

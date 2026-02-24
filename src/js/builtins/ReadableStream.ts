@@ -124,40 +124,9 @@ export function readableStreamToText(stream: ReadableStream): Promise<string> {
   // this is a direct stream
   var underlyingSource = $getByIdDirectPrivate(stream, "underlyingSource");
   if (underlyingSource !== undefined) {
-    if (process.platform === "freebsd") {
-      const bytesResult = stream.bytes();
-      const decode = bytes => Buffer.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).toString();
-      if ($isPromise(bytesResult)) return bytesResult.then(decode);
-      return Promise.$resolve(decode(bytesResult));
-    }
     return $readableStreamToTextDirect(stream, underlyingSource);
   }
   if ($isReadableStreamLocked(stream)) return Promise.$reject($ERR_INVALID_STATE_TypeError("ReadableStream is locked"));
-
-  // FreeBSD: native buffered fast-path "text" currently corrupts the first byte in some
-  // subprocess stream cases. The underlying bytes are correct, but TextDecoder-based
-  // decoding reproduces the corruption on these buffers. Decode via Buffer for now.
-  if (process.platform === "freebsd") {
-    const decodeBytes = bytes => Buffer.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).toString();
-    const bytesResult = stream.bytes();
-    const cleanup = () => {
-      stream.$reader = undefined;
-      $readableStreamCloseIfPossible(stream);
-    };
-    if ($isPromise(bytesResult)) {
-      return bytesResult
-        .then(bytes => {
-          cleanup();
-          return decodeBytes(bytes);
-        })
-        .catch(e => {
-          cleanup();
-          return Promise.$reject(e);
-        });
-    }
-    cleanup();
-    return Promise.$resolve(decodeBytes(bytesResult));
-  }
 
   const result = $tryUseReadableStreamBufferedFastPath(stream, "text");
 
