@@ -4800,3 +4800,18 @@ Fresh strict replay validation completes end-to-end:
   - JS `rmdir` normalization shim is no longer needed on the current branch
   - keep the lower-layer FreeBSD normalization in `src/bun.js/node/node_fs.zig` for now (comment there is stale and
     should be cleaned up later).
+
+### Phase D P1 cleanup progress: re-enabled `node_fs.zig` small-file `readFile` pre-stat fast path
+
+- Targeted the FreeBSD-specific disablement in `src/bun.js/node/node_fs.zig` that bypassed the small-file pre-stat
+  `readFile` fast path (commented as a Zig 0.13/FreeBSD release-build workaround).
+- Removed the FreeBSD-only early `break ""` so the pre-stat fast path runs again on FreeBSD.
+- Rebuilt (`BUN_FREEBSD_CODEGEN_NODE=1` path).
+- Validation:
+  - focused UTF-8 `readFileSync` stress probe (small file, 20,000 iterations) => `ok`
+    - no corruption
+    - no spurious `ENOMEM`
+  - `./build/release/bun test test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+- Conclusion:
+  - this FreeBSD fast-path disable workaround is no longer needed on the current baseline
+  - remaining FreeBSD `readFileWithOptions()` workaround branches should be tested one-by-one.

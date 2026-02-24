@@ -5105,14 +5105,7 @@ pub const NodeFS = struct {
         // If we manage to read the entire file, we don't need to call stat() at all.
         // This will make it slightly slower to read e.g. 512 KB files, but usually the OS won't return a full 512 KB in one read anyway.
         //
-        // FreeBSD: disable this fast-path for now. In release builds on FreeBSD, this
-        // branch can produce a corrupted temporary slice in readFileSync() for small
-        // text files, which surfaces as spurious ENOMEM from UTF-8 transcoding.
         const temporary_read_buffer_before_stat_call = brk: {
-            if (comptime Environment.isFreeBSD) {
-                break :brk "";
-            }
-
             const temporary_read_buffer = temporary_read_buffer: {
                 var temporary_read_buffer: []u8 = &async_stack_buffer;
 
