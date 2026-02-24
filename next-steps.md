@@ -111,7 +111,8 @@ Priority areas:
     - completed first detailed classification pass: `spawn/process/stdio internals`
     - completed second detailed classification pass: `filesystem/watcher/copy paths`
     - completed third detailed classification pass: `platform parity support (mostly keep)`
-    - next classification pass: `current-tree stage0/bootstrap codegen paths`
+    - completed fourth detailed classification pass: `current-tree stage0/bootstrap codegen paths`
+    - next classification pass: `lower-priority FreeBSD conditionals/support toggles`
      - add `owner/risk/replacement target` notes for each `temporary shim`
    - Priority shims to classify first:
      - `src/js/internal/streams/readable.ts` stdin->stdio `pipe()` workaround
@@ -170,10 +171,10 @@ Priority areas:
 
 ### Phase D immediate focus (updated)
 
-1. Complete detailed classification pass 4: `current-tree stage0/bootstrap codegen paths`
-   - classify file-level entries (`bootstrap-only` / `mixed` if any runtime effect)
-   - split strict-bootstrap orchestration from codegen-script runtime workarounds
-   - attach strict bootstrap / replay validation references
+1. Complete detailed classification pass 5: `lower-priority FreeBSD conditionals/support toggles`
+   - classify remaining queue files (`Global`, `feature_flags`, `bun.zig`, `napi`, allocators, bindings, encoding`)
+   - identify anything that should be promoted into a higher-risk runtime cluster
+   - finish the Phase D inventory queue coverage in the roadmap doc
 2. Add a small "pre-upstream cleanup queue (debug hooks)" subsection update
    - explicitly track `BUN_FREEBSD_SPAWN_TRACE`
    - explicitly track `BUN_FREEBSD_FILESINK_TRACE`

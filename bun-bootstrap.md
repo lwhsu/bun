@@ -4612,3 +4612,22 @@ Fresh strict replay validation completes end-to-end:
       kqueue user-event waker is implemented
     - `src/perf.zig`: correct FreeBSD disablement of Linux perf backend, but still a capability gap to track
 - Updated `next-steps.md` to move the next Phase D pass to `current-tree stage0/bootstrap codegen paths`.
+
+### Phase D pass 4 completed: current-tree stage0/bootstrap codegen classification
+
+- Completed the fourth detailed Phase D classification pass in `docs/freebsd-upstream-bootstrap-plan.md` for the
+  `current-tree stage0/bootstrap codegen` cluster.
+- Classified and documented:
+  - `scripts/bootstrap-freebsd.sh`
+  - `src/codegen/create-hash-table.ts`
+  - `src/codegen/bindgen.ts`
+  - `src/codegen/bundle-functions.ts`
+  - `src/codegen/bake-codegen.ts`
+  - `src/codegen/bundle-modules.ts`
+- Key outcome:
+  - this cluster is overwhelmingly `bootstrap-only`, which confirms it should stay isolated from runtime parity cleanup
+    and later upstream patch-stack splitting
+  - `src/codegen/bundle-modules.ts` is explicitly tracked as `mixed` because one postbuild normalization fix affects
+    generated runtime modules in normal (non-stage0) builds, while the rest of the FreeBSD changes are stage0-only
+  - `src/codegen/bake-codegen.ts` placeholder Bake artifact fallback remains a top pre-upstream cleanup item
+- Updated `next-steps.md` to move the next Phase D pass to `lower-priority FreeBSD conditionals/support toggles`.

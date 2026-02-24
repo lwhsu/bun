@@ -607,6 +607,41 @@ Pass 3 completion check:
 2. `mixed` entries identify the temporary sub-behaviors (`posix_event_loop` waker path, `perf` backend disabled state).
 3. Runtime-impacting entries include parity test references (`util`, `os`) or broader subsystem coverage references.
 
+### Phase D Detailed Pass 4: Current-Tree Stage0 / Bootstrap Codegen Paths
+
+Status: **Started (classification pass 4 completed for core files below)**.
+
+Goal of this pass:
+
+1. Explicitly separate strict-bootstrap survival logic from runtime/platform parity work.
+2. Identify any `mixed` codegen files where a FreeBSD change affects normal (non-stage0) generated outputs.
+3. Tie every bootstrap-only workaround to strict bootstrap / replay validation evidence.
+
+Detailed classification (current-tree):
+
+| File | FreeBSD-specific behavior | Classification | Why / replacement target | Repro / verify |
+|---|---|---|---|---|
+| `scripts/bootstrap-freebsd.sh` | FreeBSD bootstrap orchestration, legacy patch replay, strict no-fallback toggles, standalone pregen sequencing, strict-build serialization, replay controls | `bootstrap-only` | Bootstrap entrypoint and replay mechanism only. Not part of runtime semantics. Keep as local/bootstrap tooling until upstream split. | Strict no-fallback bootstrap (`BUN_FREEBSD_*_NODE=0`) and fresh replay validation logs in `bun-bootstrap.md` |
+| `src/codegen/create-hash-table.ts` | FreeBSD legacy stage0 process-I/O workarounds (temp files, shell redirection, exitCode polling) for Perl helper invocation | `bootstrap-only` | Compensates for legacy stage0 spawn/stdin/exit hangs. Should be removed once stage0 path is no longer required / legacy stage0 bugs are no longer in the bootstrap path. | Strict no-fallback codegen (`generate-jssink` / hash-table generation) logs and isolated repros in `bun-bootstrap.md` |
+| `src/codegen/bindgen.ts` | FreeBSD legacy stage0 bindgen recovery for unnamed `fn()` exports / missing `TypeImpl` metadata and alias shims in generated bindings | `bootstrap-only` | Legacy stage0 bindgen/module-loading compatibility path to keep strict bootstrap progressing. Does not represent desired steady-state bindgen behavior. | Strict no-fallback bootstrap and replay validation (`BUN_FREEBSD_BINDGENV2_NODE=0`) |
+| `src/codegen/bundle-functions.ts` | FreeBSD legacy stage0 tmp_functions entrypoint-corruption retries, aliasing, transpiler fallback, define compat for transpiler path | `bootstrap-only` | Tmp builtins bundling survival path for legacy stage0 instability/corruption. Intended to be retired with stage0 workaround reduction. | Strict bootstrap / replay codegen logs; `bundle-functions:done` milestones in `bun-bootstrap.md` |
+| `src/codegen/bake-codegen.ts` | FreeBSD legacy stage0 alias/retry/transpiler paths and bootstrap placeholder Bake artifact fallback; teardown `reallyExit` workaround | `bootstrap-only` | Explicitly bootstrap-only fallback for stage0 replay due Bake `Bun.build()` crashes on legacy stage0. Must be reduced/replaced before upstreaming. | Fresh strict replay validation (`phase-c-replay-rerun2.log`) and Phase C replay milestone in `bun-bootstrap.md` |
+| `src/codegen/bundle-modules.ts` | Large FreeBSD stage0 alias/retry/hardlink/remap/teardown and duplicate-invocation workarounds; strict stage0 tracing controls; stage0-only exit handling | `mixed` | `bootstrap-only`: the majority of FreeBSD stage0 alias/retry/teardown logic. `keep`/non-stage0 codegen behavior: FreeBSD self-host `forceCJSFormat` path and generic postbuild normalization fix that corrected malformed alias-shaped multi-line default export stubs (e.g. `internal:url`) in generated builtin modules. | Strict no-fallback bootstrap and replay logs; postbuild `internal:url` baseline rebuild verification; Phase E baseline rebuild notes in `bun-bootstrap.md` |
+
+Pass 4 notes / conclusions:
+
+1. This cluster is overwhelmingly `bootstrap-only`, which confirms it should stay isolated from runtime parity cleanup and Phase F upstream-splitting should keep these patches grouped.
+2. `src/codegen/bundle-modules.ts` is the only `mixed` file in this pass:
+   - most changes are stage0 bootstrap survival workarounds
+   - at least one fix (postbuild export-stub normalization) affected generated runtime modules in the normal build pipeline and should be reviewed separately from stage0-only logic
+3. `src/codegen/bake-codegen.ts` placeholder artifact fallback remains one of the highest-priority pre-upstream cleanup items even though Phase C replayability is now proven.
+
+Pass 4 completion check:
+
+1. All files listed in queue item 4 are now classified at a file level.
+2. The only `mixed` entry (`bundle-modules.ts`) is split into bootstrap-only vs non-stage0 codegen behavior.
+3. All entries include strict bootstrap / replay validation references.
+
 How to reproduce:
 
 ```bash
