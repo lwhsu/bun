@@ -5308,14 +5308,7 @@ pub const NodeFS = struct {
         // Success path below returns ownership of `buf.items` to the caller.
         // Mark success before constructing return values so defer does not free it.
         did_succeed = true;
-        // Zig 0.13 + FreeBSD release builds can miscompile the comptime ternary
-        // assignment here, leaving `buf.items.len` as 0 even when `total > 0`.
-        // Keep this branch explicit to preserve the runtime length.
-        if (comptime string_type == .null_terminated) {
-            buf.items.len = total + 1;
-        } else {
-            buf.items.len = total;
-        }
+        buf.items.len = if (comptime string_type == .null_terminated) total + 1 else total;
         if (total == 0) {
             buf.clearAndFree();
             return switch (args.encoding) {

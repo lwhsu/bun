@@ -184,5 +184,5 @@ Priority areas:
    - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround (attempted; still required)
    - later retry: `src/js/internal/streams/readable.ts` flush-barrier after additional child-side stdio pipeline fixes
    - `src/js/node/fs.ts` / `src/js/node/fs.promises.ts` `rmdir` errno normalization shim (cleanup completed)
-   - `src/bun.js/node/node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler-era workarounds (in progress: small-file pre-stat fast path, `result_bytes` dup, and string union special-case removed)
-   - next: test the remaining `readFileWithOptions()` explicit len-assignment workaround path
+   - `src/bun.js/node/node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler-era workarounds (`readFileWithOptions()` cluster cleanup completed on current baseline)
+   - next: clean up stale `node_fs.zig` FreeBSD `rmdir` normalization comment/history and reclassify any remaining `node_fs` FreeBSD branches

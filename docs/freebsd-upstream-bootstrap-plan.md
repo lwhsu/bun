@@ -718,7 +718,7 @@ Prioritized cleanup list (temporary shims + `mixed` sub-behaviors):
 | P1 | `FileSink` FreeBSD completion-order workaround (`stream.done()` defer) | `src/bun.js/webcore/FileSink.zig` | `mixed` sub-behavior | Cleanup in progress: FreeBSD-only defer branch has been removed on this branch and targeted tests are green; continue watching for regressions while the higher-level stdio flush-barrier shim still exists. | Keep generic pending-write accounting fixes; validate the shared completion path under broader coverage, then downgrade/remove remaining FreeBSD-specific `FileSink` behavior/debug hooks. | `spawn-stdin-readable-stream`, `process-stdio`, and `process-stdin` remain green after removing the FreeBSD-only defer branch. |
 | P1 | watcher synthetic duplicate event workaround | `src/bun.js/node/path_watcher.zig` | `mixed` sub-behavior | Medium risk; synthetic duplicate event intentionally shapes higher-level behavior and may produce extra notifications. Cleanup attempt on current branch regressed `fs.promises.watch` timeout, so the workaround remains required. | Improve FreeBSD directory fallback event synthesis / consumer readiness so one synthetic event is sufficient, or model explicit create/remove reconciliation more precisely. | `fs.watch.test.ts` remains green without duplicate synthetic event emission. |
 | P1 | JS `rmdir` errno normalization (`EREMOTE -> ENOTEMPTY`) | `src/js/node/fs.ts`, `src/js/node/fs.promises.ts` | `temporary shim` | Cleanup completed on current branch: JS shims removed after confirming lower layers already return `ENOTEMPTY` for sync/callback/promise `rmdir` paths. | Keep lower-layer normalization (currently in `node_fs.zig`) or replace with more principled errno serialization once the FreeBSD errno path is fully cleaned up. | `fs.test.ts` `rmdir` cases pass after removing JS shims. |
-| P1 | `node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler workarounds | `src/bun.js/node/node_fs.zig` | `mixed` sub-behavior | Cleanup in progress: small-file pre-stat fast-path disable has been removed and validated on current baseline; other FreeBSD readFile branches remain under review. | Re-test remaining branches on supported compiler baseline (current/Oven Zig path) and reduce/remove workarounds that no longer reproduce. | `fs.test.ts` + targeted small-file `readFileSync` string paths pass with each reduction step. |
+| P1 | `node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler workarounds | `src/bun.js/node/node_fs.zig` | `mixed` sub-behavior | Cleanup largely completed for the `readFileWithOptions()` cluster on current baseline: small-file pre-stat fast-path disable, `result_bytes` duplicate path, string-return union special-case, and explicit len-assignment special-case were all removed and validated. | Keep re-testing any remaining FreeBSD-specific `node_fs` branches on the supported compiler baseline and remove stale compiler-era workarounds opportunistically. | `fs.test.ts` + targeted small-file `readFileSync` string paths pass after each reduction step. |
 | P2 | FreeBSD waiter-thread default / polling interval tuning | `src/bun.js/api/bun/process.zig` | `mixed` sub-behavior (keep-dominant) | Low-medium risk; current behavior addresses real exit-race reliability and is likely acceptable. Main concern is overhead/tuning, not correctness regression. | Optional: revisit if native kqueue NOTE_EXIT handling proves reliable enough under stress. | High-churn spawn/child_process stress remains reliable with changed/default strategy (if revisited). |
 | P2 | FreeBSD event loop waker uses `LinuxWaker`/eventfd path | `src/async/posix_event_loop.zig` | `mixed` sub-behavior | Low runtime risk relative to P0/P1, but architectural cleanup item. In-code marked temporary. | Implement native kqueue user-event waker for FreeBSD (`KEventWaker` equivalent) and retire eventfd-based path. | Event-loop regression tests/smokes remain green with native FreeBSD waker. |
 | P2 | `feature_flags.zig` SIMDUTF disabled on FreeBSD | `src/feature_flags.zig` | `mixed` capability gate | Low correctness risk; conservative capability disable. Review friction is “why disabled?” more than runtime bug risk. | Validate SIMDUTF path on FreeBSD toolchains/ABI and enable if safe. | Bench/tests and correctness checks pass with `use_simdutf` enabled on FreeBSD. |
@@ -988,6 +988,30 @@ Conclusion:
 
 1. The FreeBSD string-return union special-case is no longer needed on the current baseline.
 2. The remaining explicit len-assignment workaround should be tested separately before removal.
+
+#### P1 Cleanup Progress: remove `node_fs.zig` explicit len-assignment workaround
+
+Status: **Completed on current branch (shared comptime ternary path restored)**.
+
+What was changed:
+
+1. Removed the FreeBSD-specific explicit branch for setting `buf.items.len` after `did_succeed`:
+   - `src/bun.js/node/node_fs.zig`
+2. Restored the shared comptime ternary assignment:
+   - `buf.items.len = if (comptime string_type == .null_terminated) total + 1 else total;`
+
+Validation (after rebuild):
+
+1. Focused UTF-8 `readFileSync` stress probe (small file, `20,000` iterations) passed:
+   - no corruption
+   - no spurious `ENOMEM`
+2. `test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+
+Conclusion:
+
+1. The explicit len-assignment workaround is no longer needed on the current baseline.
+2. The previously identified FreeBSD `readFileWithOptions()` Zig-0.13-era workaround cluster is effectively retired on
+   this branch (for the current/Oven Zig build baseline), subject to future regressions.
 
 How to reproduce:
 
