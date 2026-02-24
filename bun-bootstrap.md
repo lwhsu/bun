@@ -4815,3 +4815,17 @@ Fresh strict replay validation completes end-to-end:
 - Conclusion:
   - this FreeBSD fast-path disable workaround is no longer needed on the current baseline
   - remaining FreeBSD `readFileWithOptions()` workaround branches should be tested one-by-one.
+
+### Phase D P1 cleanup progress: removed `node_fs.zig` `result_bytes` duplicate workaround
+
+- Continued the `src/bun.js/node/node_fs.zig` `readFileWithOptions()` cleanup by removing the FreeBSD-only
+  `result_bytes` duplicate path (the branch that copied `buf.items.ptr[0..total]` before returning).
+- Rebuilt (`BUN_FREEBSD_CODEGEN_NODE=1` path).
+- Revalidated with the same regression floor:
+  - focused UTF-8 `readFileSync` stress probe (small file, 20,000 iterations) => `ok`
+  - `./build/release/bun test test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+- Conclusion:
+  - the `result_bytes` duplicate workaround is no longer needed on the current baseline
+  - next `node_fs` cleanup step should test the remaining FreeBSD `readFileWithOptions()` branches:
+    - string-return union path (`transcoded_string` special-case)
+    - explicit len-assignment workaround path (if still reproducible).

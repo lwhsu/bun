@@ -5342,16 +5342,7 @@ pub const NodeFS = struct {
             };
         }
 
-        const result_bytes = if (comptime Environment.isFreeBSD and string_type == .default) brk: {
-            // FreeBSD + Zig 0.13 release builds can produce an invalid ArrayList
-            // length metadata here despite a correct `total` count. Copy using
-            // the explicit byte count to make the return path deterministic.
-            const copied = bun.default_allocator.dupe(u8, buf.items.ptr[0..total]) catch return .{
-                .err = Syscall.Error.fromCode(.NOMEM, .read).withPathLike(args.path),
-            };
-            buf.clearAndFree();
-            break :brk copied;
-        } else buf.items;
+        const result_bytes = buf.items;
 
         return switch (args.encoding) {
             .buffer => .{

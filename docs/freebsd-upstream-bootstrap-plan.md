@@ -944,6 +944,29 @@ Conclusion:
 1. The FreeBSD small-file pre-stat fast-path disable workaround is no longer needed on the current build baseline.
 2. Additional FreeBSD `readFileWithOptions()` workaround branches remain and should be evaluated independently.
 
+#### P1 Cleanup Progress: remove `node_fs.zig` FreeBSD `result_bytes` duplicate path
+
+Status: **Completed on current branch (duplicate path removed)**.
+
+What was changed:
+
+1. Removed the FreeBSD-only `result_bytes` duplication branch in `readFileWithOptions()`:
+   - `src/bun.js/node/node_fs.zig`
+2. FreeBSD now uses the shared `buf.items` path for `result_bytes`.
+
+Validation (after rebuild):
+
+1. Focused UTF-8 `readFileSync` stress probe (small file, `20,000` iterations) passed:
+   - no corruption
+   - no spurious `ENOMEM`
+2. `test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+
+Conclusion:
+
+1. The FreeBSD `result_bytes` duplicate workaround is no longer needed on the current baseline.
+2. Remaining `readFileWithOptions()` FreeBSD branches (string-return union path and explicit len assignment path) should
+   be tested next.
+
 How to reproduce:
 
 ```bash
