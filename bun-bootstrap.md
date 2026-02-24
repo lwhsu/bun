@@ -4171,4 +4171,34 @@ Actions performed:
 1. Several rebuild/relink/repro loops initially retested stale binaries because new legacy fallback patches hit
    Zig 0.13 compile issues (`pointless discard`, `Dir.chmod` signature mismatch). These were corrected.
 2. Replay debugging should now shift from batch-0 parser/chunk corruption to the batch-47 alias-stage hang path,
-   while preserving the `bun/ffi.ts` progress in the replay patchset.
+  while preserving the `bun/ffi.ts` progress in the replay patchset.
+
+## 2026-02-24: Replay stage0 `bundle-modules.ts` no-fallback repro now completes end-to-end
+
+### What was done
+
+1. Retargeted the explicit stage0 alias for `internal/streams/end-of-stream.ts`
+   from `eos.ts` to `s47.ts` in `src/codegen/bundle-modules.ts`.
+2. Continued testing legacy stage0 chunk-write-path fixes (legacy `bundle_v2.zig`) while rerunning the traced
+   single-batch stage0 repro.
+3. Re-ran:
+   - `BUN_FREEBSD_CODEGEN_TRACE=1 BUN_FREEBSD_STAGE0_BUNDLER_BATCH_SIZE=1 build/freebsd-bootstrap/stage0/bun --no-install run ./src/codegen/bundle-modules.ts --debug=OFF build/release`
+
+### Result
+
+- The stage0 no-fallback `bundle-modules.ts` repro now completes end-to-end again under the replay-path state:
+  - full module bundling pass
+  - postbuild module rewrite pass
+  - `bundle-functions:done`
+  - `Generate Code`
+  - final bundle summary output
+
+### Findings
+
+1. The batch-47 stall was sensitive to the alias basename; `s47.ts` progresses where `eos.ts` stalled in the
+   replay run.
+2. This confirms the replay-path stage0 runtime is now past both:
+   - the earlier batch-0 `bun/ffi.ts` parser/chunk corruption blocker
+   - the next alias-stage stall at batch 47
+3. The next step is no longer the isolated `bundle-modules.ts` repro. It is the **fresh full strict replay
+   validation** (`scripts/bootstrap-freebsd.sh` no-fallback) to surface the next replayability gap.

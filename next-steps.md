@@ -46,10 +46,13 @@ Current note:
 7. Immediate replay milestone reached:
    - `bun/ffi.ts` batch-0 blocker is no longer the first failure in fresh replay stage0 `bundle-modules.ts`
      (repro now progresses through batch 46).
-8. Immediate next action (replay path):
-   - debug/fix the next replay stage0 `bundle-modules.ts` hang at `batchIndex: 47`
-     (`internal/streams/end-of-stream.ts` alias `eos.ts`)
-   - after that reproducer advances, rerun fresh strict replay validation end-to-end.
+8. Immediate replay milestone reached:
+   - replay-path stage0 `bundle-modules.ts` no-fallback repro now completes end-to-end again
+     (full module pass + postbuild + bundle-functions + Generate Code).
+9. Immediate next action (replay path):
+   - rerun **fresh full strict replay validation** (`scripts/bootstrap-freebsd.sh` no-fallback)
+   - capture the next replayability blocker (if any), which should now be outside the isolated
+     `bundle-modules.ts` batch-0/batch-47 failures.
 
 ### 2. Phase E Gate (formalize and rerun)
 

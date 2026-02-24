@@ -164,7 +164,7 @@ const bundledEntryPoints: string[] = [];
 // bundler invocation time (not preprocess time) because preprocess-time aliasing can deadlock stage0.
 const stage0AliasedModuleBaseNames: Record<string, string> = {
   "internal/perf_hooks/monitorEventLoopDelay.ts": "29.ts",
-  "internal/streams/end-of-stream.ts": "eos.ts",
+  "internal/streams/end-of-stream.ts": "s47.ts",
   "internal/streams/lazy_transform.ts": "lazy.ts",
   "internal/streams/native-readable.ts": "s51.ts",
   "internal/url.ts": "s63.ts",
