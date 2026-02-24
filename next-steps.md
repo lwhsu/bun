@@ -1,10 +1,10 @@
-# FreeBSD Bun Porting: Next Steps (Post Phase C-strict)
+# FreeBSD Bun Porting: Next Steps (Post Phase C Replayability)
 
 Baseline checkpoint:
 
 1. Branch: `freebsd-bootstrap`
 2. Commit: `b4099d80af` (`freebsd: complete phase-c strict no-fallback bootstrap`)
-3. Status: Phase C (including C-strict) complete, Phase D/E in progress
+3. Status: Phase C (including fresh replayability validation) complete, Phase D/E in progress
 
 ## Priorities (Before Phase F)
 
@@ -15,46 +15,29 @@ Baseline checkpoint:
 
 ## Immediate Execution Plan
 
-### 1. Phase C Replayability Integrity (must keep)
+### 1. Phase D/E Priority Execution (current)
 
-Goal: ensure strict bootstrap is reproducible from a fresh legacy worktree, not only from accumulated local legacy edits.
+Goal: use the replay-proven strict bootstrap baseline to harden runtime parity and confidence gates before Phase F.
 
 Tasks:
 
-1. Export any remaining legacy-worktree fixes into `scripts/patches/`
-2. Wire each patch into `scripts/bootstrap-freebsd.sh` (`patch_legacy_worktree_for_freebsd()`)
-3. Rebuild stage0 from a fresh legacy worktree
-4. Re-run strict no-fallback bootstrap:
-   - `BUN_FREEBSD_BINDGENV2_NODE=0`
-   - `BUN_FREEBSD_CODEGEN_NODE=0`
-   - `BUN_FREEBSD_NPM_INSTALL=0`
+1. Re-run and formalize the Phase E core gate on the replay-proven checkpoint
+2. Expand Phase E with selected high-value suites (`child_process`, `crypto`, `url`, more package-manager flows)
+3. Classify/bootstrap-tag remaining FreeBSD-specific workarounds in `src/codegen/*`, JS runtime, and Zig runtime
+4. Reduce or clearly defer pre-upstream cleanup queue items with rationale
 
 Current note:
 
-1. The legacy `src/install/extract_tarball.zig` cache-move fallback fix has been exported and wired.
-2. Replay validation exposed malformed patch headers in some legacy debug patches; fixed and replay now reaches stage0 build.
-3. Replay validation exposed stale `~/.cache/zig` dependency during legacy `identifier-cache`; bootstrap now forces legacy Zig caches under `${BUN_FREEBSD_BOOTSTRAP_DIR}/legacy-zig-cache`.
-4. Replay rerun (`session 22462`) confirmed patch replay + stage0 install path fixes, but failed in strict
-   stage0 codegen (`bake-codegen.ts` crash, `bundle-modules.ts` preprocess corruption).
-5. Next action: carry the later strict-stage0 codegen workarounds into the replay path/current checkpoint,
-   then rerun fresh replay validation to confirm full strict bootstrap completes end-to-end.
-6. Replay debugging update:
-   - the apparent legacy `zig build-obj` "hang" was a false positive when watching the parent `zig build obj`
-     process; monitor the child `zig build-obj ... --listen=-` process instead.
-   - current replay blocker remains legacy stage0 `bundle-modules.ts` batch-0 crash (`bun/ffi.ts`,
-     `panic: Segmentation fault at address 0x1C0`).
-7. Immediate replay milestone reached:
-   - `bun/ffi.ts` batch-0 blocker is no longer the first failure in fresh replay stage0 `bundle-modules.ts`
-     (repro now progresses through batch 46).
-8. Immediate replay milestone reached:
-   - replay-path stage0 `bundle-modules.ts` no-fallback repro now completes end-to-end again
-     (full module pass + postbuild + bundle-functions + Generate Code).
-9. Immediate next action (replay path):
-   - rerun **fresh full strict replay validation** (`scripts/bootstrap-freebsd.sh` no-fallback)
-   - capture the next replayability blocker (if any), which should now be outside the isolated
-     `bundle-modules.ts` batch-0/batch-47 failures.
+1. Fresh strict replay validation now completes end-to-end (`phase-c-replay-rerun2.log`).
+2. Replay path required a bootstrap-only FreeBSD stage0 fallback in `src/codegen/bake-codegen.ts`
+   (placeholder Bake runtime outputs + clean `reallyExit(0)`).
+3. This fallback is acceptable for bootstrap replay proof but should be tracked as a cleanup/parity item
+   before upstreaming.
+4. Replay debugging note remains important:
+   - legacy `zig build-obj` monitoring must watch the child `zig build-obj ... --listen=-`, not only the
+     parent `zig build obj`, to avoid false “hang” diagnosis.
 
-### 2. Phase E Gate (formalize and rerun)
+### 2. Phase E Gate (formalize and rerun on replay-proven baseline)
 
 Goal: define a reproducible FreeBSD confidence gate on top of the strict-bootstrap checkpoint.
 
@@ -81,7 +64,7 @@ Execution notes:
 2. Record exact commands and pass/fail counts in `bun-bootstrap.md`
 3. Separate missing local test deps (`detect-libc`, `proxy`, `express`, etc.) from runtime bugs
 
-### 3. Phase D Cleanup / Workaround Classification
+### 3. Phase D Cleanup / Workaround Classification (raise the bar before Phase F)
 
 Goal: reduce risk before upstreaming by making workaround scope explicit.
 
@@ -101,12 +84,13 @@ Priority areas:
 ### 4. Pre-Upstream Cleanup Queue (high-priority items first)
 
 1. Stage0 `--version` platform string (`Linux x64` on FreeBSD) classification/fix
-2. Review and label temporary compatibility workarounds with intended retirement path
-3. Re-check release-build-only test exposure issues (`bun:internal-for-testing`) and classify separately
+2. Replace or clearly document the `bake-codegen.ts` FreeBSD stage0 placeholder fallback (bootstrap-only)
+3. Review and label temporary compatibility workarounds with intended retirement path
+4. Re-check release-build-only test exposure issues (`bun:internal-for-testing`) and classify separately
 
 ## Done When (before Phase F)
 
-1. Strict bootstrap replayability is validated from patchset + fresh legacy worktree
+1. Phase E core gate is re-run on the replay-proven strict bootstrap baseline
 2. Phase E core gate is defined and rerun on current checkpoint
 3. Major temporary workarounds are classified and documented
 4. Pre-upstream cleanup queue high-priority items are either fixed or explicitly deferred with rationale

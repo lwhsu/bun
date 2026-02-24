@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, rmSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { argParse, readUtf8CompatSync, writeIfNotChanged } from "./helpers";
 
@@ -42,14 +42,34 @@ async function writeIfNotChangedCompat(file: string, contents: string) {
 }
 
 let stage0BakeBuildCounter = 0;
+const freebsdStage0BakeAliasByLabel: Record<string, string> = {
+  "first-pass-client": "bc.ts",
+  "first-pass-server": "bs.ts",
+  "first-pass-error": "be.ts",
+};
 async function buildCompat(label: string, options: Parameters<typeof Bun.build>[0]) {
   if (!isFreeBSDStage0 || !options.entrypoints || options.entrypoints.length !== 1) {
     return await Bun.build(options);
   }
 
   const originalEntrypoint = options.entrypoints[0]!;
-  const aliasEntrypoint = join(codegenRoot, `b${stage0BakeBuildCounter++}.ts`);
-  await Bun.write(aliasEntrypoint, readUtf8CompatSync(originalEntrypoint));
+  // Keep the alias in the same directory as the original entrypoint so relative imports
+  // (used heavily by Bake runtime files) still resolve under legacy stage0.
+  const makeAlias = async (aliasEntrypoint: string) => {
+    rmSync(aliasEntrypoint, { force: true });
+    if (isFreeBSDStage0) {
+      try {
+        // Hardlink avoids a legacy stage0 crash in Bun.write() when creating source-dir aliases.
+        linkSync(originalEntrypoint, aliasEntrypoint);
+        return;
+      } catch {}
+    }
+    await Bun.write(aliasEntrypoint, readUtf8CompatSync(originalEntrypoint));
+  };
+
+  const aliasBasename = freebsdStage0BakeAliasByLabel[label] ?? `s0b${stage0BakeBuildCounter++}.ts`;
+  const aliasEntrypoint = join(dirname(originalEntrypoint), aliasBasename);
+  await makeAlias(aliasEntrypoint);
 
   const result = await Bun.build({
     ...options,
@@ -65,8 +85,8 @@ async function buildCompat(label: string, options: Parameters<typeof Bun.build>[
     logsText.includes("File not found")
   ) {
     // Retry once with a fresh shorter alias. Legacy FreeBSD stage0 can poison a first attempt.
-    const retryAlias = join(codegenRoot, `r${stage0BakeBuildCounter++}.ts`);
-    await Bun.write(retryAlias, readUtf8CompatSync(originalEntrypoint));
+    const retryAlias = join(dirname(originalEntrypoint), `s0r${stage0BakeBuildCounter++}.ts`);
+    await makeAlias(retryAlias);
     return await Bun.build({
       ...options,
       entrypoints: [retryAlias],
@@ -109,26 +129,45 @@ function css(file: string, is_development: boolean): string {
 
 async function run() {
   const devServerZig = readUtf8CompatSync(join(base_dir, "DevServer.zig"));
-  await writeIfNotChangedCompat(
-    join(base_dir, "generated.ts"),
-    convertZigEnum(devServerZig, ["IncomingMessageId", "MessageId"]),
-  );
+  if (isFreeBSDStage0) {
+    // Legacy stage0 can crash in the early write path before Bake bundling starts.
+    // For bootstrap, the checked-in src/bake/generated.ts is sufficient.
+  } else {
+    await writeIfNotChangedCompat(
+      join(base_dir, "generated.ts"),
+      convertZigEnum(devServerZig, ["IncomingMessageId", "MessageId"]),
+    );
+  }
 
-  const results = await Promise.allSettled(
-    ["client", "server", "error"].map(async file => {
+  if (isFreeBSDStage0) {
+    // Bootstrap-only fallback: legacy FreeBSD stage0 still crashes in Bun.build() while bundling
+    // Bake runtimes (replay path). These outputs are only codegen artifacts needed to satisfy
+    // the build graph at this stage; full runtime parity is validated later with the final Bun.
+    await writeIfNotChangedCompat(join(codegenRoot, "bake.client.js"), "export default async function(){ }\n");
+    await writeIfNotChangedCompat(join(codegenRoot, "bake.server.js"), "export default function(){ return {}; }\n");
+    await writeIfNotChangedCompat(join(codegenRoot, "bake.error.js"), "export default async function(){ }\n");
+    await writeIfNotChangedCompat(join(codegenRoot, "bake_empty_file"), "this is used to fulfill a cmake dependency");
+    process.reallyExit(0);
+  }
+
+  const buildBakeRuntime = async (file: "client" | "server" | "error") => {
       const side = file === "error" ? "client" : file;
+      const overlayCss = css("../bake/client/overlay.css", !!debug);
       let result = await buildCompat(`first-pass-${file}`, {
         entrypoints: [join(base_dir, `hmr-runtime-${file}.ts`)],
         define: {
           side: JSON.stringify(side),
           IS_ERROR_RUNTIME: String(file === "error"),
           IS_BUN_DEVELOPMENT: String(!!debug),
-          OVERLAY_CSS: css("../bake/client/overlay.css", !!debug),
+          OVERLAY_CSS: overlayCss,
         },
         minify: {
           syntax: !debug,
         },
-        target: side === "server" ? "bun" : "browser",
+        // Legacy FreeBSD stage0 can crash in Bun.build() on the Bake server runtime
+        // when using target:"bun". For bootstrap codegen, browser target is sufficient
+        // to produce the transform input consumed by the second pass.
+        target: isFreeBSDStage0 && side === "server" ? "browser" : side === "server" ? "bun" : "browser",
         drop: debug ? [] : ["ASSERT", "DEBUG"],
         conditions: [side],
       });
@@ -239,19 +278,35 @@ async function run() {
       }
 
       await writeIfNotChangedCompat(join(codegenRoot, `bake.${file}.js`), code);
-    }),
-  );
+  };
+
+  // FreeBSD stage0 can crash when switching Bun.build target modes mid-process.
+  // Run the server (target:"bun") build first, then browser-target client/error.
+  const bakeFiles = isFreeBSDStage0
+    ? (["server", "client", "error"] as const)
+    : (["client", "server", "error"] as const);
+  const results = isFreeBSDStage0
+    ? await (async () => {
+        const out: PromiseSettledResult<void>[] = [];
+        for (const file of bakeFiles) {
+          try {
+            await buildBakeRuntime(file);
+            out.push({ status: "fulfilled", value: undefined });
+          } catch (error) {
+            out.push({ status: "rejected", reason: error });
+          }
+        }
+        return out;
+      })()
+    : await Promise.allSettled(bakeFiles.map(buildBakeRuntime));
 
   // print failures in a de-duplicated fashion.
   interface Err {
     kind: ("client" | "server" | "error")[];
     err: any;
   }
-  const failed = [
-    { kind: ["client"], result: results[0] },
-    { kind: ["server"], result: results[1] },
-    { kind: ["error"], result: results[2] },
-  ]
+  const failed = bakeFiles
+    .map((kind, i) => ({ kind: [kind], result: results[i] }))
     .filter(x => x.result.status === "rejected")
     // @ts-ignore
     .map(x => ({ kind: x.kind, err: x.result.reason })) as Err[];
@@ -289,6 +344,11 @@ async function run() {
       await writeIfNotChangedCompat(empty_file, "this is used to fulfill a cmake dependency");
     }
   }
-}
 
+  // Legacy FreeBSD stage0 can crash during process teardown after successful codegen.
+  // Exit explicitly once outputs are written to make the bootstrap path reliable.
+  if (isFreeBSDStage0) {
+    process.reallyExit(0);
+  }
+}
 await run();

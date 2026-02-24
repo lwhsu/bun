@@ -445,24 +445,15 @@ patch_legacy_worktree_for_freebsd() {
   fi
 
   local bundler_parse_file="${LEGACY_WORKTREE}/src/bundler/bundle_v2.zig"
-  local bundler_parse_recover_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-bundler-parse-recover.patch"
+  local bundler_replay_hardening_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-bundler-replay-hardening.patch"
   if [[ -f "${bundler_parse_file}" ]] \
-    && ! grep -q 're-reading file after malformed cache entry' "${bundler_parse_file}"; then
-    if [[ ! -f "${bundler_parse_recover_patch}" ]]; then
-      echo "error: missing patch file: ${bundler_parse_recover_patch}" >&2
+    && ! grep -q 'writing chunk \"var.js\"' "${bundler_parse_file}" \
+    && ! grep -q 'Bootstrap-only workaround: legacy FreeBSD stage0 can emit corrupted chunk output' "${bundler_parse_file}"; then
+    if [[ ! -f "${bundler_replay_hardening_patch}" ]]; then
+      echo "error: missing patch file: ${bundler_replay_hardening_patch}" >&2
       exit 1
     fi
-    apply_patch_if_needed "${bundler_parse_recover_patch}" "FreeBSD legacy bundler parse cache-recover patch"
-  fi
-
-  local bundler_use_directive_patch="${ROOT_DIR}/scripts/patches/freebsd-stage0-bundler-use-directive-skip.patch"
-  if [[ -f "${bundler_parse_file}" ]] \
-    && ! grep -q 'UseDirective parsing on malformed cached contents' "${bundler_parse_file}"; then
-    if [[ ! -f "${bundler_use_directive_patch}" ]]; then
-      echo "error: missing patch file: ${bundler_use_directive_patch}" >&2
-      exit 1
-    fi
-    apply_patch_if_needed "${bundler_use_directive_patch}" "FreeBSD legacy bundler UseDirective skip patch"
+    apply_patch_if_needed "${bundler_replay_hardening_patch}" "FreeBSD legacy bundler replay hardening patch"
   fi
 
   local fs_file="${LEGACY_WORKTREE}/src/fs.zig"

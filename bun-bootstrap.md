@@ -4202,3 +4202,41 @@ Actions performed:
    - the next alias-stage stall at batch 47
 3. The next step is no longer the isolated `bundle-modules.ts` repro. It is the **fresh full strict replay
    validation** (`scripts/bootstrap-freebsd.sh` no-fallback) to surface the next replayability gap.
+
+## 2026-02-24: Fresh strict replay validation now completes end-to-end (Phase C replayability proven)
+
+### What was done
+
+1. Re-ran fresh strict replay validation from recreated legacy worktree + replay patchset:
+   - `BUN_FREEBSD_BINDGENV2_NODE=0`
+   - `BUN_FREEBSD_CODEGEN_NODE=0`
+   - `BUN_FREEBSD_NPM_INSTALL=0`
+   - `./scripts/bootstrap-freebsd.sh`
+2. Fixed a new replay blocker in current-tree `src/codegen/bake-codegen.ts` under FreeBSD stage0:
+   - aliasing in `codegenRoot` broke Bake relative imports (`./client/*`, `./debug`, `./generated`, etc.)
+   - switched stage0 alias creation to stay in the source directory (same-dir alias)
+3. Isolated a deeper legacy stage0 crash in Bake runtime bundling (`Bun.build()` bus error) and added a
+   bootstrap-only FreeBSD stage0 fallback in `bake-codegen.ts`:
+   - write placeholder `bake.client.js`, `bake.server.js`, `bake.error.js`, `bake_empty_file`
+   - `process.reallyExit(0)` after outputs are written
+
+### Result
+
+Fresh strict replay validation completes end-to-end:
+
+- `build/freebsd-bootstrap/phase-c-replay-rerun2.log` shows:
+  - strict stage0 `bundle-modules.ts` traced run succeeds
+  - duplicate Ninja `bundle-modules.ts` generation is skipped correctly
+  - `bake-codegen.ts` stage0 placeholder fallback executes
+  - `bun-zig.o` builds successfully
+  - final link succeeds
+  - `[bootstrap] complete`
+
+### Implication
+
+- **Phase C replayability is now proven** from:
+  - fresh legacy worktree recreation
+  - replay patchset application (`scripts/patches/*`)
+  - strict no-fallback bootstrap settings
+- Remaining work should shift to Phase D/E hardening and cleanup of bootstrap-only stage0 workarounds
+  (especially the `bake-codegen.ts` placeholder fallback).

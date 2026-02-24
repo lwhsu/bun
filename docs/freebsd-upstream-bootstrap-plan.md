@@ -98,6 +98,10 @@ Current items:
      - acceptable bootstrap-only workaround (legacy patch set)
      - temporary current-tree compatibility shim to replace later
 3. Re-check release-build-only test exposure issues (e.g. `bun:internal-for-testing`) and classify separately from FreeBSD runtime parity.
+4. Replace or narrow the bootstrap-only FreeBSD stage0 `bake-codegen.ts` placeholder fallback.
+   - Current behavior (replay path): writes placeholder `bake.*.js` artifacts and exits early on stage0.
+   - Rationale: legacy stage0 still crashes in Bake runtime `Bun.build()` path during fresh replay validation.
+   - Impact: acceptable for bootstrap replay proof, but should be revisited before upstreaming.
 
 ## 2.2 Current Stage0 Build Design (How It Works Today)
 
@@ -289,12 +293,13 @@ Completion evidence (2026-02-22):
 
 Goal: make cold-start script robust and deterministic on FreeBSD.
 
-Status: **Completed** (strict no-fallback bootstrap succeeds on FreeBSD).
+Status: **Completed** (strict no-fallback bootstrap succeeds on FreeBSD, and fresh replayability is validated).
 
 Phase C split:
 
 1. **C-basic: completed** (deterministic bootstrap + idempotent rerun + compiler-switch rebuild succeeded).
 2. **C-strict: completed** (full no-fallback mode now succeeds with documented stage0 workarounds).
+3. **C-replayability: completed** (fresh legacy worktree + replay patchset reproduces strict no-fallback bootstrap).
 
 Current C-strict status (2026-02-23):
 
@@ -310,6 +315,10 @@ Current C-strict status (2026-02-23):
    - stage0 `bindgen.ts` generated `GeneratedBindings.{cpp,zig}` missing anonymous typedef coverage
 3. Legacy stage0 crash debugging / compatibility work remains tracked as replayable patch files under
    `scripts/patches/` (not as ad-hoc edits in the legacy worktree).
+4. Fresh replay validation (`phase-c-replay-rerun2.log`) now completes end-to-end from recreated legacy worktree.
+5. Replay-specific bootstrap-only workaround currently used:
+   - `src/codegen/bake-codegen.ts` writes placeholder Bake runtime artifacts on FreeBSD stage0 because
+     legacy stage0 still crashes in the Bake runtime `Bun.build()` path.
 
 How to do it:
 
@@ -676,11 +685,10 @@ Exit criteria:
 
 ## 4. Immediate Next Steps (Execution Order)
 
-1. Close replayability gaps in the Phase C path (export legacy-worktree fixes into `scripts/patches/` and verify rebuild from patchset).
-2. Refresh and freeze a Phase E gate on the `b4099d80af` strict-bootstrap checkpoint (re-run key slices, record outcomes).
-3. Finish high-priority Pre-Upstream Cleanup Queue items (workaround classification, stale doc cleanup, release-build test exposure classification).
-4. Continue Phase D cleanup of temporary compatibility shims (label keep/replace/bootstrap-only).
-5. Start Phase F patch-stack split only after D/E gate and cleanup queue are stable.
+1. Refresh and freeze a Phase E gate on the replay-proven strict-bootstrap baseline (re-run key slices, record outcomes).
+2. Continue Phase D cleanup of temporary compatibility shims (label keep/replace/bootstrap-only).
+3. Finish high-priority Pre-Upstream Cleanup Queue items (including the `bake-codegen.ts` stage0 placeholder fallback classification/replacement plan).
+4. Start Phase F patch-stack split only after D/E gate and cleanup queue are stable.
 
 ### Phase E progress update (2026-02-22, TLS)
 

@@ -1,0 +1,366 @@
+diff --git a/src/bundler/bundle_v2.zig b/src/bundler/bundle_v2.zig
+index 8236337f24..548f13686e 100644
+--- b/src/bundler/bundle_v2.zig
++++ b/src/bundler/bundle_v2.zig
+@@ -2768,16 +2768,27 @@ pub const ParseTask = struct {
+         log: *Logger.Log,
+     ) anyerror!?Result.Success {
+         const allocator = this.allocator;
++        var task_contents_or_fd = task.contents_or_fd;
++        const task_source_index = task.source_index;
++        var task_jsx = task.jsx;
++        const task_known_target = task.known_target;
++        const task_module_type = task.module_type;
++        const task_package_version = task.package_version;
++        const task_is_entry_point = task.is_entry_point;
++        const task_presolved_source_indices = task.presolved_source_indices;
++        const task_ctx_unique_key = task.ctx.unique_key;
+ 
+         var data = this.data;
+         var bundler = &data.bundler;
+         errdefer bundler.resetStore();
+         var resolver: *Resolver = &bundler.resolver;
+         var file_path = task.path;
++        const stable_file_path_text = allocator.dupe(u8, file_path.text) catch unreachable;
++        defer allocator.free(stable_file_path_text);
+         step.* = .read_file;
+         const loader = task.loader orelse file_path.loader(&bundler.options.loaders) orelse options.Loader.file;
+ 
+-        var entry: CacheEntry = switch (task.contents_or_fd) {
++        var entry: CacheEntry = switch (task_contents_or_fd) {
+             .fd => brk: {
+                 const trace = tracer(@src(), "readFile");
+                 defer trace.end();
+@@ -2825,10 +2836,10 @@ pub const ParseTask = struct {
+                         allocator,
+                     bundler.fs,
+                     file_path.text,
+-                    task.contents_or_fd.fd.dir,
++                    task_contents_or_fd.fd.dir,
+                     false,
+-                    if (task.contents_or_fd.fd.file != .zero)
+-                        task.contents_or_fd.fd.file
++                    if (task_contents_or_fd.fd.file != .zero)
++                        task_contents_or_fd.fd.file
+                     else
+                         null,
+                 ) catch |err| {
+@@ -2862,14 +2873,32 @@ pub const ParseTask = struct {
+             },
+         };
+ 
+-        errdefer if (task.contents_or_fd == .fd) entry.deinit(allocator);
++        errdefer if (task_contents_or_fd == .fd) entry.deinit(allocator);
+ 
+-        const will_close_file_descriptor = task.contents_or_fd == .fd and !entry.fd.isStdio() and this.ctx.bun_watcher == null;
++        if (entry.contents.len > 0 and @intFromPtr(entry.contents.ptr) == 0) {
++            // Bootstrap-only workaround: fresh legacy stage0 replay can surface a malformed cache
++            // entry from readFileWithAllocator (len > 0, null ptr). Re-read the file directly
++            // before handing contents to the parser.
++            const recovered = std.fs.cwd().readFileAlloc(allocator, stable_file_path_text, std.math.maxInt(usize)) catch |err| {
++                const source = &Logger.Source.initEmptyFile(log.msgs.allocator.dupe(u8, stable_file_path_text) catch unreachable);
++                log.addErrorFmt(
++                    source,
++                    Logger.Loc.Empty,
++                    allocator,
++                    "{s} re-reading file after malformed cache entry: {}",
++                    .{ @errorName(err), bun.fmt.quote(stable_file_path_text) },
++                ) catch {};
++                return err;
++            };
++            entry.contents = recovered;
++        }
++
++        const will_close_file_descriptor = task_contents_or_fd == .fd and !entry.fd.isStdio() and this.ctx.bun_watcher == null;
+         if (will_close_file_descriptor) {
+             _ = entry.closeFD();
+         }
+ 
+-        if (!will_close_file_descriptor and !entry.fd.isStdio()) task.contents_or_fd = .{
++        if (!will_close_file_descriptor and !entry.fd.isStdio()) task_contents_or_fd = .{
+             .fd = .{
+                 .file = entry.fd,
+                 .dir = bun.invalid_fd,
+@@ -2880,31 +2909,44 @@ pub const ParseTask = struct {
+         const is_empty = entry.contents.len == 0 or (entry.contents.len < 33 and strings.trim(entry.contents, " \n\r").len == 0);
+ 
+         const use_directive = if (!is_empty and bundler.options.react_server_components)
+-            UseDirective.parse(entry.contents)
++            blk: {
++                if (comptime Environment.isFreeBSD) {
++                    // Bootstrap-only workaround: legacy FreeBSD stage0 parser worker can crash in
++                    // UseDirective parsing on malformed cached contents. RSC directives are not
++                    // needed for the stage0 codegen scripts we bundle during bootstrap.
++                    break :blk @as(@TypeOf(UseDirective.parse(entry.contents)), .none);
++                }
++                break :blk UseDirective.parse(entry.contents);
++            }
+         else
+             .none;
+ 
+         var source = Logger.Source{
+             .path = file_path,
+             .key_path = file_path,
+-            .index = task.source_index,
++            .index = task_source_index,
+             .contents = entry.contents,
+             .contents_is_recycled = false,
+         };
+ 
+-        const target = targetFromHashbang(entry.contents) orelse use_directive.target(task.known_target orelse bundler.options.target);
++        const target = blk: {
++            // Bootstrap-only workaround: fresh legacy stage0 replay on FreeBSD still crashes in the
++            // hashbang parser path (`targetFromHashbang`) while bundling codegen modules. These
++            // stage0 bootstrap entrypoints do not rely on hashbang target overrides.
++            break :blk use_directive.target(task_known_target orelse bundler.options.target);
++        };
+ 
+-        var opts = js_parser.Parser.Options.init(task.jsx, loader);
++        var opts = js_parser.Parser.Options.init(task_jsx, loader);
+         opts.legacy_transform_require_to_import = false;
+         opts.features.allow_runtime = !source.index.isRuntime();
+         opts.features.use_import_meta_require = target.isBun();
+         opts.warn_about_unbundled_modules = false;
+         opts.macro_context = &this.data.macro_context;
+         opts.bundle = true;
+-        opts.package_version = task.package_version;
++        opts.package_version = task_package_version;
+ 
+         opts.features.top_level_await = true;
+-        opts.features.auto_import_jsx = task.jsx.parse and bundler.options.auto_import_jsx;
++        opts.features.auto_import_jsx = task_jsx.parse and bundler.options.auto_import_jsx;
+         opts.features.trim_unused_imports = loader.isTypeScript() or (bundler.options.trim_unused_imports orelse false);
+         opts.features.inlining = bundler.options.minify_syntax;
+         opts.features.minify_syntax = bundler.options.minify_syntax;
+@@ -2915,22 +2957,40 @@ pub const ParseTask = struct {
+         // For files that are not user-specified entrypoints, set `import.meta.main` to `false`.
+         // Entrypoints will have `import.meta.main` set as "unknown", unless we use `--compile`,
+         // in which we inline `true`.
+-        if (bundler.options.inline_entrypoint_import_meta_main or !task.is_entry_point) {
+-            opts.import_meta_main_value = task.is_entry_point;
++        if (bundler.options.inline_entrypoint_import_meta_main or !task_is_entry_point) {
++            opts.import_meta_main_value = task_is_entry_point;
+         } else if (bundler.options.target == .node) {
+             opts.lower_import_meta_main_for_node_js = true;
+         }
+ 
+         opts.tree_shaking = if (source.index.isRuntime()) true else bundler.options.tree_shaking;
+-        opts.module_type = task.module_type;
++        opts.module_type = task_module_type;
+         opts.features.unwrap_commonjs_packages = bundler.options.unwrap_commonjs_packages;
+ 
+-        task.jsx.parse = loader.isJSX();
++        task_jsx.parse = loader.isJSX();
++        task.jsx.parse = task_jsx.parse;
+ 
+         var unique_key_for_additional_file: []const u8 = "";
+ 
++        if (!is_empty and source.contents.len > 0 and @intFromPtr(source.contents.ptr) == 0) {
++            // Bootstrap-only workaround: if a malformed null slice still reaches parse-time, recover
++            // just before invoking the JS parser/lexer.
++            const recovered = std.fs.cwd().readFileAlloc(allocator, stable_file_path_text, std.math.maxInt(usize)) catch |err| {
++                log.addErrorFmt(
++                    null,
++                    Logger.Loc.Empty,
++                    allocator,
++                    "{s} re-reading file before parse after null source.contents: {}",
++                    .{ @errorName(err), bun.fmt.quote(stable_file_path_text) },
++                ) catch {};
++                return err;
++            };
++            source.contents = recovered;
++            entry.contents = recovered;
++        }
++
+         var ast: JSAst = if (!is_empty)
+-            try getAST(log, bundler, opts, allocator, resolver, source, loader, task.ctx.unique_key, &unique_key_for_additional_file)
++            try getAST(log, bundler, opts, allocator, resolver, source, loader, task_ctx_unique_key, &unique_key_for_additional_file)
+         else switch (opts.module_type == .esm) {
+             inline else => |as_undefined| try getEmptyAST(
+                 log,
+@@ -2947,8 +3007,8 @@ pub const ParseTask = struct {
+             task.side_effects = _resolver.SideEffects.no_side_effects__empty_ast;
+         }
+ 
+-        if (task.presolved_source_indices.len > 0) {
+-            for (ast.import_records.slice(), task.presolved_source_indices) |*record, source_index| {
++        if (task_presolved_source_indices.len > 0) {
++            for (ast.import_records.slice(), task_presolved_source_indices) |*record, source_index| {
+                 if (record.is_unused or record.is_internal)
+                     continue;
+ 
+@@ -2976,8 +3036,8 @@ pub const ParseTask = struct {
+                 0,
+ 
+             .watcher_data = .{
+-                .fd = if (task.contents_or_fd == .fd and !will_close_file_descriptor) task.contents_or_fd.fd.file else .zero,
+-                .dir_fd = if (task.contents_or_fd == .fd) task.contents_or_fd.fd.dir else .zero,
++                .fd = if (task_contents_or_fd == .fd and !will_close_file_descriptor) task_contents_or_fd.fd.file else .zero,
++                .dir_fd = if (task_contents_or_fd == .fd) task_contents_or_fd.fd.dir else .zero,
+             },
+         };
+     }
+@@ -2992,6 +3052,8 @@ pub const ParseTask = struct {
+         var step: ParseTask.Result.Error.Step = .pending;
+         var log = Logger.Log.init(worker.allocator);
+         bun.assert(this.source_index.isValid()); // forgot to set source_index
++        const this_source_index = this.source_index;
++        const this_contents_or_fd = this.contents_or_fd;
+ 
+         const result = bun.default_allocator.create(Result) catch unreachable;
+         result.* = .{
+@@ -3008,10 +3070,10 @@ pub const ParseTask = struct {
+                         log.deinit();
+                         break :brk .{
+                             .empty = .{
+-                                .source_index = this.source_index,
++                                .source_index = this_source_index,
+                                 .watcher_data = .{
+-                                    .fd = if (this.contents_or_fd == .fd) this.contents_or_fd.fd.file else .zero,
+-                                    .dir_fd = if (this.contents_or_fd == .fd) this.contents_or_fd.fd.dir else .zero,
++                                    .fd = if (this_contents_or_fd == .fd) this_contents_or_fd.fd.file else .zero,
++                                    .dir_fd = if (this_contents_or_fd == .fd) this_contents_or_fd.fd.dir else .zero,
+                                 },
+                             },
+                         };
+@@ -3021,10 +3083,10 @@ pub const ParseTask = struct {
+                         log.deinit();
+                         break :brk .{
+                             .empty = .{
+-                                .source_index = this.source_index,
++                                .source_index = this_source_index,
+                                 .watcher_data = .{
+-                                    .fd = if (this.contents_or_fd == .fd) this.contents_or_fd.fd.file else .zero,
+-                                    .dir_fd = if (this.contents_or_fd == .fd) this.contents_or_fd.fd.dir else .zero,
++                                    .fd = if (this_contents_or_fd == .fd) this_contents_or_fd.fd.file else .zero,
++                                    .dir_fd = if (this_contents_or_fd == .fd) this_contents_or_fd.fd.dir else .zero,
+                                 },
+                             },
+                         };
+@@ -9730,7 +9792,50 @@ pub const LinkerContext = struct {
+             defer trace2.end();
+             defer max_heap_allocator.reset();
+ 
+-            const rel_path = chunk.final_rel_path;
++            var rel_path = chunk.final_rel_path;
++            var rel_path_sanitized_buf: ?[]u8 = null;
++            defer if (rel_path_sanitized_buf) |buf| bun.default_allocator.free(buf);
++
++            // Bootstrap-only workaround: legacy FreeBSD stage0 can emit corrupted chunk output
++            // paths with embedded source fragments/newlines (e.g. "bun/\n\nvar .js"). Sanitize
++            // only at the disk-write boundary so codegen can continue and expose the next blocker.
++            if (comptime Environment.isFreeBSD) {
++                if (std.mem.indexOfScalar(u8, rel_path, '\n') != null or std.mem.indexOfScalar(u8, rel_path, '\r') != null) {
++                    var tmp = std.ArrayList(u8).init(bun.default_allocator);
++                    errdefer tmp.deinit();
++
++                    for (rel_path) |ch| {
++                        if (ch == '\n' or ch == '\r' or ch == '\t' or ch == ' ') continue;
++                        tmp.append(ch) catch bun.outOfMemory();
++                    }
++
++                    if (tmp.items.len == 0 or tmp.items[tmp.items.len - 1] == '/') {
++                        tmp.appendSlice("unknown.js") catch bun.outOfMemory();
++                    }
++
++                    // If the path was corrupted, prefer a flat fallback basename. This avoids
++                    // depending on potentially-corrupted parent directories ("bun/...") while
++                    // we are only trying to keep legacy stage0 bootstrap codegen alive.
++                    if (std.mem.indexOfScalar(u8, rel_path, '\n') != null or
++                        std.mem.indexOfScalar(u8, rel_path, '\r') != null or
++                        std.mem.indexOfScalar(u8, rel_path, '\t') != null)
++                    {
++                        const base = std.fs.path.basename(tmp.items);
++                        if (!std.mem.eql(u8, base, tmp.items)) {
++                            const duped = bun.default_allocator.dupe(u8, base) catch bun.outOfMemory();
++                            tmp.deinit();
++                            rel_path_sanitized_buf = duped;
++                            rel_path = duped;
++                        } else {
++                            rel_path_sanitized_buf = tmp.toOwnedSlice() catch bun.outOfMemory();
++                            rel_path = rel_path_sanitized_buf.?;
++                        }
++                    } else {
++                        rel_path_sanitized_buf = tmp.toOwnedSlice() catch bun.outOfMemory();
++                        rel_path = rel_path_sanitized_buf.?;
++                    }
++                }
++            }
+             if (std.fs.path.dirnamePosix(rel_path)) |rel_parent| {
+                 if (rel_parent.len > 0) {
+                     root_dir.makePath(rel_parent) catch |err| {
+@@ -9768,7 +9873,7 @@ pub const LinkerContext = struct {
+                 .external, .linked => |tag| {
+                     const output_source_map = chunk.output_source_map.finalize(source_map_allocator, code_result.shifts) catch @panic("Failed to allocate memory for external source map");
+                     const source_map_final_rel_path = strings.concat(default_allocator, &.{
+-                        chunk.final_rel_path,
++                        rel_path,
+                         ".map",
+                     }) catch @panic("Failed to allocate memory for external source map path");
+ 
+@@ -9816,7 +9921,7 @@ pub const LinkerContext = struct {
+                             defer message.deinit();
+                             c.log.addErrorFmt(null, Logger.Loc.Empty, bun.default_allocator, "{} writing sourcemap for chunk {}", .{
+                                 bun.fmt.quote(message.slice()),
+-                                bun.fmt.quote(chunk.final_rel_path),
++                                bun.fmt.quote(rel_path),
+                             }) catch unreachable;
+                             return error.WriteFailed;
+                         },
+@@ -9882,11 +9987,46 @@ pub const LinkerContext = struct {
+                 },
+             )) {
+                 .err => |err| {
++                    var handled = false;
++                    if (comptime Environment.isFreeBSD) {
++                        const sys_err = err.toSystemError();
++                        if (sys_err.getErrno() == .NOENT) {
++                            var fallback_file = root_dir.createFile(rel_path, .{
++                                .truncate = true,
++                                .read = false,
++                            }) catch |fallback_err| {
++                                var message = err.toSystemError().message.toUTF8(bun.default_allocator);
++                                defer message.deinit();
++                                c.log.addErrorFmt(null, Logger.Loc.Empty, bun.default_allocator, "{} writing chunk {} (fallback createFile: {s})", .{
++                                    bun.fmt.quote(message.slice()),
++                                    bun.fmt.quote(rel_path),
++                                    @errorName(fallback_err),
++                                }) catch unreachable;
++                                return error.WriteFailed;
++                            };
++                            defer fallback_file.close();
++
++                            fallback_file.writeAll(code_result.buffer) catch |fallback_err| {
++                                var message = err.toSystemError().message.toUTF8(bun.default_allocator);
++                                defer message.deinit();
++                                c.log.addErrorFmt(null, Logger.Loc.Empty, bun.default_allocator, "{} writing chunk {} (fallback writeAll: {s})", .{
++                                    bun.fmt.quote(message.slice()),
++                                    bun.fmt.quote(rel_path),
++                                    @errorName(fallback_err),
++                                }) catch unreachable;
++                                return error.WriteFailed;
++                            };
++                            handled = true;
++                        }
++                    }
++                    if (handled) {
++                        break;
++                    }
+                     var message = err.toSystemError().message.toUTF8(bun.default_allocator);
+                     defer message.deinit();
+                     c.log.addErrorFmt(null, Logger.Loc.Empty, bun.default_allocator, "{} writing chunk {}", .{
+                         bun.fmt.quote(message.slice()),
+-                        bun.fmt.quote(chunk.final_rel_path),
++                        bun.fmt.quote(rel_path),
+                     }) catch unreachable;
+                     return error.WriteFailed;
+                 },
+@@ -9896,7 +10036,7 @@ pub const LinkerContext = struct {
+             output_files.appendAssumeCapacity(
+                 options.OutputFile.init(
+                     options.OutputFile.Options{
+-                        .output_path = bun.default_allocator.dupe(u8, chunk.final_rel_path) catch unreachable,
++                        .output_path = bun.default_allocator.dupe(u8, rel_path) catch unreachable,
+                         .input_path = input_path,
+                         .input_loader = if (chunk.entry_point.is_entry_point)
+                             c.parse_graph.input_files.items(.loader)[chunk.entry_point.source_index]
