@@ -573,6 +573,40 @@ Pass 2 completion check:
 2. `mixed` entries identify the temporary sub-behaviors (`path_watcher`, `node_fs`).
 3. Runtime-impacting entries include fs/watch/copy validation references.
 
+### Phase D Detailed Pass 3: Platform Parity Support (`sys` / `errno` / `os` / event loop)
+
+Status: **Started (classification pass 3 completed for core files below)**.
+
+Goal of this pass:
+
+1. Confirm the foundational FreeBSD platform support changes are clearly classified as long-term `keep`.
+2. Split out any temporary platform-adaptation choices (especially event-loop wake path decisions) from permanent support.
+3. Tie platform support entries to parity tests already passing (`util`, `os`, process/runtime slices).
+
+Detailed classification (current-tree):
+
+| File | FreeBSD-specific behavior | Classification | Why / replacement target | Repro / verify |
+|---|---|---|---|---|
+| `src/errno/freebsd_errno.zig` | Dedicated FreeBSD errno table + libuv errno aliases (including `ENODATA`/`UV_E.NODATA`) | `keep` | Fundamental platform parity support. Required for correct errno names/codes and Node/libuv compatibility behavior on FreeBSD. | `test/js/node/util/util.test.js` (`192 pass / 0 fail`) |
+| `src/sys.zig` | FreeBSD platform defs import; libc/syscall selection; FreeBSD-specific flags/types/syscall signatures (`fstatat`, `mkdir`, `pread/pwrite`, `writev` iovcnt types, etc.) | `keep` | Core cross-platform syscall layer support. These are required ABI/signature differences and should remain upstream. | Broad runtime coverage; `util`, `fs`, `os`, `process`, install paths exercised throughout Phase D/E |
+| `src/bun.js/node/node_os.zig` | FreeBSD implementations for `os.cpus()`, `os.release()`, `os.version()`, `os.loadavg()`, `os.userInfo()`, `os.totalmem()`, `os.uptime()` and FreeBSD network interface layout support | `keep` | Core Node `os` parity implementation for FreeBSD. Not a temporary workaround. | `test/js/node/os/os.test.js` (`52 pass / 0 fail`) |
+| `src/js/node/os.ts` | `os.type()` returns `\"FreeBSD\"` when `process.platform === \"freebsd\"` | `keep` | User-visible Node API parity; straightforward permanent platform support. | `test/js/node/os/os.test.js` |
+| `src/workaround_missing_symbols.zig` | FreeBSD symbol bindings (`stat`, `lstat`, `fstat`, `memmem`) via `current = freebsd` selection | `keep` | Platform glue for symbol availability/signatures. This is foundational support, not a bootstrap shim. | Indirectly exercised by broad fs/runtime coverage |
+| `src/perf.zig` | Explicitly disables Linux perf path on FreeBSD (`Environment.isLinux and !isFreeBSD`) | `mixed` (keep-dominant) | `keep`: correct to avoid Linux perf backend on FreeBSD. `temporary`/future follow-up: perf tracing on FreeBSD is intentionally disabled pending native implementation (not a regression blocker, but a pre-upstream capability gap to track). | Runtime smoke (no crashes when perf tracing disabled); no dedicated FreeBSD perf parity test yet |
+| `src/async/posix_event_loop.zig` | FreeBSD kqueue event type/layout support and flags handling; temporary FreeBSD waker selection uses `LinuxWaker`/eventfd path instead of native kqueue user-event waker | `mixed` | `keep`: FreeBSD kqueue event-loop integration and event flag handling. `temporary shim`: documented FreeBSD waker path keeps eventfd-based wake mechanism until a native kqueue user-event waker (`KEventWaker` equivalent) is implemented. | Broad runtime/test coverage; spawn/process/watch/http slices; event-loop behavior exercised throughout bootstrap + Phase E |
+
+Pass 3 notes / conclusions:
+
+1. This cluster is mostly long-term `keep` support, which is the expected outcome.
+2. The only notable temporary design choice here is `posix_event_loop.zig` waker selection on FreeBSD (`LinuxWaker` path), which is already documented in-code as temporary.
+3. `perf.zig` is functionally correct (`keep` to avoid wrong backend), but should remain in the pre-upstream cleanup/capability-tracking queue as a disabled-on-FreeBSD subsystem.
+
+Pass 3 completion check:
+
+1. All files listed in queue item 3 are now classified at a file level.
+2. `mixed` entries identify the temporary sub-behaviors (`posix_event_loop` waker path, `perf` backend disabled state).
+3. Runtime-impacting entries include parity test references (`util`, `os`) or broader subsystem coverage references.
+
 How to reproduce:
 
 ```bash

@@ -110,7 +110,8 @@ Priority areas:
      - expand the inventory beyond high-priority rows (now queued by subsystem in the roadmap doc)
     - completed first detailed classification pass: `spawn/process/stdio internals`
     - completed second detailed classification pass: `filesystem/watcher/copy paths`
-    - next classification pass: `platform parity support (mostly keep)`
+    - completed third detailed classification pass: `platform parity support (mostly keep)`
+    - next classification pass: `current-tree stage0/bootstrap codegen paths`
      - add `owner/risk/replacement target` notes for each `temporary shim`
    - Priority shims to classify first:
      - `src/js/internal/streams/readable.ts` stdin->stdio `pipe()` workaround
@@ -169,10 +170,10 @@ Priority areas:
 
 ### Phase D immediate focus (updated)
 
-1. Complete detailed classification pass 3: `platform parity support` cluster
-   - expected mostly `keep` entries (`errno/sys/os/event loop support`)
-   - confirm any remaining temporary compiler/runtime shims in this group are explicitly split out
-   - attach validation refs (`util.test.js`, `os.test.js`, related runtime slices)
+1. Complete detailed classification pass 4: `current-tree stage0/bootstrap codegen paths`
+   - classify file-level entries (`bootstrap-only` / `mixed` if any runtime effect)
+   - split strict-bootstrap orchestration from codegen-script runtime workarounds
+   - attach strict bootstrap / replay validation references
 2. Add a small "pre-upstream cleanup queue (debug hooks)" subsection update
    - explicitly track `BUN_FREEBSD_SPAWN_TRACE`
    - explicitly track `BUN_FREEBSD_FILESINK_TRACE`

@@ -4592,3 +4592,23 @@ Fresh strict replay validation completes end-to-end:
     - `node_fs.zig` FreeBSD+Zig 0.13 release-build `readFile*` compiler-workaround paths
   - `node_fs.zig` is documented as a `mixed` file that needs sub-item cleanup review (runtime support vs compiler workaround)
 - Updated `next-steps.md` to move the next Phase D pass to `platform parity support (mostly keep)`.
+
+### Phase D pass 3 completed: platform parity support classification
+
+- Completed the third detailed Phase D classification pass in `docs/freebsd-upstream-bootstrap-plan.md` for the
+  `platform parity support` cluster (`sys` / `errno` / `node:os` / event loop / support glue).
+- Classified and documented the current-tree FreeBSD-specific changes in:
+  - `src/errno/freebsd_errno.zig`
+  - `src/sys.zig`
+  - `src/bun.js/node/node_os.zig`
+  - `src/js/node/os.ts`
+  - `src/workaround_missing_symbols.zig`
+  - `src/perf.zig`
+  - `src/async/posix_event_loop.zig`
+- Key outcome:
+  - this cluster is mostly foundational platform support (`keep`) as expected
+  - two `mixed` entries are explicitly tracked:
+    - `src/async/posix_event_loop.zig`: temporary FreeBSD waker choice uses `LinuxWaker`/eventfd path until a native
+      kqueue user-event waker is implemented
+    - `src/perf.zig`: correct FreeBSD disablement of Linux perf backend, but still a capability gap to track
+- Updated `next-steps.md` to move the next Phase D pass to `current-tree stage0/bootstrap codegen paths`.
