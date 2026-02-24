@@ -4449,3 +4449,23 @@ Fresh strict replay validation completes end-to-end:
 - Current package-manager slice takeaway:
   - FreeBSD runtime is behaving well on self-contained install/link/lockfile-path tests.
   - Broader install/workspace coverage needs the local `verdaccio` test dependency available to continue.
+
+### Phase E expansion: `node:http` directory batch (major HTTP/2 timeout cluster + local deps)
+
+- `test/js/node/http` run result:
+  - `229 pass / 7 skip / 5 todo / 160 fail / 5 errors`
+- Failures split into two groups:
+  1. Local test dependency/setup blockers (not yet classified as FreeBSD runtime bugs):
+     - missing `proxy` (`node-http-connect.node.mts`)
+     - missing `express` (`node-http-uaf-fixture.ts`)
+     - missing `https-proxy-agent` (`node-http-agent-tls-options.test.mts`)
+  2. Major timeout cluster in HTTP/2 client compatibility tests:
+     - repeated `Client Basics` timeouts across `node none/max/aligned` and `bun none/max/aligned`
+     - source file identified as `test/js/node/http2/node-http2.test.js`
+
+- Isolation results:
+  - single HTTP/2 `Client Basics` GET test passes in isolation
+  - `Client Basics` subset filter also passes in isolation
+- Current interpretation:
+  - likely suite interaction / resource leak / state accumulation in the broader HTTP/2 test matrix,
+    not a simple "HTTP/2 client is entirely broken on FreeBSD".

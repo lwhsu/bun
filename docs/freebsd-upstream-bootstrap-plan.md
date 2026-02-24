@@ -514,6 +514,10 @@ Additional Phase E expansion progress (current branch):
 - `test/js/node/url` passes (`186 pass / 2 skip / 9 todo / 0 fail`)
 - `test/js/node/crypto` passes (`789 pass / 22 skip / 1 todo / 0 fail`)
 - `test/js/node/child_process` broader directory run is mostly green with invocation hygiene (avoid repo-root `.env`, set `PATH`), with remaining issues classified separately.
+- `test/js/node/http` directory run currently exposes:
+  - local missing test dependencies (`proxy`, `express`, `https-proxy-agent`)
+  - a major HTTP/2 timeout cluster sourced from `test/js/node/http2/node-http2.test.js` (`Client Basics` matrix)
+  - isolated HTTP/2 `Client Basics` cases pass, suggesting a suite interaction/resource issue rather than total HTTP/2 client failure
 - Initial package-manager/install slice checks pass:
   - `lockfile-only.test.ts`
   - `bun-install-pathname-trailing-slash.test.ts`

@@ -119,6 +119,9 @@ Priority areas:
        - `bun-link` also green
        - `bun-workspaces`, `isolated-install`, `bun-lock` currently blocked by missing local `verdaccio` test dependency
      - additional Node slices with runtime/process/file-system interaction (e.g. more `child_process` cases run outside repo root)
+     - `node:http` expansion now identifies next major runtime area:
+       - HTTP/2 `Client Basics` timeout cluster in `test/js/node/http2/node-http2.test.js`
+       - isolated single/subset cases pass; investigate suite interaction/resource leak
 
 3. Re-run / freeze Phase E core gate summary after watcher fix
    - Fixed FreeBSD child-side truncation in `process.stdin.pipe(process.stdout)` by adding
