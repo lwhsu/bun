@@ -4313,3 +4313,21 @@ Fresh strict replay validation completes end-to-end:
 - Current conclusion:
   - remaining bug is a deeper FreeBSD subprocess stdin pipe completion/flush race in the `FileSink`/sink-signal path
   - `handleResolveStream()` timing influences it but does not fully control the loss
+
+### `FileSink` instrumentation result: parent writes complete, child-side stdin path truncates
+
+- Added FreeBSD-only env-gated tracing in `src/bun.js/webcore/FileSink.zig` (`BUN_FREEBSD_FILESINK_TRACE=1`)
+  for:
+  - `onWrite`
+  - `handleResolveStream`
+  - `onClose`
+- Rebuilt with `BUN_FREEBSD_CODEGEN_NODE=1` and reran the exact 16x64KB repro.
+- Trace shows parent-side subprocess stdin sink completes the full payload:
+  - `written=1048576`
+  - `writer_pending=false` before `handleResolveStream(end)`
+  - `onClose` also observes `written=1048576`
+- Child process still reports truncated stdin (`458752` in the traced run).
+
+- Updated conclusion:
+  - The remaining `spawn-stdin-readable-stream` truncation is **not** in parent `FileSink` write completion.
+  - The loss is downstream, likely in child-side stdin read/stream pipeline (`process.stdin` / read stream path).

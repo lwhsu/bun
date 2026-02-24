@@ -102,10 +102,13 @@ Priority areas:
      - failing case: `ReadableStream with very large chunked data`
      - expected `1048576`, received variable truncated chunk totals (`393216`, `524288`, `655360`, etc.)
    - Confirmed child stdin is truncated (not parent stdout readback).
-   - `FileSink` pending accounting fix is already present; issue is now likely sink completion/flush race on subprocess stdin pipes.
+   - New finding from `FileSink` trace:
+     - parent subprocess stdin sink writes complete full `1048576` bytes before close
+     - truncation happens downstream in child-side stdin read path
    - Next debugging step:
-     - instrument `FileSink` + subprocess stdin sink signal lifecycle (`handleResolveStream`, `onClose`, writer flush/end callbacks)
-     - identify whether sink closes before pending writes drain vs pending result resolves early
+     - instrument/trace child-side `process.stdin` read stream path (`ReadStream`/`PipeReader`/stdin source)
+     - compare child `process.stdin.on("data")` vs `process.stdin.pipe(process.stdout)` behavior in same process
+     - isolate whether loss occurs before JS stream events or inside pipe-to-stdout flow
 
 2. Re-run Phase E core gate after spawn stdin fix
    - `test/js/node/process/process-stdio.test.ts` (currently green again)
