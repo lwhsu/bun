@@ -109,7 +109,8 @@ Priority areas:
    - Next in this step:
      - expand the inventory beyond high-priority rows (now queued by subsystem in the roadmap doc)
     - completed first detailed classification pass: `spawn/process/stdio internals`
-    - next classification pass: `filesystem/watcher/copy paths`
+    - completed second detailed classification pass: `filesystem/watcher/copy paths`
+    - next classification pass: `platform parity support (mostly keep)`
      - add `owner/risk/replacement target` notes for each `temporary shim`
    - Priority shims to classify first:
      - `src/js/internal/streams/readable.ts` stdin->stdio `pipe()` workaround
@@ -168,10 +169,10 @@ Priority areas:
 
 ### Phase D immediate focus (updated)
 
-1. Complete detailed classification pass 2: `filesystem / watcher / copy` cluster
-   - tag file-level entries as `keep` / `temporary shim` / `mixed`
-   - split `mixed` entries by exact temporary behavior
-   - attach validation refs (`fs.test.ts`, `fs.watch.test.ts`, copy/cp repros)
+1. Complete detailed classification pass 3: `platform parity support` cluster
+   - expected mostly `keep` entries (`errno/sys/os/event loop support`)
+   - confirm any remaining temporary compiler/runtime shims in this group are explicitly split out
+   - attach validation refs (`util.test.js`, `os.test.js`, related runtime slices)
 2. Add a small "pre-upstream cleanup queue (debug hooks)" subsection update
    - explicitly track `BUN_FREEBSD_SPAWN_TRACE`
    - explicitly track `BUN_FREEBSD_FILESINK_TRACE`

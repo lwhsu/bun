@@ -4570,3 +4570,25 @@ Fresh strict replay validation completes end-to-end:
     - stdin->stdio `pipe()` flush-barrier (`dest.end()`) workaround
   - FreeBSD debug trace hooks are now explicitly called out as debug-only temporary helpers to review before upstreaming
 - Updated `next-steps.md` to move the next Phase D pass to `filesystem/watcher/copy paths`.
+
+### Phase D pass 2 completed: filesystem / watcher / copy classification
+
+- Completed the second detailed Phase D classification pass in `docs/freebsd-upstream-bootstrap-plan.md` for the
+  `filesystem / watcher / copy` cluster.
+- Classified and documented the current-tree FreeBSD-specific changes in:
+  - `src/Watcher.zig`
+  - `src/bun.js/node/path_watcher.zig`
+  - `src/bun.js/node/node_fs.zig`
+  - `src/js/node/fs.ts`
+  - `src/js/node/fs.promises.ts`
+  - `src/bun.js/webcore/blob/copy_file.zig`
+  - `src/http/SendFile.zig`
+- Key outcome:
+  - watcher backend registration (`Watcher.zig`) and FreeBSD `sendfile` / copy implementations are classified as
+    platform support (`keep`)
+  - remaining high-risk temporary shims in this cluster are explicitly identified as:
+    - `path_watcher.zig` synthetic duplicate event workaround for `fs.promises.watch`
+    - JS `rmdir` errno normalization shims in `fs.ts` / `fs.promises.ts`
+    - `node_fs.zig` FreeBSD+Zig 0.13 release-build `readFile*` compiler-workaround paths
+  - `node_fs.zig` is documented as a `mixed` file that needs sub-item cleanup review (runtime support vs compiler workaround)
+- Updated `next-steps.md` to move the next Phase D pass to `platform parity support (mostly keep)`.

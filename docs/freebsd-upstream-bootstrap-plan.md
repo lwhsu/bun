@@ -534,6 +534,45 @@ Pass 1 completion check:
 2. Runtime-impacting entries have test/repro references.
 3. `mixed` entries identify the temporary sub-behavior to revisit.
 
+### Phase D Detailed Pass 2: Filesystem / Watcher / Copy Paths
+
+Status: **Started (classification pass 2 completed for core files below)**.
+
+Goal of this pass:
+
+1. Separate required FreeBSD kqueue/fs/copy platform support from temporary compatibility shims.
+2. Isolate Zig-version/compiler-workaround paths inside `node_fs` from long-term runtime design decisions.
+3. Record exact fs/watch/copy validation references before cleanup/replacement.
+
+Detailed classification (current-tree):
+
+| File | FreeBSD-specific behavior | Classification | Why / replacement target | Repro / verify |
+|---|---|---|---|---|
+| `src/Watcher.zig` | kqueue registration and fd-open handling extended to FreeBSD alongside macOS | `keep` | Fundamental watcher backend platform support (kqueue-based file/dir registration paths). This is required FreeBSD support, not a workaround. | `test/js/node/watch/fs.watch.test.ts`; FreeBSD watcher smoke/repros in `bun-bootstrap.md` |
+| `src/bun.js/node/path_watcher.zig` | FreeBSD kqueue directory rescan fallback when event payload lacks names; synthetic duplicate event for higher-level consumer compatibility | `mixed` | `keep`: directory rescan fallback is required because FreeBSD kqueue directory notifications do not provide child-name/op granularity. `temporary shim`: extra synthetic duplicate event (with timestamp spacing) is a compatibility workaround to avoid starvation in `fs.promises.watch`; should be revisited with a more principled event synthesis model. | `test/js/node/watch/fs.watch.test.ts` (`32 pass / 0 fail`) |
+| `src/bun.js/node/node_fs.zig` | FreeBSD copy/cp read-write fallback paths; FreeBSD `rmdir` ENOTEMPTY normalization; several FreeBSD+Zig 0.13 release-build readFile/readFileSync workarounds | `mixed` | `keep`: FreeBSD copy/cp read-write fallback and low-level `rmdir` normalization are runtime support. `temporary shim`: Zig 0.13/FreeBSD release-build miscompile workarounds in readFile/readFileSync fast-path/ArrayList/string return handling should be reevaluated when compiler baseline changes or root cause is fixed. | `test/js/node/fs/fs.test.ts` (`234 pass / 6 skip / 0 fail`); targeted `mkdtemp`, `cp`, `rmdir` repros logged in `bun-bootstrap.md` |
+| `src/js/node/fs.ts` | JS-level `EREMOTE` -> `ENOTEMPTY` normalization for `rmdir` callback/sync paths | `temporary shim` | Compatibility shim compensating for incorrect errno serialization in lower layers. Target is to remove/narrow after errno/path-level mapping is fully aligned so JS wrapper shim is unnecessary. | `test/js/node/fs/fs.test.ts` (`rmdir` cases) |
+| `src/js/node/fs.promises.ts` | JS-level `EREMOTE` -> `ENOTEMPTY` normalization for promises `rmdir` | `temporary shim` | Same shim class as `src/js/node/fs.ts`; should disappear once lower-level errno mapping consistently yields `ENOTEMPTY`. | `test/js/node/fs/fs.test.ts` (`promises.rmdir` cases) |
+| `src/bun.js/webcore/blob/copy_file.zig` | FreeBSD copy path uses `NodeFS.copyFileUsingReadWriteLoop(...)` instead of unsupported Linux fast paths | `keep` (performance-followup) | Correct functional FreeBSD implementation for blob/file copy path. This may be less optimized than future native FreeBSD fast paths, but it is not a semantic workaround. | `test/js/node/fs/fs.test.ts`; copy/cp code paths exercised during install/package-manager tests |
+| `src/http/SendFile.zig` | FreeBSD-specific `sendfile(2)` call signature/errno handling in POSIX sendfile path | `keep` | Required API/signature/platform support. This is the correct FreeBSD `sendfile` integration, not a temporary workaround. | HTTP file-send flows; `node:http`/`http2` coverage and HTTP smoke tests |
+
+Pass 2 notes / conclusions:
+
+1. The highest-risk temporary shims in this cluster are:
+   - `path_watcher.zig` synthetic duplicate event emission (behavior workaround)
+   - JS-level `rmdir` errno normalization in `src/js/node/fs.ts` and `src/js/node/fs.promises.ts`
+   - `node_fs.zig` Zig 0.13/FreeBSD release-build readFile/readFileSync workarounds
+2. Watcher and copy/sendfile backend support itself is now clearly classified as `keep` and should not be conflated with the temporary compatibility layers above it.
+3. `node_fs.zig` should be split into sub-items during cleanup review:
+   - runtime support (`copy`, `rmdir`)
+   - compiler-specific temporary workarounds (`readFile*`)
+
+Pass 2 completion check:
+
+1. All files listed in queue item 2 are now classified at a file level.
+2. `mixed` entries identify the temporary sub-behaviors (`path_watcher`, `node_fs`).
+3. Runtime-impacting entries include fs/watch/copy validation references.
+
 How to reproduce:
 
 ```bash
