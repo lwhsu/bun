@@ -497,6 +497,43 @@ Classification completion criteria for each pass:
 2. `mixed` entries identify the exact sub-behavior that is temporary
 3. At least one validation command or test reference is recorded for runtime-impacting entries
 
+### Phase D Detailed Pass 1: Spawn / Process / Stdio Internals
+
+Status: **Started (classification pass 1 completed for core files below)**.
+
+Goal of this pass:
+
+1. Separate fundamental FreeBSD process/spawn support (`keep`) from short-term runtime compatibility shims.
+2. Isolate bootstrap/debug-only toggles so they do not get mixed with runtime parity work.
+3. Record exact retest references before touching any of these paths again.
+
+Detailed classification (current-tree):
+
+| File | FreeBSD-specific behavior | Classification | Why / replacement target | Repro / verify |
+|---|---|---|---|---|
+| `src/bun.js/api/bun/spawn.zig` | Uses Bun `posix_spawn_bun` path on FreeBSD; FreeBSD-specific `wait4()` wrapper behavior | `keep` | Core POSIX spawn/wait platform support. Not a workaround; this is the real FreeBSD implementation path and should remain upstream. | `test/js/node/process/process-stdio.test.ts`; `test/js/node/process/process-stdin.test.ts`; `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` |
+| `src/bun.js/api/bun/process.zig` | Defaults waiter thread on FreeBSD (`NOTE_EXIT` misses for short-lived children); `reapIfExitedNoHang()` helper; FreeBSD wait loop polling | `mixed` | `keep`: waiter-thread default + WNOHANG polling are platform reliability support. `temporary shim`: if later kqueue/EVFILT_PROC handling becomes reliable enough, the default/poll interval can be revisited for overhead. | High-churn spawn/process slices; `test/js/node/process/process-stdio.test.ts`; `test/js/node/process/process-stdin.test.ts`; broader `test/js/node/child_process` runs |
+| `src/bun.js/api/bun/js_bun_spawn_bindings.zig` | FreeBSD post-setup `reapIfExitedNoHang()` probe to close watch-registration race for very short-lived children | `keep` | Narrow platform race mitigation tied to FreeBSD exit notification behavior. This is runtime correctness support, not bootstrap-only. | `test/js/node/process/process-stdio.test.ts`; `test/js/node/process/process-stdin.test.ts`; short-lived spawn repros in `bun-bootstrap.md` |
+| `src/shell/subproc.zig` | FreeBSD post-spawn `reapIfExitedNoHang()` probe in shell subprocess path | `keep` | Same race class as JS spawn bindings, but for shell subprocesses. Runtime correctness support for short-lived shell commands. | Shell subprocess smoke / spawn coverage used during bootstrap and Phase E |
+| `src/bun.js/api/bun/subprocess.zig` | `BUN_FREEBSD_SPAWN_TRACE` debug trace helper only | `temporary shim` (debug-only) | Debug instrumentation for FreeBSD spawn diagnosis. Keep locally while Phase D/E remains active; remove or gate behind generic debug tracing before upstreaming if not broadly useful. | `BUN_FREEBSD_SPAWN_TRACE=1` ad hoc repros |
+| `src/bun.js/webcore/FileSink.zig` | FreeBSD flush/resolve ordering changes in `handleResolveStream()`; defer `stream.done()` signaling to `onClose()` on FreeBSD; env-gated trace helper | `mixed` | `keep`: pending-write accounting fixes and ordering correctness if validated as general bugfix. `temporary shim`: FreeBSD-specific completion ordering and trace hooks until child-side stdin path root cause is fully resolved/confirmed. Revisit after broader stdin/pipe parity confidence. | `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`; focused 16x64KB stdin->stdout repro; `BUN_FREEBSD_FILESINK_TRACE=1` instrumentation repro |
+| `src/js/builtins/ReadableStream.ts` | FreeBSD `ReadableStream.text()` fallback decodes via `Buffer.from(bytes).toString()` instead of native `TextDecoder`/fast path | `temporary shim` | Verified runtime compatibility workaround for first-byte corruption in subprocess stdout `.text()`. Replace after root-causing `TextDecoder`/decode-path corruption on FreeBSD. | `test/js/node/process/process-stdio.test.ts`; Unicode stdout repros in `bun-bootstrap.md` |
+| `src/js/internal/streams/readable.ts` | FreeBSD `process.stdin.pipe(process.stdout|stderr)` flush-barrier path calls `dest.end()` for narrow stdio relay case | `temporary shim` | Compatibility workaround to avoid stdin truncation at process exit. Behavior tradeoff vs Node stdio end semantics; replace after child-side stdin/stdio pipeline root cause is fixed. | `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`; focused stdin->stdout chunked relay repro |
+
+Pass 1 notes / conclusions:
+
+1. The highest-risk runtime shims in this cluster remain JS-side:
+   - `ReadableStream.text()` decode fallback (`src/js/builtins/ReadableStream.ts`)
+   - stdio flush-barrier in `Readable.prototype.pipe()` (`src/js/internal/streams/readable.ts`)
+2. The FreeBSD `reapIfExitedNoHang()` probes and waiter-thread default are currently classified as runtime platform support (`keep` / `mixed keep-dominant`) because they address real short-lived child exit races and have broad coverage evidence.
+3. Debug tracing helpers (`BUN_FREEBSD_SPAWN_TRACE`, `BUN_FREEBSD_FILESINK_TRACE`) should remain available during Phase D/E, but should be explicitly reviewed in the pre-upstream cleanup queue.
+
+Pass 1 completion check:
+
+1. All files listed in queue item 1 are now classified at a file level.
+2. Runtime-impacting entries have test/repro references.
+3. `mixed` entries identify the temporary sub-behavior to revisit.
+
 How to reproduce:
 
 ```bash

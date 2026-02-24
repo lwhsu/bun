@@ -4548,3 +4548,25 @@ Fresh strict replay validation completes end-to-end:
   - every file tagged
   - `mixed` entries split into exact temporary sub-behaviors
   - runtime-impacting entries include a repro/validation reference
+
+### Phase D pass 1 completed: spawn / process / stdio internals classification
+
+- Completed the first detailed Phase D classification pass in `docs/freebsd-upstream-bootstrap-plan.md` for the
+  `spawn/process/stdio` cluster.
+- Classified and documented the current-tree FreeBSD-specific changes in:
+  - `src/bun.js/api/bun/spawn.zig`
+  - `src/bun.js/api/bun/process.zig`
+  - `src/bun.js/api/bun/js_bun_spawn_bindings.zig`
+  - `src/shell/subproc.zig`
+  - `src/bun.js/api/bun/subprocess.zig`
+  - `src/bun.js/webcore/FileSink.zig`
+  - `src/js/builtins/ReadableStream.ts`
+  - `src/js/internal/streams/readable.ts`
+- Key outcome:
+  - process/spawn exit-race mitigations (`reapIfExitedNoHang()` probes, waiter-thread default) are currently
+    classified as platform runtime support (`keep` / keep-dominant `mixed`)
+  - highest-risk temporary shims remain JS-side runtime compatibility workarounds:
+    - `ReadableStream.text()` Buffer decode fallback
+    - stdin->stdio `pipe()` flush-barrier (`dest.end()`) workaround
+  - FreeBSD debug trace hooks are now explicitly called out as debug-only temporary helpers to review before upstreaming
+- Updated `next-steps.md` to move the next Phase D pass to `filesystem/watcher/copy paths`.

@@ -108,7 +108,8 @@ Priority areas:
      - added initial high-priority inventory rows (stdio/watch/fs/codegen/errno/os)
    - Next in this step:
      - expand the inventory beyond high-priority rows (now queued by subsystem in the roadmap doc)
-     - execute next classification pass: `spawn/process/stdio internals`
+    - completed first detailed classification pass: `spawn/process/stdio internals`
+    - next classification pass: `filesystem/watcher/copy paths`
      - add `owner/risk/replacement target` notes for each `temporary shim`
    - Priority shims to classify first:
      - `src/js/internal/streams/readable.ts` stdin->stdio `pipe()` workaround
@@ -164,3 +165,14 @@ Priority areas:
    - This is now a cleanup/polish blocker, not blocking current Phase E progress when `BUN_FREEBSD_CODEGEN_NODE=1`.
 
 7. Document + checkpoint after each material Phase D/E result (per workflow policy)
+
+### Phase D immediate focus (updated)
+
+1. Complete detailed classification pass 2: `filesystem / watcher / copy` cluster
+   - tag file-level entries as `keep` / `temporary shim` / `mixed`
+   - split `mixed` entries by exact temporary behavior
+   - attach validation refs (`fs.test.ts`, `fs.watch.test.ts`, copy/cp repros)
+2. Add a small "pre-upstream cleanup queue (debug hooks)" subsection update
+   - explicitly track `BUN_FREEBSD_SPAWN_TRACE`
+   - explicitly track `BUN_FREEBSD_FILESINK_TRACE`
+3. Keep Phase E core gate as regression floor while touching D-classified areas
