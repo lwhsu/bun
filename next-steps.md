@@ -122,7 +122,8 @@ Priority areas:
      - `node:http` expansion now identifies next major runtime area:
        - HTTP/2 `Client Basics` timeout cluster appears only in broader `node:http` directory run
        - full `test/js/node/http2/node-http2.test.js` passes standalone
-       - investigate `node:http` suite cascading interaction (likely after missing dependency failures / cleanup)
+       - reduced `node:http` rerun excluding missing-dependency tests passes
+       - classify remaining `node:http` issue as test-environment/dependency setup (proxy/express/https-proxy-agent), not current FreeBSD HTTP/2 blocker
 
 3. Re-run / freeze Phase E core gate summary after watcher fix
    - Fixed FreeBSD child-side truncation in `process.stdin.pipe(process.stdout)` by adding

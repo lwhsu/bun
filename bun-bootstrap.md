@@ -4481,3 +4481,18 @@ Fresh strict replay validation completes end-to-end:
   - the `node:http` directory timeout cluster is a broader suite interaction/cascading failure condition
     (very likely influenced by earlier dependency/setup failures and/or shared-state cleanup), not an
     isolated FreeBSD HTTP/2 client protocol correctness regression.
+
+### `node:http` reduced rerun confirms missing-dependency suite-cascade hypothesis
+
+- Reran `test/js/node/http` test files excluding known missing-dependency blockers:
+  - excluded:
+    - `node-http-connect.test.ts` (requires `proxy`)
+    - `node-http-uaf.test.ts` (fixture requires `express`)
+    - `node-http-agent-tls-options.test.mts` (requires `https-proxy-agent`)
+- Result for remaining HTTP tests:
+  - `113 pass / 1 skip / 1 todo / 0 fail` (15 files)
+- This removes the prior HTTP/2 timeout cluster entirely.
+
+- Conclusion:
+  - the broad `node:http` timeout cascade is triggered by suite interaction after dependency/setup failures,
+    not by a standalone FreeBSD HTTP/2 runtime defect.

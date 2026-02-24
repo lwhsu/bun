@@ -518,6 +518,7 @@ Additional Phase E expansion progress (current branch):
   - local missing test dependencies (`proxy`, `express`, `https-proxy-agent`)
   - a major HTTP/2 timeout cluster sourced from `test/js/node/http2/node-http2.test.js` (`Client Basics` matrix)
   - full `test/js/node/http2/node-http2.test.js` passes in isolation (`245 pass / 6 skip / 0 fail`), confirming a suite interaction/cascading issue rather than a standalone HTTP/2 client failure
+  - rerunning the `node:http` set without the missing-dependency files passes (`113 pass / 1 skip / 1 todo / 0 fail`), confirming the timeout cluster is tied to suite/dependency-failure interaction
 - Initial package-manager/install slice checks pass:
   - `lockfile-only.test.ts`
   - `bun-install-pathname-trailing-slash.test.ts`
