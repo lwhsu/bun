@@ -744,14 +744,8 @@ fn handleResolveStream(this: *FileSink, globalThis: *jsc.JSGlobalObject) void {
         }
     }
 
-    if (comptime Environment.isFreeBSD) {
-        if (this.readable_stream.has()) {
-            // Let onClose() signal completion after the writer actually finishes. Signaling done
-            // here races the subprocess stdin pipe flush path on FreeBSD and can truncate chunked
-            // writes even when end()/flush has been requested.
-        }
-    } else if (this.readable_stream.get(globalThis)) |*stream| {
-            stream.done(globalThis);
+    if (this.readable_stream.get(globalThis)) |*stream| {
+        stream.done(globalThis);
     }
     freebsdFileSinkTrace("handleResolveStream(end) done={} pending_state={s} writer_pending={} written={}", .{
         this.done,

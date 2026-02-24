@@ -4725,3 +4725,21 @@ Fresh strict replay validation completes end-to-end:
   - the JS flush-barrier workaround is still required on the current branch
   - next cleanup target should be the lower-level FreeBSD completion-order path in `src/bun.js/webcore/FileSink.zig`
     before reattempting removal of the `Readable.prototype.pipe()` workaround.
+
+### Phase D P1 cleanup progress: removed `FileSink` FreeBSD completion-order defer branch
+
+- Followed the P0-2 conclusion and tested the lower-level FreeBSD completion-order branch in
+  `src/bun.js/webcore/FileSink.zig`.
+- Removed the FreeBSD-only `handleResolveStream()` deferral (FreeBSD now uses the shared `stream.done(globalThis)`
+  path again).
+- Rebuilt and reran the targeted regression floor immediately after the code change:
+  - `./build/release/bun test test/js/node/process/process-stdin.test.ts` => `6 pass / 0 fail`
+  - `./build/release/bun test test/js/node/process/process-stdio.test.ts` => `9 pass / 0 fail`
+  - `./build/release/bun test test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail`
+- Important result:
+  - the previously sensitive chunked stdin cases in `spawn-stdin-readable-stream.test.ts` stayed green
+  - this indicates the FreeBSD-only `FileSink` completion-order defer workaround is no longer needed on the current
+    branch (while keeping the generic pending-write accounting fixes).
+- Next step:
+  - reattempt removal of the higher-level `Readable.prototype.pipe()` stdin->stdio flush-barrier (`dest.end()`)
+    with the same targeted regression floor and focused chunked relay repro.
