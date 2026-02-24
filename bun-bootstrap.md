@@ -4706,3 +4706,22 @@ Fresh strict replay validation completes end-to-end:
 - Notes:
   - I briefly tested two speculative fixes in `encoding.zig` and `TextDecoder.zig`, confirmed they were no-ops for this
     bug, and reverted them before landing the real fix in `unicode.zig`.
+
+### Phase D P0-2 cleanup attempt: `Readable.prototype.pipe()` stdin->stdio flush-barrier still required
+
+- Tried to remove the FreeBSD `useFreeBSDStdioFlushBarrier` special case in `src/js/internal/streams/readable.ts`
+  (set it to `false` temporarily) to test whether the lower-level fixes had made it unnecessary.
+- After rebuild:
+  - focused 16x64KB stdin->stdout relay repro still passed
+  - `test/js/node/process/process-stdio.test.ts` still passed
+  - but `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` regressed immediately:
+    - `ReadableStream with large data` failed
+    - `ReadableStream with very large chunked data` failed
+    - observed truncation example: `393216 / 1048576`
+- Restored the workaround and rebuilt.
+- Revalidated after restore:
+  - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail`
+- Conclusion:
+  - the JS flush-barrier workaround is still required on the current branch
+  - next cleanup target should be the lower-level FreeBSD completion-order path in `src/bun.js/webcore/FileSink.zig`
+    before reattempting removal of the `Readable.prototype.pipe()` workaround.

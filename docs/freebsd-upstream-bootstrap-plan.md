@@ -777,6 +777,36 @@ Impact on prioritization:
 1. `src/js/builtins/ReadableStream.ts` FreeBSD decode fallback can be removed from the active P0 queue (done on branch).
 2. `src/bun.js/webcore/encoding.zig` remains a tracked temporary shim (`Pass 5`) but is no longer the primary suspected cause of this TextDecoder bug.
 
+#### P0-2 Cleanup Attempt: stdin->stdio flush-barrier (`Readable.prototype.pipe()`)
+
+Status: **Attempted; workaround still required (kept)**.
+
+What was tested:
+
+1. Temporarily disabled the FreeBSD `useFreeBSDStdioFlushBarrier` branch in:
+   - `src/js/internal/streams/readable.ts`
+2. Rebuilt and reran:
+   - focused 16x64KB stdin->stdout relay repro
+   - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
+   - `test/js/node/process/process-stdio.test.ts`
+
+Results:
+
+1. Focused repro still passed (not sufficient to prove safety).
+2. `process-stdio.test.ts` still passed.
+3. `spawn-stdin-readable-stream.test.ts` regressed immediately:
+   - `ReadableStream with large data` failed
+   - `ReadableStream with very large chunked data` failed
+   - observed truncation example: `393216 / 1048576`
+
+Conclusion:
+
+1. The FreeBSD flush-barrier in `Readable.prototype.pipe()` is still masking a real remaining completion/exit race.
+2. The workaround must remain for now.
+3. Next cleanup target should move to the lower-level path:
+   - `src/bun.js/webcore/FileSink.zig` FreeBSD completion-order branch
+   - then reattempt `readable.ts` removal after lower-level fixes.
+
 How to reproduce:
 
 ```bash
