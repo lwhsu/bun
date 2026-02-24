@@ -181,5 +181,6 @@ Priority areas:
    - `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier (attempted twice, including after `FileSink`
      cleanup; still required)
    - `src/bun.js/webcore/FileSink.zig` FreeBSD completion-order branch (cleanup completed; targeted tests green)
-   - next: `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround
+   - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround (attempted; still required)
    - later retry: `src/js/internal/streams/readable.ts` flush-barrier after additional child-side stdio pipeline fixes
+   - next: `src/js/node/fs.ts` / `src/js/node/fs.promises.ts` `rmdir` errno normalization shim

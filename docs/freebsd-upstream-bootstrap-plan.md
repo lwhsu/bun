@@ -716,7 +716,7 @@ Prioritized cleanup list (temporary shims + `mixed` sub-behaviors):
 | P0 | stdin->stdio flush-barrier (`dest.end()`) in `Readable.prototype.pipe()` | `src/js/internal/streams/readable.ts` | `temporary shim` | High runtime semantic risk; explicitly trades off Node stdio-end semantics for reliability in a narrow path. Broadly visible if user code pipes `process.stdin` to stdio. | Fix child-side stdin/stdio pipeline completion/exit ordering so chunked writes are not truncated without ending stdio. Remove special-case branch. | Focused stdin->stdout chunked repro passes without special-case `dest.end()`, and `spawn-stdin-readable-stream` suite remains green. |
 | P0 | FreeBSD encoding owned-buffer copy workaround | `src/bun.js/webcore/encoding.zig` | `temporary shim` | Runtime correctness workaround intersects with prior Unicode/text corruption investigations. Likely related to broader string ownership/decoding behavior. | Identify ownership/lifetime issue in external string creation path; restore external-buffer path or a principled FreeBSD-safe equivalent. | Process/unicode decoding repros pass with workaround removed or reduced; no regressions in process/text slices. |
 | P1 | `FileSink` FreeBSD completion-order workaround (`stream.done()` defer) | `src/bun.js/webcore/FileSink.zig` | `mixed` sub-behavior | Cleanup in progress: FreeBSD-only defer branch has been removed on this branch and targeted tests are green; continue watching for regressions while the higher-level stdio flush-barrier shim still exists. | Keep generic pending-write accounting fixes; validate the shared completion path under broader coverage, then downgrade/remove remaining FreeBSD-specific `FileSink` behavior/debug hooks. | `spawn-stdin-readable-stream`, `process-stdio`, and `process-stdin` remain green after removing the FreeBSD-only defer branch. |
-| P1 | watcher synthetic duplicate event workaround | `src/bun.js/node/path_watcher.zig` | `mixed` sub-behavior | Medium risk; synthetic duplicate event intentionally shapes higher-level behavior and may produce extra notifications. Required workaround today for `fs.promises.watch` parity. | Improve FreeBSD directory fallback event synthesis / consumer readiness so one synthetic event is sufficient, or model explicit create/remove reconciliation more precisely. | `fs.watch.test.ts` remains green without duplicate synthetic event emission. |
+| P1 | watcher synthetic duplicate event workaround | `src/bun.js/node/path_watcher.zig` | `mixed` sub-behavior | Medium risk; synthetic duplicate event intentionally shapes higher-level behavior and may produce extra notifications. Cleanup attempt on current branch regressed `fs.promises.watch` timeout, so the workaround remains required. | Improve FreeBSD directory fallback event synthesis / consumer readiness so one synthetic event is sufficient, or model explicit create/remove reconciliation more precisely. | `fs.watch.test.ts` remains green without duplicate synthetic event emission. |
 | P1 | JS `rmdir` errno normalization (`EREMOTE -> ENOTEMPTY`) | `src/js/node/fs.ts`, `src/js/node/fs.promises.ts` | `temporary shim` | Medium risk; JS-layer compatibility shim is straightforward but should not remain if lower layers can serialize errno correctly. | Move normalization to lower-level errno/path handling (or fully fix FreeBSD errno plumbing for this path) and remove JS wrapper mapping. | `fs.test.ts` `rmdir` cases pass after removing JS shims. |
 | P1 | `node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler workarounds | `src/bun.js/node/node_fs.zig` | `mixed` sub-behavior | Medium risk, but compiler/version-scoped. Clutters runtime path and may become obsolete once compiler baseline changes. | Re-test on supported compiler baseline (current/Oven Zig path) and reduce/remove workaround branches that no longer reproduce. | `fs.test.ts` + targeted small-file `readFileSync` string paths pass with workaround reduced/removed on chosen baseline. |
 | P2 | FreeBSD waiter-thread default / polling interval tuning | `src/bun.js/api/bun/process.zig` | `mixed` sub-behavior (keep-dominant) | Low-medium risk; current behavior addresses real exit-race reliability and is likely acceptable. Main concern is overhead/tuning, not correctness regression. | Optional: revisit if native kqueue NOTE_EXIT handling proves reliable enough under stress. | High-churn spawn/child_process stress remains reliable with changed/default strategy (if revisited). |
@@ -863,6 +863,32 @@ Conclusion:
    restored.
 3. The remaining race is further narrowed to behavior above/beyond the removed `FileSink` defer branch; future cleanup
    work should target the child-side stdio pipeline/exit ordering more directly.
+
+#### P1 Cleanup Attempt: watcher synthetic duplicate event still required
+
+Status: **Attempted; workaround still required (kept)**.
+
+What was tested:
+
+1. Removed the extra FreeBSD synthetic duplicate event in the directory-rescan fallback in:
+   - `src/bun.js/node/path_watcher.zig`
+2. Kept the FreeBSD directory rescan fallback itself intact (only reduced duplicate emission).
+3. Rebuilt and ran:
+   - `test/js/node/watch/fs.watch.test.ts`
+
+Results:
+
+1. `fs.watch.test.ts` regressed:
+   - `fs.promises.watch > add file/folder to folder` timed out
+2. Restored the duplicate synthetic event (with timestamp spacing beyond dedupe threshold), rebuilt, and reran:
+   - `fs.watch.test.ts` => `32 pass / 0 fail`
+
+Conclusion:
+
+1. The FreeBSD directory rescan fallback remains correct/required.
+2. The extra synthetic duplicate event is still required for `fs.promises.watch` parity on the current branch.
+3. Future cleanup should target a more principled FreeBSD directory event synthesis or consumer-readiness fix, not just
+   removal of the duplicate emission.
 
 How to reproduce:
 

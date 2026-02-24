@@ -4767,3 +4767,18 @@ Fresh strict replay validation completes end-to-end:
 - Conclusion:
   - removing the `FileSink` FreeBSD completion-order defer branch was a valid cleanup, but it is not sufficient to
     remove the higher-level `Readable.prototype.pipe()` flush-barrier workaround yet.
+
+### Phase D P1 cleanup attempt: watcher synthetic duplicate event still required
+
+- Tested reducing the FreeBSD watcher workaround in `src/bun.js/node/path_watcher.zig` by removing the extra synthetic
+  duplicate event in the directory-rescan fallback (kept the rescan fallback itself).
+- Rebuilt and ran:
+  - `./build/release/bun test test/js/node/watch/fs.watch.test.ts`
+- Result:
+  - regression in `fs.promises.watch > add file/folder to folder` (timeout)
+  - confirms the duplicate synthetic event is still required for current `fs.promises.watch` parity behavior
+- Restored the duplicate synthetic event (with timestamp spacing beyond the dedupe threshold), rebuilt, reran:
+  - `./build/release/bun test test/js/node/watch/fs.watch.test.ts` => `32 pass / 0 fail`
+- Conclusion:
+  - the duplicate synthetic event workaround stays for now
+  - future cleanup needs a more principled event synthesis / consumer-readiness fix, not a simple removal.
