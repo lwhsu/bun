@@ -964,8 +964,30 @@ Validation (after rebuild):
 Conclusion:
 
 1. The FreeBSD `result_bytes` duplicate workaround is no longer needed on the current baseline.
-2. Remaining `readFileWithOptions()` FreeBSD branches (string-return union path and explicit len assignment path) should
-   be tested next.
+2. Remaining `readFileWithOptions()` FreeBSD branches (explicit len assignment path) should be tested next.
+
+#### P1 Cleanup Progress: remove `node_fs.zig` FreeBSD string-return union special-case
+
+Status: **Completed on current branch (shared string-return path restored)**.
+
+What was changed:
+
+1. Removed the FreeBSD-only `transcoded_string` return special-case in `readFileWithOptions()` for
+   `string_type == .default`:
+   - `src/bun.js/node/node_fs.zig`
+2. FreeBSD now uses the shared `.string = result_bytes` union return path.
+
+Validation (after rebuild):
+
+1. Focused UTF-8 `readFileSync` stress probe (small file, `20,000` iterations) passed:
+   - no corruption
+   - no spurious `ENOMEM`
+2. `test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+
+Conclusion:
+
+1. The FreeBSD string-return union special-case is no longer needed on the current baseline.
+2. The remaining explicit len-assignment workaround should be tested separately before removal.
 
 How to reproduce:
 

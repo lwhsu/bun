@@ -5352,17 +5352,6 @@ pub const NodeFS = struct {
             },
             else => brk: {
                 if (comptime string_type == .default) {
-                    if (comptime Environment.isFreeBSD) {
-                        // FreeBSD bootstrap path: avoid returning raw []u8 through this
-                        // union boundary for readFileSync string paths. Convert while the
-                        // owned buffer is still local and return a Bun string directly.
-                        break :brk .{
-                            .result = .{
-                                .transcoded_string = jsc.WebCore.encoding.toBunStringFromOwnedSlice(result_bytes, args.encoding),
-                            },
-                        };
-                    }
-
                     break :brk .{
                         .result = .{
                             .string = result_bytes,

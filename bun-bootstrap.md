@@ -4829,3 +4829,16 @@ Fresh strict replay validation completes end-to-end:
   - next `node_fs` cleanup step should test the remaining FreeBSD `readFileWithOptions()` branches:
     - string-return union path (`transcoded_string` special-case)
     - explicit len-assignment workaround path (if still reproducible).
+
+### Phase D P1 cleanup progress: removed `node_fs.zig` string-return union special-case
+
+- Continued the `src/bun.js/node/node_fs.zig` `readFileWithOptions()` cleanup by removing the FreeBSD-only
+  string-return special-case (`.transcoded_string = toBunStringFromOwnedSlice(...)`) for `string_type == .default`.
+- FreeBSD now uses the shared `.string = result_bytes` union return path.
+- Rebuilt (`BUN_FREEBSD_CODEGEN_NODE=1` path).
+- Revalidated with the same regression floor:
+  - focused UTF-8 `readFileSync` stress probe (small file, 20,000 iterations) => `ok`
+  - `./build/release/bun test test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+- Conclusion:
+  - the FreeBSD string-return union special-case is no longer needed on the current baseline
+  - next remaining `node_fs` cleanup target in this cluster is the explicit len-assignment workaround path.
