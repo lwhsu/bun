@@ -100,9 +100,12 @@ Priority areas:
    - Repro now stable (no crash):
      - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
      - failing case: `ReadableStream with very large chunked data`
-     - expected `1048576`, received `393216`
-   - Likely area remains `FileSink` / subprocess stdin pipe write accounting.
-   - Re-check previously identified `pending.consumed` accounting fixes against current tree state.
+     - expected `1048576`, received variable truncated chunk totals (`393216`, `524288`, `655360`, etc.)
+   - Confirmed child stdin is truncated (not parent stdout readback).
+   - `FileSink` pending accounting fix is already present; issue is now likely sink completion/flush race on subprocess stdin pipes.
+   - Next debugging step:
+     - instrument `FileSink` + subprocess stdin sink signal lifecycle (`handleResolveStream`, `onClose`, writer flush/end callbacks)
+     - identify whether sink closes before pending writes drain vs pending result resolves early
 
 2. Re-run Phase E core gate after spawn stdin fix
    - `test/js/node/process/process-stdio.test.ts` (currently green again)

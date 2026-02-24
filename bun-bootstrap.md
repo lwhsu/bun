@@ -4285,3 +4285,31 @@ Fresh strict replay validation completes end-to-end:
 - Additional observation (separate from the fixed crash):
   - A minimal probe using `await p.exited` after touching `p.stdout` can return `ECHILD (waitpid)`
   - This appears to be a subprocess lifecycle bug separate from the `p.stdout` getter crash.
+
+### Follow-up: chunked stdin truncation still unresolved (narrowed to FileSink completion race)
+
+- Remaining failure after crash recovery:
+  - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
+  - only failing case: `ReadableStream with very large chunked data`
+- Reconfirmed exact failure is child-stdin truncation, not parent stdout readback:
+  - child process reports same byte count on stderr (`process.stdin.on('data')` accumulator)
+  - e.g. `393216`, `524288`, `655360`, `720896` (varies by run)
+- Truncation is chunk-granular and timing-dependent:
+  - matrix repro (`64KB` chunks) produces different received chunk counts per run
+  - single 1MB chunk path still passes
+
+- Investigated `src/bun.js/webcore/FileSink.zig`:
+  - previous pending accounting fix (`f6c80898e4`) is still present and matches current tree
+  - `/dev/null` sink probe passes up to 1MB, so the bug is specific to subprocess stdin pipe path
+
+- Tried FreeBSD-specific `FileSink.handleResolveStream()` mitigations:
+  1. call `end()` (flush path) instead of direct `writer.close()` on FreeBSD
+  2. reorder to flush/end before `stream.done()`
+  3. suppress early `stream.done()` on FreeBSD and rely on sink close path (`onClose`) to signal completion
+- Result:
+  - behavior changes (truncation amount shifts), but the test still fails
+  - current rerun still receives `393216 / 1048576`
+
+- Current conclusion:
+  - remaining bug is a deeper FreeBSD subprocess stdin pipe completion/flush race in the `FileSink`/sink-signal path
+  - `handleResolveStream()` timing influences it but does not fully control the loss

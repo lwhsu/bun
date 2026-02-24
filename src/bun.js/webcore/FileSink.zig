@@ -701,12 +701,28 @@ pub const FlushPendingTask = struct {
 
 /// Does not ref or unref.
 fn handleResolveStream(this: *FileSink, globalThis: *jsc.JSGlobalObject) void {
-    if (this.readable_stream.get(globalThis)) |*stream| {
-        stream.done(globalThis);
+    // Flush/finish the sink before notifying the JS ReadableStream wrapper. On FreeBSD subprocess
+    // stdin pipes we can otherwise resolve the source stream early and race pending buffered writes,
+    // causing chunked stdin truncation.
+    if (!this.done) {
+        if (comptime Environment.isFreeBSD) {
+            switch (this.end(null)) {
+                .err => this.writer.close(),
+                .result => {},
+            }
+        } else {
+            this.writer.close();
+        }
     }
 
-    if (!this.done) {
-        this.writer.close();
+    if (comptime Environment.isFreeBSD) {
+        if (this.readable_stream.has()) {
+            // Let onClose() signal completion after the writer actually finishes. Signaling done
+            // here races the subprocess stdin pipe flush path on FreeBSD and can truncate chunked
+            // writes even when end()/flush has been requested.
+        }
+    } else if (this.readable_stream.get(globalThis)) |*stream| {
+            stream.done(globalThis);
     }
 }
 
