@@ -4469,3 +4469,15 @@ Fresh strict replay validation completes end-to-end:
 - Current interpretation:
   - likely suite interaction / resource leak / state accumulation in the broader HTTP/2 test matrix,
     not a simple "HTTP/2 client is entirely broken on FreeBSD".
+
+### HTTP/2 isolation follow-up: `node-http2.test.js` passes standalone
+
+- Ran `test/js/node/http2/node-http2.test.js` directly:
+  - `245 pass / 6 skip / 0 fail`
+- Also verified earlier:
+  - single `Client Basics` GET case passes
+  - `Client Basics` subset filter passes
+- Updated interpretation:
+  - the `node:http` directory timeout cluster is a broader suite interaction/cascading failure condition
+    (very likely influenced by earlier dependency/setup failures and/or shared-state cleanup), not an
+    isolated FreeBSD HTTP/2 client protocol correctness regression.
