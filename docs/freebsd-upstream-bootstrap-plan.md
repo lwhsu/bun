@@ -399,7 +399,7 @@ Exit criteria:
 
 Goal: move from bootstrap success to maintainable FreeBSD runtime support.
 
-Status: **In progress (major gate slices passing)**.
+Status: **In progress (Phase E core gate green; workaround inventory/classification still pending)**.
 
 How to do it:
 
@@ -438,7 +438,7 @@ Exit criteria:
 
 Goal: define and execute a FreeBSD confidence gate before upstreaming.
 
-Status: **In progress**.
+Status: **In progress (core gate green, expansion triage ongoing)**.
 
 Baseline commits for reproducibility (current local workspace snapshot):
 
@@ -723,10 +723,43 @@ Exit criteria:
 
 ## 4. Immediate Next Steps (Execution Order)
 
-1. Refresh and freeze a Phase E gate on the replay-proven strict-bootstrap baseline (re-run key slices, record outcomes).
-2. Continue Phase D cleanup of temporary compatibility shims (label keep/replace/bootstrap-only).
-3. Finish high-priority Pre-Upstream Cleanup Queue items (including the `bake-codegen.ts` stage0 placeholder fallback classification/replacement plan).
-4. Start Phase F patch-stack split only after D/E gate and cleanup queue are stable.
+1. **Phase D first**: inventory and classify current FreeBSD-specific changes by subsystem.
+   - Deliverable: documented classification table (`keep` / `temporary shim` / `bootstrap-only`) with repro references.
+   - Scope target: current-tree runtime and codegen workarounds first; legacy stage0 patchset remains separately tracked under `scripts/patches/`.
+2. Freeze the now-green Phase E core gate in docs (current baseline command list + exact pass counts) and keep it as the regression floor.
+3. Continue Phase E expansion only for high-value slices that are:
+   - self-contained, or
+   - clearly marked as blocked by missing local test dependencies (`verdaccio`, `proxy`, `express`, `https-proxy-agent`, etc.).
+4. Finish high-priority Pre-Upstream Cleanup Queue items that directly affect reviewability:
+   - classify/narrow `bake-codegen.ts` stage0 placeholder fallback
+   - classify temporary runtime shims (`ReadableStream.text`, stdin->stdio pipe workaround, watcher synthetic duplicates)
+   - stage0 version string reporting (`Linux x64`) classification/fix
+5. Start Phase F patch-stack split only after:
+   - Phase D workaround inventory is complete
+   - Phase E core gate remains green
+   - major temporary shims have an explicit keep/replace/defer rationale
+
+### 4.1 Phase D Scope & Effort Estimate (Current Branch)
+
+This estimate is for the **current-tree** FreeBSD delta review and classification work, not the legacy stage0 replay patchset maintenance.
+
+1. Inventory + classification pass (docs + references):
+   - scope: ~25-40 current-tree files with FreeBSD-specific logic or FreeBSD bootstrap/runtime toggles
+   - effort: ~0.5-1.5 days
+2. High-priority shim review (design + targeted retest):
+   - `src/js/internal/streams/readable.ts` stdin->stdio workaround
+   - `src/js/builtins/ReadableStream*` FreeBSD `text()` fallback
+   - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround
+   - `src/js/node/fs.ts` / `src/js/node/fs.promises.ts` compatibility shims (`rmdir`, etc.)
+   - effort: ~1-3 days depending on whether any shim is replaced immediately vs deferred
+3. Bootstrap-only workaround classification (current-tree codegen):
+   - `src/codegen/bake-codegen.ts`, `bundle-modules.ts`, `bundle-functions.ts`, `bindgen.ts`, `create-hash-table.ts`
+   - effort: ~0.5-1.5 days (classification/docs), more only if replacement work is attempted now
+
+Overall Phase D-before-F estimate:
+
+1. Minimum (classification-focused, with deferrals): ~2-4 days
+2. Aggressive (replace several temporary shims before F): ~4-8+ days
 
 ### Phase E progress update (2026-02-22, TLS)
 

@@ -4496,3 +4496,18 @@ Fresh strict replay validation completes end-to-end:
 - Conclusion:
   - the broad `node:http` timeout cascade is triggered by suite interaction after dependency/setup failures,
     not by a standalone FreeBSD HTTP/2 runtime defect.
+
+### Planning checkpoint: Phase D-first pivot (status/roadmap review)
+
+- Performed a full branch/status/roadmap review after the recent Phase E progress.
+- Current status summary:
+  - Phase C (strict bootstrap + replayability) complete
+  - Phase E core gate is green
+  - Phase E expansion is progressing well, with several large slices green (`url`, `crypto`) and many remaining
+    failures now classified as local test dependency/setup issues rather than FreeBSD runtime defects
+- Roadmap adjustment:
+  - switch immediate priority to **Phase D** (workaround inventory + classification) before further broad Phase E expansion
+  - keep Phase E expansion running opportunistically for self-contained slices / well-classified environment blockers
+- Scope/effort estimate recorded in `docs/freebsd-upstream-bootstrap-plan.md`:
+  - minimum (classification-first): ~2-4 days
+  - aggressive (replace several temporary shims before Phase F): ~4-8+ days

@@ -96,7 +96,21 @@ Priority areas:
 4. Pre-upstream cleanup queue high-priority items are either fixed or explicitly deferred with rationale
 ## Immediate Next Steps (updated 2026-02-24)
 
-1. Freeze and document Phase E core-gate baseline (now green)
+1. Phase D first: build and document a workaround inventory/classification table
+   - Inventory current-tree FreeBSD-specific changes by subsystem (`spawn/stdio`, `watch/fs`, `codegen`, `os/util/errno`, etc.).
+   - For each item, classify as:
+     - `keep` (upstreamable platform support)
+     - `temporary shim` (replace later)
+     - `bootstrap-only` (legacy/stage0 or strict-bootstrap workaround)
+   - Attach repro/validation references from `bun-bootstrap.md` for each high-risk item.
+   - Priority shims to classify first:
+     - `src/js/internal/streams/readable.ts` stdin->stdio `pipe()` workaround
+     - `src/js/builtins/ReadableStream*` FreeBSD `text()` fallback
+     - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround
+     - `src/js/node/fs.ts` / `src/js/node/fs.promises.ts` compatibility shims
+     - current-tree codegen stage0 fallbacks in `src/codegen/*`
+
+2. Freeze and document Phase E core-gate baseline (now green)
    - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail`
    - `test/js/node/process/process-stdio.test.ts` => `9 pass / 0 fail`
    - `test/js/node/process/process-stdin.test.ts` => `6 pass / 0 fail`
@@ -106,7 +120,7 @@ Priority areas:
    - Watcher note:
      - FreeBSD synthetic duplicate event must use timestamp spacing `> 1` to bypass duplicate filtering.
 
-2. Expand Phase E coverage (next high-value slices)
+3. Expand Phase E coverage (next high-value slices, after/alongside Phase D inventory)
    - `test/js/node/child_process/*` broader batch:
      - mostly green under controlled invocation (`PATH` includes `build/release`, avoid repo-root `.env`)
      - remaining `spawn(...,{env})` failure from repo root is `.env` autoload contamination, not runtime semantics
@@ -125,18 +139,6 @@ Priority areas:
        - reduced `node:http` rerun excluding missing-dependency tests passes
        - classify remaining `node:http` issue as test-environment/dependency setup (proxy/express/https-proxy-agent), not current FreeBSD HTTP/2 blocker
 
-3. Re-run / freeze Phase E core gate summary after watcher fix
-   - Fixed FreeBSD child-side truncation in `process.stdin.pipe(process.stdout)` by adding
-     a narrow `Readable.prototype.pipe()` compatibility path for stdin->stdio relay on source end.
-   - Verified:
-     - focused 16x64KB repro now receives full `1048576`
-     - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail`
-   - Re-run / confirm current baseline for:
-     - `test/js/node/process/process-stdio.test.ts` (green)
-     - `test/js/node/util/util.test.js` (green)
-     - `test/js/node/fs/fs.test.ts` (green)
-     - `test/js/node/watch/fs.watch.test.ts` (pending single `fs.promises.watch` timeout)
-
 4. Track behavior impact of the stdin->stdio `pipe()` workaround
    - The current FreeBSD workaround ends stdio for the narrow `process.stdin.pipe(process.stdout|stderr)` case.
    - Run targeted process/stdio stream tests to detect regressions in scripts that continue writing after stdin end.
@@ -154,4 +156,4 @@ Priority areas:
    - `process.reallyExit(0)` -> `process.exit(0)` did not fix it.
    - This is now a cleanup/polish blocker, not blocking current Phase E progress when `BUN_FREEBSD_CODEGEN_NODE=1`.
 
-7. Document + checkpoint after each material Phase E result (per workflow policy)
+7. Document + checkpoint after each material Phase D/E result (per workflow policy)
