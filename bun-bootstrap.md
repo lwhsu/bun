@@ -4654,3 +4654,26 @@ Fresh strict replay validation completes end-to-end:
   - `BUN_FREEBSD_FILESINK_TRACE`
   - `BUN_FREEBSD_MODULE_TRACE`
 - Updated `next-steps.md` to move from inventory coverage to Phase D cleanup prioritization (ranking/replacement targets).
+
+### Phase D cleanup prioritization added (post-inventory execution order)
+
+- Added a new `Phase D Cleanup Prioritization (Post-Inventory)` section to
+  `docs/freebsd-upstream-bootstrap-plan.md`.
+- The section now ranks all remaining `temporary shim` and `mixed` sub-behaviors by:
+  - runtime semantic risk
+  - breadth of impact
+  - upstream review friction
+  - replacement/repro readiness
+  - bootstrap-only vs runtime impact
+- Added explicit replacement targets and removal/downgrade conditions for each prioritized item.
+- Current ranking outcome:
+  - **P0** focuses on the Unicode/text-decoding symptom cluster:
+    - `src/js/builtins/ReadableStream.ts` (`ReadableStream.text()` Buffer fallback)
+    - `src/js/internal/streams/readable.ts` is still P0 for semantics, but the roadmap now recommends starting with
+      `src/bun.js/webcore/encoding.zig` + `ReadableStream.ts` together because they likely share root cause
+  - **P1** includes `FileSink` completion-order workaround, watcher synthetic duplicate event, JS `rmdir` errno shim,
+    and `node_fs.zig` Zig 0.13 readFile* workarounds
+  - **P3** groups debug trace hooks and bootstrap-only stage0 codegen workarounds for later isolated cleanup/Phase F split
+- Updated `next-steps.md` to start executing the first prioritized cleanup target:
+  - investigate `src/bun.js/webcore/encoding.zig` + `src/js/builtins/ReadableStream.ts` together under the existing
+    process-stdio Unicode repros and Phase E core-gate regression floor.

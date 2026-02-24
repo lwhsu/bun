@@ -172,13 +172,12 @@ Priority areas:
 
 ### Phase D immediate focus (updated)
 
-1. Start Phase D cleanup prioritization (post-inventory)
-   - rank all `temporary shim` and `mixed` sub-behaviors by upstream risk
-   - add owner/replacement target/removal condition notes for each
-   - identify which shims must be reduced before Phase F vs can remain documented
+1. Execute Phase D cleanup priority P0-1
+   - investigate `src/bun.js/webcore/encoding.zig` and `src/js/builtins/ReadableStream.ts` together
+   - test whether a root-cause fix in encoding removes/reduces the `ReadableStream.text()` Buffer fallback
+   - document exact repros and rollback criteria before changing behavior
 2. Keep Phase E core gate as regression floor while touching D-classified areas
-3. Choose the first cleanup target from the highest-risk temporary runtime shims
-   - current likely candidates:
-     - `src/js/builtins/ReadableStream.ts` decode fallback
-     - `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier
-     - `src/bun.js/webcore/encoding.zig` ownership/copy workaround
+3. Queue next P0/P1 cleanup targets after P0-1 result
+   - `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier
+   - `src/bun.js/webcore/FileSink.zig` FreeBSD completion-order branch
+   - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround

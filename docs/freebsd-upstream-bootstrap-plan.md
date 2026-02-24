@@ -687,6 +687,56 @@ Pass 5 completion check:
 2. Temporary/debug-only entries are explicitly identified and cross-linked to the pre-upstream cleanup queue.
 3. Phase D inventory queue coverage is complete.
 
+### Phase D Cleanup Prioritization (Post-Inventory)
+
+Status: **Started (initial ranking + replacement/removal criteria documented)**.
+
+Purpose:
+
+1. Convert the Phase D inventory from classification into an execution order.
+2. Identify which temporary shims are most likely to block upstream review or hide real runtime defects.
+3. Distinguish:
+   - must-reduce before Phase F (upstream patch split),
+   - can remain temporarily with strong documentation,
+   - bootstrap-only items that should stay isolated.
+
+Ranking criteria (used for this branch):
+
+1. Runtime semantic risk (does it intentionally change user-visible behavior?)
+2. Breadth of impact (how many subsystems/tests rely on the path?)
+3. Upstream review friction (hard to justify as permanent?)
+4. Availability of a concrete replacement target/repro
+5. Whether the workaround is bootstrap-only (lower priority for runtime hardening)
+
+Prioritized cleanup list (temporary shims + `mixed` sub-behaviors):
+
+| Priority | Item | File(s) | Type | Current status / risk | Replacement target | Removal / downgrade condition |
+|---|---|---|---|---|---|---|
+| P0 | `ReadableStream.text()` FreeBSD Buffer decode fallback | `src/js/builtins/ReadableStream.ts` | `temporary shim` | High runtime semantic risk; masks underlying decode-path/TextDecoder corruption on subprocess stdout buffers. Impacts general `.text()` behavior and is difficult to upstream as-is. | Root-cause and fix the FreeBSD decode corruption in native/text decoding path (likely `TextDecoder`/buffer ownership/encoding path). Then restore normal fast-path behavior. | Unicode subprocess stdout repros and `test/js/node/process/process-stdio.test.ts` pass with fallback removed. |
+| P0 | stdin->stdio flush-barrier (`dest.end()`) in `Readable.prototype.pipe()` | `src/js/internal/streams/readable.ts` | `temporary shim` | High runtime semantic risk; explicitly trades off Node stdio-end semantics for reliability in a narrow path. Broadly visible if user code pipes `process.stdin` to stdio. | Fix child-side stdin/stdio pipeline completion/exit ordering so chunked writes are not truncated without ending stdio. Remove special-case branch. | Focused stdin->stdout chunked repro passes without special-case `dest.end()`, and `spawn-stdin-readable-stream` suite remains green. |
+| P0 | FreeBSD encoding owned-buffer copy workaround | `src/bun.js/webcore/encoding.zig` | `temporary shim` | Runtime correctness workaround intersects with prior Unicode/text corruption investigations. Likely related to broader string ownership/decoding behavior. | Identify ownership/lifetime issue in external string creation path; restore external-buffer path or a principled FreeBSD-safe equivalent. | Process/unicode decoding repros pass with workaround removed or reduced; no regressions in process/text slices. |
+| P1 | `FileSink` FreeBSD completion-order workaround (`stream.done()` defer) | `src/bun.js/webcore/FileSink.zig` | `mixed` sub-behavior | Medium-high risk; affects stream completion timing semantics. Current tests are green, but this is still a FreeBSD-only ordering change. | Confirm/repair the underlying subprocess stdin completion race so FreeBSD can share the normal completion path (keeping generic accounting fixes). | `spawn-stdin-readable-stream` and focused repros pass with FreeBSD-only ordering branch removed; trace hooks no longer needed. |
+| P1 | watcher synthetic duplicate event workaround | `src/bun.js/node/path_watcher.zig` | `mixed` sub-behavior | Medium risk; synthetic duplicate event intentionally shapes higher-level behavior and may produce extra notifications. Required workaround today for `fs.promises.watch` parity. | Improve FreeBSD directory fallback event synthesis / consumer readiness so one synthetic event is sufficient, or model explicit create/remove reconciliation more precisely. | `fs.watch.test.ts` remains green without duplicate synthetic event emission. |
+| P1 | JS `rmdir` errno normalization (`EREMOTE -> ENOTEMPTY`) | `src/js/node/fs.ts`, `src/js/node/fs.promises.ts` | `temporary shim` | Medium risk; JS-layer compatibility shim is straightforward but should not remain if lower layers can serialize errno correctly. | Move normalization to lower-level errno/path handling (or fully fix FreeBSD errno plumbing for this path) and remove JS wrapper mapping. | `fs.test.ts` `rmdir` cases pass after removing JS shims. |
+| P1 | `node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler workarounds | `src/bun.js/node/node_fs.zig` | `mixed` sub-behavior | Medium risk, but compiler/version-scoped. Clutters runtime path and may become obsolete once compiler baseline changes. | Re-test on supported compiler baseline (current/Oven Zig path) and reduce/remove workaround branches that no longer reproduce. | `fs.test.ts` + targeted small-file `readFileSync` string paths pass with workaround reduced/removed on chosen baseline. |
+| P2 | FreeBSD waiter-thread default / polling interval tuning | `src/bun.js/api/bun/process.zig` | `mixed` sub-behavior (keep-dominant) | Low-medium risk; current behavior addresses real exit-race reliability and is likely acceptable. Main concern is overhead/tuning, not correctness regression. | Optional: revisit if native kqueue NOTE_EXIT handling proves reliable enough under stress. | High-churn spawn/child_process stress remains reliable with changed/default strategy (if revisited). |
+| P2 | FreeBSD event loop waker uses `LinuxWaker`/eventfd path | `src/async/posix_event_loop.zig` | `mixed` sub-behavior | Low runtime risk relative to P0/P1, but architectural cleanup item. In-code marked temporary. | Implement native kqueue user-event waker for FreeBSD (`KEventWaker` equivalent) and retire eventfd-based path. | Event-loop regression tests/smokes remain green with native FreeBSD waker. |
+| P2 | `feature_flags.zig` SIMDUTF disabled on FreeBSD | `src/feature_flags.zig` | `mixed` capability gate | Low correctness risk; conservative capability disable. Review friction is “why disabled?” more than runtime bug risk. | Validate SIMDUTF path on FreeBSD toolchains/ABI and enable if safe. | Bench/tests and correctness checks pass with `use_simdutf` enabled on FreeBSD. |
+| P2 | Debug allocator assert relaxations | `src/Global.zig`, `src/allocators/MimallocArena.zig` | `temporary shim` / `mixed` sub-behavior | Debug-only paths; low production risk but cleanup-worthy before upstream. | Reconcile allocator shutdown/assert behavior with FreeBSD+mimalloc and restore assertions where valid. | Debug builds/stress runs pass with assertions restored or narrowed. |
+| P3 | FreeBSD-specific debug trace hooks | `src/bun.js/api/bun/process.zig`, `src/bun.js/api/bun/subprocess.zig`, `src/shell/subproc.zig`, `src/bun.js/webcore/FileSink.zig`, `src/bun.js/bindings/ZigGlobalObject.cpp` | `temporary shim` (debug-only) | Low runtime risk, high review-noise risk. Useful for local diagnosis but should not ship as-is unless generalized. | Remove after D/E stabilization or convert to generic debug scopes/envs. | No active blocker requires them; equivalent diagnostics available through generic logging/debug scopes. |
+| P3 | Bootstrap-only codegen/stage0 workarounds | `scripts/bootstrap-freebsd.sh`, `src/codegen/*` stage0-specific branches | `bootstrap-only` / `mixed` (`bundle-modules.ts`) | Not runtime parity blockers. Important for replayability, but can be isolated and reviewed separately in Phase F. | Keep isolated; reduce only pre-upstream placeholders/high-friction items (e.g. `bake-codegen.ts` placeholder fallback) unless they interfere with runtime work. | Phase F patch split cleanly isolates bootstrap-only changes; pre-upstream cleanup queue items addressed/documented. |
+
+Execution guidance after ranking:
+
+1. Start with one P0 item and keep the Phase E core gate as the regression floor.
+2. Prefer fixes that reduce multiple shims at once (e.g. if `encoding.zig` root cause resolves `ReadableStream.text()` fallback).
+3. Defer P2/P3 items unless they block reviewability or mask active runtime issues.
+
+Recommended next cleanup target (current branch evidence):
+
+1. `src/bun.js/webcore/encoding.zig` + `src/js/builtins/ReadableStream.ts` pair (investigate together)
+   - Reason: both relate to the same Unicode/text-decoding symptom cluster and may share root cause.
+
 How to reproduce:
 
 ```bash
