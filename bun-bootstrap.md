@@ -4782,3 +4782,21 @@ Fresh strict replay validation completes end-to-end:
 - Conclusion:
   - the duplicate synthetic event workaround stays for now
   - future cleanup needs a more principled event synthesis / consumer-readiness fix, not a simple removal.
+
+### Phase D P1 cleanup progress: removed JS `rmdir` errno normalization shims
+
+- Investigated the `EREMOTE -> ENOTEMPTY` JS shims in:
+  - `src/js/node/fs.ts`
+  - `src/js/node/fs.promises.ts`
+- Before changing code, ran a non-empty-directory `rmdir` probe (sync/callback/promise) and confirmed the current
+  binary already returned `ENOTEMPTY` in all three paths (`errno = -66` on FreeBSD), indicating the JS shim was likely
+  redundant.
+- Removed the JS normalization shims and rebuilt (`BUN_FREEBSD_CODEGEN_NODE=1` path).
+- Revalidated:
+  - non-empty-directory `rmdir` probe still reports `ENOTEMPTY` for sync/callback/promise
+  - `./build/release/bun test test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+    - includes `rmdir`, `rmdirSync`, and `fs.promises.rmdir` coverage
+- Conclusion:
+  - JS `rmdir` normalization shim is no longer needed on the current branch
+  - keep the lower-layer FreeBSD normalization in `src/bun.js/node/node_fs.zig` for now (comment there is stale and
+    should be cleaned up later).

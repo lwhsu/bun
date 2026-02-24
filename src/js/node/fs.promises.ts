@@ -26,14 +26,6 @@ const kFlag = Symbol("kFlag");
 
 let Interface; // lazy value for require("node:readline").Interface.
 
-function normalizeFreeBSDRmdirError(err: any) {
-  if (process.platform === "freebsd" && err?.code === "EREMOTE") {
-    err.code = "ENOTEMPTY";
-    err.errno = -39;
-  }
-  return err;
-}
-
 function watch(
   filename: string | Buffer | URL,
   options: { encoding?: BufferEncoding; persistent?: boolean; recursive?: boolean; signal?: AbortSignal } = {},
@@ -224,11 +216,7 @@ const exports = {
   lutimes: asyncWrap(fs.lutimes, "lutimes"),
   rm: asyncWrap(fs.rm, "rm"),
   rmdir: async function rmdir(...args) {
-    try {
-      return await fs.rmdir.$apply(fs, args);
-    } catch (err) {
-      throw normalizeFreeBSDRmdirError(err);
-    }
+    return await fs.rmdir.$apply(fs, args);
   },
   writev: async (fd, buffers, position) => {
     var bytesWritten = await fs.writev(fd, buffers, position);

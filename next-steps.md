@@ -183,4 +183,5 @@ Priority areas:
    - `src/bun.js/webcore/FileSink.zig` FreeBSD completion-order branch (cleanup completed; targeted tests green)
    - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround (attempted; still required)
    - later retry: `src/js/internal/streams/readable.ts` flush-barrier after additional child-side stdio pipeline fixes
-   - next: `src/js/node/fs.ts` / `src/js/node/fs.promises.ts` `rmdir` errno normalization shim
+   - `src/js/node/fs.ts` / `src/js/node/fs.promises.ts` `rmdir` errno normalization shim (cleanup completed)
+   - next: `src/bun.js/node/node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler-era workarounds (revalidate on current baseline)

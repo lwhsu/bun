@@ -717,7 +717,7 @@ Prioritized cleanup list (temporary shims + `mixed` sub-behaviors):
 | P0 | FreeBSD encoding owned-buffer copy workaround | `src/bun.js/webcore/encoding.zig` | `temporary shim` | Runtime correctness workaround intersects with prior Unicode/text corruption investigations. Likely related to broader string ownership/decoding behavior. | Identify ownership/lifetime issue in external string creation path; restore external-buffer path or a principled FreeBSD-safe equivalent. | Process/unicode decoding repros pass with workaround removed or reduced; no regressions in process/text slices. |
 | P1 | `FileSink` FreeBSD completion-order workaround (`stream.done()` defer) | `src/bun.js/webcore/FileSink.zig` | `mixed` sub-behavior | Cleanup in progress: FreeBSD-only defer branch has been removed on this branch and targeted tests are green; continue watching for regressions while the higher-level stdio flush-barrier shim still exists. | Keep generic pending-write accounting fixes; validate the shared completion path under broader coverage, then downgrade/remove remaining FreeBSD-specific `FileSink` behavior/debug hooks. | `spawn-stdin-readable-stream`, `process-stdio`, and `process-stdin` remain green after removing the FreeBSD-only defer branch. |
 | P1 | watcher synthetic duplicate event workaround | `src/bun.js/node/path_watcher.zig` | `mixed` sub-behavior | Medium risk; synthetic duplicate event intentionally shapes higher-level behavior and may produce extra notifications. Cleanup attempt on current branch regressed `fs.promises.watch` timeout, so the workaround remains required. | Improve FreeBSD directory fallback event synthesis / consumer readiness so one synthetic event is sufficient, or model explicit create/remove reconciliation more precisely. | `fs.watch.test.ts` remains green without duplicate synthetic event emission. |
-| P1 | JS `rmdir` errno normalization (`EREMOTE -> ENOTEMPTY`) | `src/js/node/fs.ts`, `src/js/node/fs.promises.ts` | `temporary shim` | Medium risk; JS-layer compatibility shim is straightforward but should not remain if lower layers can serialize errno correctly. | Move normalization to lower-level errno/path handling (or fully fix FreeBSD errno plumbing for this path) and remove JS wrapper mapping. | `fs.test.ts` `rmdir` cases pass after removing JS shims. |
+| P1 | JS `rmdir` errno normalization (`EREMOTE -> ENOTEMPTY`) | `src/js/node/fs.ts`, `src/js/node/fs.promises.ts` | `temporary shim` | Cleanup completed on current branch: JS shims removed after confirming lower layers already return `ENOTEMPTY` for sync/callback/promise `rmdir` paths. | Keep lower-layer normalization (currently in `node_fs.zig`) or replace with more principled errno serialization once the FreeBSD errno path is fully cleaned up. | `fs.test.ts` `rmdir` cases pass after removing JS shims. |
 | P1 | `node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler workarounds | `src/bun.js/node/node_fs.zig` | `mixed` sub-behavior | Medium risk, but compiler/version-scoped. Clutters runtime path and may become obsolete once compiler baseline changes. | Re-test on supported compiler baseline (current/Oven Zig path) and reduce/remove workaround branches that no longer reproduce. | `fs.test.ts` + targeted small-file `readFileSync` string paths pass with workaround reduced/removed on chosen baseline. |
 | P2 | FreeBSD waiter-thread default / polling interval tuning | `src/bun.js/api/bun/process.zig` | `mixed` sub-behavior (keep-dominant) | Low-medium risk; current behavior addresses real exit-race reliability and is likely acceptable. Main concern is overhead/tuning, not correctness regression. | Optional: revisit if native kqueue NOTE_EXIT handling proves reliable enough under stress. | High-churn spawn/child_process stress remains reliable with changed/default strategy (if revisited). |
 | P2 | FreeBSD event loop waker uses `LinuxWaker`/eventfd path | `src/async/posix_event_loop.zig` | `mixed` sub-behavior | Low runtime risk relative to P0/P1, but architectural cleanup item. In-code marked temporary. | Implement native kqueue user-event waker for FreeBSD (`KEventWaker` equivalent) and retire eventfd-based path. | Event-loop regression tests/smokes remain green with native FreeBSD waker. |
@@ -889,6 +889,37 @@ Conclusion:
 2. The extra synthetic duplicate event is still required for `fs.promises.watch` parity on the current branch.
 3. Future cleanup should target a more principled FreeBSD directory event synthesis or consumer-readiness fix, not just
    removal of the duplicate emission.
+
+#### P1 Cleanup Progress: remove JS `rmdir` errno normalization shims
+
+Status: **Completed on current branch (JS shims removed)**.
+
+What was tested:
+
+1. Probed `rmdir` behavior on a non-empty directory before code changes (sync, callback, and promise paths):
+   - all returned `ENOTEMPTY` already (not `EREMOTE`)
+2. Removed JS normalization shims from:
+   - `src/js/node/fs.ts`
+   - `src/js/node/fs.promises.ts`
+3. Rebuilt and reran:
+   - non-empty-directory `rmdir` probe (sync/callback/promise)
+   - `test/js/node/fs/fs.test.ts`
+
+Results:
+
+1. Probe after rebuild still reports:
+   - `sync ENOTEMPTY`
+   - `cb ENOTEMPTY`
+   - `prom ENOTEMPTY`
+2. `fs.test.ts` remains green:
+   - `234 pass / 6 skip / 0 fail`
+   - `rmdir` / `rmdirSync` / `fs.promises.rmdir` cases all pass
+
+Conclusion:
+
+1. The JS `EREMOTE -> ENOTEMPTY` normalization shims were redundant on the current branch and have been removed.
+2. The remaining FreeBSD-specific normalization in `src/bun.js/node/node_fs.zig` should stay for now, but its stale
+   comment/history should be cleaned up in a later pass.
 
 How to reproduce:
 

@@ -38,14 +38,6 @@ function nullcallback(callback) {
 }
 const FunctionPrototypeBind = nullcallback.bind;
 
-function normalizeFreeBSDRmdirError(err: any) {
-  if (process.platform === "freebsd" && err?.code === "EREMOTE") {
-    err.code = "ENOTEMPTY";
-    err.errno = -39;
-  }
-  return err;
-}
-
 class FSWatcher extends EventEmitter {
   #watcher;
   #listener;
@@ -209,7 +201,7 @@ var access = function access(path, mode, callback) {
       options = undefined;
     }
     ensureCallback(callback);
-    fs.rmdir(path, options).then(nullcallback(callback), err => callback(normalizeFreeBSDRmdirError(err)));
+    fs.rmdir(path, options).then(nullcallback(callback), callback);
   },
   copyFile = function copyFile(src, dest, mode, callback) {
     if ($isCallable(mode)) {
@@ -600,12 +592,8 @@ var access = function access(path, mode, callback) {
   lutimesSync = fs.lutimesSync.bind(fs),
   rmSync = fs.rmSync.bind(fs),
   rmdirSync = function rmdirSync(...args) {
-    try {
-      // @ts-ignore
-      return fs.rmdirSync.$apply(fs, args);
-    } catch (err) {
-      throw normalizeFreeBSDRmdirError(err);
-    }
+    // @ts-ignore
+    return fs.rmdirSync.$apply(fs, args);
   },
   writev = function writev(fd, buffers, position, callback) {
     if (typeof position === "function") {
