@@ -4345,3 +4345,24 @@ Fresh strict replay validation completes end-to-end:
 - Conclusion:
   - the remaining loss is in child-side `Readable.prototype.pipe()` behavior to stdio on FreeBSD/Bun,
     likely process-exit timing before stdout pending writes fully drain when stdio is intentionally not ended.
+
+### Fix: FreeBSD `Readable.prototype.pipe(process.stdin -> process.stdout|stderr)` stdio-end compatibility
+
+- Added a narrow FreeBSD compatibility path in `src/js/internal/streams/readable.ts`:
+  - only applies when:
+    - `src === process.stdin`
+    - `dest === process.stdout || dest === process.stderr`
+    - default pipe end semantics are in effect (`pipeOpts.end !== false`)
+  - on source end, Bun now calls `dest.end()` instead of following the usual stdio no-end rule.
+- Tried a weaker zero-byte write callback barrier first (`dest.write("", cb)`), but it did **not** fix truncation.
+- The `dest.end()` variant matches the focused probe result (`process.stdin.pipe(process.stdout, { end: true })`)
+  and fixes the failing test.
+
+- Validation:
+  - focused 16x64KB repro now reports full child stdin length `1048576`
+  - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
+    - `20 pass / 1 todo / 0 fail`
+
+- Tradeoff note:
+  - This is a FreeBSD/Bun compatibility workaround that narrows behavior to the common stdin->stdio relay case.
+  - It intentionally prefers reliable flush-before-exit over Node's usual "don't end stdio on pipe" rule.

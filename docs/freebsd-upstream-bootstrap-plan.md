@@ -461,9 +461,12 @@ Latest checkpoint (2026-02-22):
    - `fs.promises.watch()` async iterator race (lost wakeup) was fixed.
    - Current FreeBSD fallback includes a compatibility workaround (extra synthetic directory event per fallback entry) that should be revisited before upstreaming.
 5. Next runtime blocker (post-watcher): resolved for current Phase E target.
-   - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` failure in `ReadableStream with large data` is fixed by `FileSink` pending-write accounting corrections.
+   - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` had two FreeBSD issues:
+     - parent-side `FileSink` pending-write accounting bug (fixed)
+     - child-side `process.stdin.pipe(process.stdout)` truncation (later isolated and fixed in JS stream pipe behavior)
+   - Current FreeBSD compatibility workaround in `src/js/internal/streams/readable.ts`:
+     - for the narrow `process.stdin -> process.stdout|stderr` relay case, Bun ends stdio on source end to flush pending writes before process exit.
    - Full file now passes (`20 pass / 1 todo / 0 fail`) on FreeBSD.
-   - Residual follow-up (not currently in this Bun test file): ad hoc probe still shows a possible single-chunk `Uint8Array` 1 MiB truncation edge case; keep this as a runtime correctness follow-up item.
 6. Expanded spawn coverage after FileSink fix:
    - `spawn-stdin-readable-stream.test.ts` passes (`20 pass / 1 todo / 0 fail`)
    - `spawn-stdin-readable-stream-edge-cases.test.ts` passes (`13 pass / 1 todo / 0 fail`)

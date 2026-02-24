@@ -96,30 +96,22 @@ Priority areas:
 4. Pre-upstream cleanup queue high-priority items are either fixed or explicitly deferred with rationale
 ## Immediate Next Steps (updated 2026-02-24)
 
-1. Fix remaining `spawn-stdin-readable-stream` large chunked data truncation
-   - Repro now stable (no crash):
-     - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
-     - failing case: `ReadableStream with very large chunked data`
-     - expected `1048576`, received variable truncated chunk totals (`393216`, `524288`, `655360`, etc.)
-   - Confirmed child stdin is truncated (not parent stdout readback).
-   - New finding from `FileSink` trace:
-     - parent subprocess stdin sink writes complete full `1048576` bytes before close
-     - truncation happens downstream in child-side stdin read path
-   - New child-side probes:
-     - `process.stdin.on("data")` and `Bun.stdin.stream().getReader()` both receive full `1048576`
-     - manual `process.stdout.write(...)` forwarding also receives full `1048576`
-     - `process.stdin.pipe(process.stdout)` truncates
-     - `process.stdin.pipe(process.stdout, { end: true })` receives full `1048576`
-   - Next debugging step:
-     - patch `src/js/internal/streams/readable.ts` (`Readable.prototype.pipe`) for FreeBSD stdio flush-on-end barrier
-     - validate no truncation in the chunked repro, then rerun `spawn-stdin-readable-stream.test.ts`
+1. Re-run Phase E core gate after `spawn-stdin-readable-stream` fix
+   - Fixed FreeBSD child-side truncation in `process.stdin.pipe(process.stdout)` by adding
+     a narrow `Readable.prototype.pipe()` compatibility path for stdin->stdio relay on source end.
+   - Verified:
+     - focused 16x64KB repro now receives full `1048576`
+     - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail`
+   - Re-run / confirm current baseline for:
+     - `test/js/node/process/process-stdio.test.ts`
+     - `test/js/node/util/util.test.js`
+     - `test/js/node/fs/fs.test.ts`
+     - `test/js/node/watch/fs.watch.test.ts`
 
-2. Re-run Phase E core gate after spawn stdin fix
-   - `test/js/node/process/process-stdio.test.ts` (currently green again)
-   - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
-   - `test/js/node/util/util.test.js` (currently green again)
-   - `test/js/node/fs/fs.test.ts`
-   - `test/js/node/watch/fs.watch.test.ts` (known remaining `fs.promises.watch` cases)
+2. Track behavior impact of the stdin->stdio `pipe()` workaround
+   - The current FreeBSD workaround ends stdio for the narrow `process.stdin.pipe(process.stdout|stderr)` case.
+   - Run targeted process/stdio stream tests to detect regressions in scripts that continue writing after stdin end.
+   - If needed, refine to a drain/flush barrier that preserves no-end semantics once the underlying FreeBSD issue is fixed.
 
 3. Track and isolate `await p.exited` `ECHILD` probe regression
    - Minimal repro currently shows:
