@@ -446,6 +446,57 @@ Initial Phase D workaround inventory (high-priority first pass):
 | stage0 hash-table generator workaround | `src/codegen/create-hash-table.ts` | `bootstrap-only` | Legacy stage0 process I/O bugs (`stdin` close / `await exited` hangs) worked around via temp files + polling. | strict bootstrap codegen runs; JSSink generation path |
 | stage0 bindgen compatibility shims | `src/codegen/bindgen.ts` | `bootstrap-only` | Legacy stage0 bindgen metadata/name loss recovery for `.bind.ts` processing and generated alias shims. | strict bootstrap no-fallback (`BUN_FREEBSD_BINDGENV2_NODE=0`) |
 
+Phase D inventory queue (next classification passes):
+
+Use this queue to expand the initial table into a complete current-tree FreeBSD classification before Phase F.
+
+1. Spawn / process / stdio internals (highest remaining runtime-risk cluster after current shims)
+   - `src/bun.js/api/bun/process.zig`
+   - `src/bun.js/api/bun/js_bun_spawn_bindings.zig`
+   - `src/bun.js/api/bun/spawn.zig`
+   - `src/bun.js/api/bun/subprocess.zig`
+   - `src/shell/subproc.zig`
+   - `src/bun.js/webcore/FileSink.zig`
+   - `src/js/builtins/ReadableStream.ts`
+   - `src/js/internal/streams/readable.ts`
+2. Filesystem / watcher / copy paths
+   - `src/Watcher.zig`
+   - `src/bun.js/node/path_watcher.zig`
+   - `src/bun.js/node/node_fs.zig`
+   - `src/js/node/fs.ts`
+   - `src/js/node/fs.promises.ts`
+   - `src/bun.js/webcore/blob/copy_file.zig`
+   - `src/http/SendFile.zig`
+3. Platform parity support (mostly expected `keep`)
+   - `src/sys.zig`
+   - `src/errno/freebsd_errno.zig`
+   - `src/bun.js/node/node_os.zig`
+   - `src/js/node/os.ts`
+   - `src/async/posix_event_loop.zig`
+   - `src/workaround_missing_symbols.zig`
+   - `src/perf.zig`
+4. Current-tree stage0/bootstrap codegen paths (mostly `bootstrap-only`)
+   - `src/codegen/bundle-modules.ts`
+   - `src/codegen/bundle-functions.ts`
+   - `src/codegen/bake-codegen.ts`
+   - `src/codegen/create-hash-table.ts`
+   - `src/codegen/bindgen.ts`
+   - `scripts/bootstrap-freebsd.sh` (strict-mode orchestration toggles)
+5. Lower-priority FreeBSD conditionals / support toggles (classify after core runtime clusters)
+   - `src/Global.zig`
+   - `src/feature_flags.zig`
+   - `src/bun.zig`
+   - `src/napi/napi.zig`
+   - `src/allocators/MimallocArena.zig`
+   - `src/bun.js/bindings/ZigGlobalObject.cpp`
+   - `src/bun.js/webcore/encoding.zig`
+
+Classification completion criteria for each pass:
+
+1. Every file in the pass is tagged (`keep` / `temporary shim` / `bootstrap-only` / `mixed`)
+2. `mixed` entries identify the exact sub-behavior that is temporary
+3. At least one validation command or test reference is recorded for runtime-impacting entries
+
 How to reproduce:
 
 ```bash

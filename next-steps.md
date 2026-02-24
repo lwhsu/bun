@@ -107,7 +107,8 @@ Priority areas:
      - added Phase D action plan to the Phase D section in `docs/freebsd-upstream-bootstrap-plan.md`
      - added initial high-priority inventory rows (stdio/watch/fs/codegen/errno/os)
    - Next in this step:
-     - expand the inventory beyond high-priority rows (networking/shell/spawn internals/cmake-facing runtime toggles)
+     - expand the inventory beyond high-priority rows (now queued by subsystem in the roadmap doc)
+     - execute next classification pass: `spawn/process/stdio internals`
      - add `owner/risk/replacement target` notes for each `temporary shim`
    - Priority shims to classify first:
      - `src/js/internal/streams/readable.ts` stdin->stdio `pipe()` workaround

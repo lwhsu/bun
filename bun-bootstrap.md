@@ -4534,3 +4534,17 @@ Fresh strict replay validation completes end-to-end:
     - `bindgen.ts`
 - Next Phase D step:
   - expand the inventory beyond the high-priority rows and add replacement/defer targets for every `temporary shim`.
+
+### Phase D inventory expansion queue added (subsystem passes)
+
+- Added a Phase D inventory queue to `docs/freebsd-upstream-bootstrap-plan.md` to drive the next classification passes.
+- Queue is grouped by subsystem and ordered by risk/impact:
+  1. spawn/process/stdio internals
+  2. filesystem/watcher/copy paths
+  3. platform parity support (expected mostly `keep`)
+  4. current-tree stage0/bootstrap codegen paths (expected mostly `bootstrap-only`)
+  5. lower-priority FreeBSD conditionals/support toggles
+- Added per-pass completion criteria to avoid drifting into vague classification:
+  - every file tagged
+  - `mixed` entries split into exact temporary sub-behaviors
+  - runtime-impacting entries include a repro/validation reference
