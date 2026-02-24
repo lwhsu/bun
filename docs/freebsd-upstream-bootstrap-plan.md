@@ -102,6 +102,14 @@ Current items:
    - Current behavior (replay path): writes placeholder `bake.*.js` artifacts and exits early on stage0.
    - Rationale: legacy stage0 still crashes in Bake runtime `Bun.build()` path during fresh replay validation.
    - Impact: acceptable for bootstrap replay proof, but should be revisited before upstreaming.
+5. Review and downscope/remove FreeBSD-specific debug tracing hooks before upstreaming.
+   - Currently used for diagnosis during Phase C/D/E:
+     - `BUN_FREEBSD_SPAWN_TRACE` (`src/bun.js/api/bun/process.zig`, `src/bun.js/api/bun/subprocess.zig`, `src/shell/subproc.zig`, spawn bindings)
+     - `BUN_FREEBSD_FILESINK_TRACE` (`src/bun.js/webcore/FileSink.zig`)
+     - `BUN_FREEBSD_MODULE_TRACE` (`src/bun.js/bindings/ZigGlobalObject.cpp`)
+   - Desired outcome:
+     - either remove once no longer needed, or
+     - convert to generic debug scopes/envs if broadly useful and acceptable upstream.
 
 ## 2.2 Current Stage0 Build Design (How It Works Today)
 
@@ -641,6 +649,43 @@ Pass 4 completion check:
 1. All files listed in queue item 4 are now classified at a file level.
 2. The only `mixed` entry (`bundle-modules.ts`) is split into bootstrap-only vs non-stage0 codegen behavior.
 3. All entries include strict bootstrap / replay validation references.
+
+### Phase D Detailed Pass 5: Lower-Priority FreeBSD Conditionals / Support Toggles
+
+Status: **Started (classification pass 5 completed for remaining queue files below)**.
+
+Goal of this pass:
+
+1. Close the Phase D inventory queue coverage by classifying lower-priority FreeBSD conditionals.
+2. Identify which of these are harmless/expected platform support vs temporary debug or workaround code.
+3. Promote any unexpectedly risky item back into the higher-priority cleanup list.
+
+Detailed classification (current-tree):
+
+| File | FreeBSD-specific behavior | Classification | Why / replacement target | Repro / verify |
+|---|---|---|---|---|
+| `src/Global.zig` | FreeBSD-specific debug allocator `deinit()` assert relaxation; FreeBSD exit path uses `std.c.exit()` branch instead of Linux `quick_exit` path | `mixed` | `keep`: FreeBSD process-exit path using libc `exit` is platform support. `temporary shim`: debug allocator assert relaxation on FreeBSD should be revisited if allocator/runtime shutdown ordering is fixed. | Broad runtime smoke/tests; crash/exit handling exercised during bootstrap + test runs |
+| `src/feature_flags.zig` | `use_simdutf = ... && !isFreeBSD` | `mixed` (capability gate) | Correctly disables unsupported/unverified SIMDUTF path on FreeBSD today, but this is a capability gap to revisit (likely becomes `keep` once SIMDUTF path is validated on FreeBSD). | Build/runtime smoke; Unicode/string decoding paths; Phase E process/text decoding investigations |
+| `src/bun.zig` | FreeBSD-specific reload-process branch avoids Linux pre-reload hook; FreeBSD `statfs` type and monotonic clock handling | `keep` | Core platform support / API differences. These are not bootstrap hacks. | Broad runtime coverage; process reload/shell/process operations and time APIs |
+| `src/napi/napi.zig` | Treats FreeBSD with macOS for POSIX V8 mangled-name variant selection | `keep` | Platform ABI/name compatibility glue for N-API/V8 symbol declarations. | N-API build/link/runtime coverage (indirect) |
+| `src/allocators/MimallocArena.zig` | FreeBSD debug path skips `mi_is_in_heap_region()` assertion and uses `mi_free()` directly | `temporary shim` | Debug-only allocator compatibility/workaround on FreeBSD. Should be reviewed against mimalloc behavior/version and narrowed or removed if assert path can be made safe. | Debug builds / allocator stress; no dedicated Phase E test currently |
+| `src/bun.js/bindings/ZigGlobalObject.cpp` | `BUN_FREEBSD_MODULE_TRACE` env-gated module trace logging for FreeBSD | `temporary shim` (debug-only) | Diagnostic instrumentation added for FreeBSD module-loading debugging. Keep only while actively needed; likely remove or convert to generic debug tracing before upstream. | `BUN_FREEBSD_MODULE_TRACE=1` ad hoc module-load repros |
+| `src/bun.js/webcore/encoding.zig` | FreeBSD-owned-buffer fallback copies when creating `bun.String` from converted UTF16/Latin1 buffers | `temporary shim` | FreeBSD runtime correctness workaround in encoding/string ownership path (avoids problematic external-buffer path). Needs root-cause fix/validation before upstream cleanup. | Process/stdout text decoding regressions and Unicode repros; `test/js/node/process/process-stdio.test.ts` |
+
+Pass 5 notes / conclusions:
+
+1. Phase D inventory queue coverage is now complete across all queued subsystems/files.
+2. Remaining lower-priority temporary items cluster into three categories:
+   - debug instrumentation (`ZigGlobalObject.cpp`, tracing env hooks)
+   - capability gating (`feature_flags.zig` SIMDUTF disabled on FreeBSD)
+   - runtime/debug allocator/encoding workarounds (`MimallocArena.zig`, `encoding.zig`, part of `Global.zig`)
+3. `src/bun.js/webcore/encoding.zig` should be treated as a higher-priority temporary runtime shim than the rest of this pass because it intersects with the earlier `ReadableStream.text()`/Unicode debugging path.
+
+Pass 5 completion check:
+
+1. All files listed in queue item 5 are now classified at a file level.
+2. Temporary/debug-only entries are explicitly identified and cross-linked to the pre-upstream cleanup queue.
+3. Phase D inventory queue coverage is complete.
 
 How to reproduce:
 

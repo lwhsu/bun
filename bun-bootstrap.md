@@ -4631,3 +4631,26 @@ Fresh strict replay validation completes end-to-end:
     generated runtime modules in normal (non-stage0) builds, while the rest of the FreeBSD changes are stage0-only
   - `src/codegen/bake-codegen.ts` placeholder Bake artifact fallback remains a top pre-upstream cleanup item
 - Updated `next-steps.md` to move the next Phase D pass to `lower-priority FreeBSD conditionals/support toggles`.
+
+### Phase D pass 5 completed: lower-priority conditionals/support toggles classification
+
+- Completed the fifth detailed Phase D classification pass in `docs/freebsd-upstream-bootstrap-plan.md` for the
+  remaining lower-priority FreeBSD conditionals/support-toggle queue.
+- Classified and documented:
+  - `src/Global.zig`
+  - `src/feature_flags.zig`
+  - `src/bun.zig`
+  - `src/napi/napi.zig`
+  - `src/allocators/MimallocArena.zig`
+  - `src/bun.js/bindings/ZigGlobalObject.cpp`
+  - `src/bun.js/webcore/encoding.zig`
+- Key outcome:
+  - Phase D inventory queue coverage is now complete across all queued subsystem passes
+  - lower-priority temporary/debug entries are explicitly tracked (allocator debug path, module trace hook, encoding workaround)
+  - `encoding.zig` is called out as a higher-priority temporary runtime shim than most items in this pass because it overlaps
+    with earlier FreeBSD Unicode/text-decoding investigations
+- Updated `docs/freebsd-upstream-bootstrap-plan.md` pre-upstream cleanup queue with explicit debug-hook tracking:
+  - `BUN_FREEBSD_SPAWN_TRACE`
+  - `BUN_FREEBSD_FILESINK_TRACE`
+  - `BUN_FREEBSD_MODULE_TRACE`
+- Updated `next-steps.md` to move from inventory coverage to Phase D cleanup prioritization (ranking/replacement targets).

@@ -112,7 +112,8 @@ Priority areas:
     - completed second detailed classification pass: `filesystem/watcher/copy paths`
     - completed third detailed classification pass: `platform parity support (mostly keep)`
     - completed fourth detailed classification pass: `current-tree stage0/bootstrap codegen paths`
-    - next classification pass: `lower-priority FreeBSD conditionals/support toggles`
+    - completed fifth detailed classification pass: `lower-priority FreeBSD conditionals/support toggles`
+    - Phase D inventory queue coverage complete
      - add `owner/risk/replacement target` notes for each `temporary shim`
    - Priority shims to classify first:
      - `src/js/internal/streams/readable.ts` stdin->stdio `pipe()` workaround
@@ -171,11 +172,13 @@ Priority areas:
 
 ### Phase D immediate focus (updated)
 
-1. Complete detailed classification pass 5: `lower-priority FreeBSD conditionals/support toggles`
-   - classify remaining queue files (`Global`, `feature_flags`, `bun.zig`, `napi`, allocators, bindings, encoding`)
-   - identify anything that should be promoted into a higher-risk runtime cluster
-   - finish the Phase D inventory queue coverage in the roadmap doc
-2. Add a small "pre-upstream cleanup queue (debug hooks)" subsection update
-   - explicitly track `BUN_FREEBSD_SPAWN_TRACE`
-   - explicitly track `BUN_FREEBSD_FILESINK_TRACE`
-3. Keep Phase E core gate as regression floor while touching D-classified areas
+1. Start Phase D cleanup prioritization (post-inventory)
+   - rank all `temporary shim` and `mixed` sub-behaviors by upstream risk
+   - add owner/replacement target/removal condition notes for each
+   - identify which shims must be reduced before Phase F vs can remain documented
+2. Keep Phase E core gate as regression floor while touching D-classified areas
+3. Choose the first cleanup target from the highest-risk temporary runtime shims
+   - current likely candidates:
+     - `src/js/builtins/ReadableStream.ts` decode fallback
+     - `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier
+     - `src/bun.js/webcore/encoding.zig` ownership/copy workaround
