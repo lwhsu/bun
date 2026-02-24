@@ -105,10 +105,14 @@ Priority areas:
    - New finding from `FileSink` trace:
      - parent subprocess stdin sink writes complete full `1048576` bytes before close
      - truncation happens downstream in child-side stdin read path
+   - New child-side probes:
+     - `process.stdin.on("data")` and `Bun.stdin.stream().getReader()` both receive full `1048576`
+     - manual `process.stdout.write(...)` forwarding also receives full `1048576`
+     - `process.stdin.pipe(process.stdout)` truncates
+     - `process.stdin.pipe(process.stdout, { end: true })` receives full `1048576`
    - Next debugging step:
-     - instrument/trace child-side `process.stdin` read stream path (`ReadStream`/`PipeReader`/stdin source)
-     - compare child `process.stdin.on("data")` vs `process.stdin.pipe(process.stdout)` behavior in same process
-     - isolate whether loss occurs before JS stream events or inside pipe-to-stdout flow
+     - patch `src/js/internal/streams/readable.ts` (`Readable.prototype.pipe`) for FreeBSD stdio flush-on-end barrier
+     - validate no truncation in the chunked repro, then rerun `spawn-stdin-readable-stream.test.ts`
 
 2. Re-run Phase E core gate after spawn stdin fix
    - `test/js/node/process/process-stdio.test.ts` (currently green again)

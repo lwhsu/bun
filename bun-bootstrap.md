@@ -4331,3 +4331,17 @@ Fresh strict replay validation completes end-to-end:
 - Updated conclusion:
   - The remaining `spawn-stdin-readable-stream` truncation is **not** in parent `FileSink` write completion.
   - The loss is downstream, likely in child-side stdin read/stream pipeline (`process.stdin` / read stream path).
+
+### Child-side narrowing: `process.stdin.pipe(process.stdout)` is the truncation path
+
+- Built focused child-process probes to compare stdin consumption/output strategies.
+- Results:
+  - `process.stdin.on("data")` counting only: full `1048576`
+  - `Bun.stdin.stream().getReader()` counting: full `1048576`
+  - manual forwarding `process.stdout.write(...)` (with/without drain handling): full `1048576`
+  - `process.stdin.pipe(process.stdout)`: truncated (variable)
+- Additional probe:
+  - `process.stdin.pipe(process.stdout, { end: true })` produces full `1048576`
+- Conclusion:
+  - the remaining loss is in child-side `Readable.prototype.pipe()` behavior to stdio on FreeBSD/Bun,
+    likely process-exit timing before stdout pending writes fully drain when stdio is intentionally not ended.
