@@ -44,7 +44,9 @@ let freebsdStage0FunctionAliasCounter = 0;
 const isFreeBSDStage0 = process.platform === "freebsd" && Bun.version === "0.0.0";
 const freebsdStage0BuiltinFunctionTranspiler = isFreeBSDStage0 ? new Bun.Transpiler({ loader: "ts" }) : null;
 const useFreebsdStage0BuiltinFunctionTranspiler =
-  isFreeBSDStage0 && process.env.BUN_FREEBSD_STAGE0_BUNDLE_FUNCTIONS_USE_BUILD !== "1";
+  // Prefer Bun.build() for correctness; legacy stage0 transpiler is a fallback for specific
+  // corruption/empty-output cases. The transpiler-only mode remains opt-in for debugging.
+  isFreeBSDStage0 && process.env.BUN_FREEBSD_STAGE0_BUNDLE_FUNCTIONS_USE_TRANSPILER === "1";
 
 function buildLogsContainLegacyStage0EntrypointCorruption(logs: readonly any[]) {
   return logs.some(log => {
@@ -64,6 +66,15 @@ function buildLogsContainLegacyStage0EntrypointCorruption(logs: readonly any[]) 
       return false;
     }
   });
+}
+
+function applyFreebsdStage0BuiltinFunctionDefineCompat(source: string) {
+  if (!isFreeBSDStage0) return source;
+
+  // `Bun.Transpiler` fallback does not apply Bun.build({ define }), so stage0 builds can leave
+  // debug guards like `IS_BUN_DEVELOPMENT` unresolved in embedded builtin functions. Inline the
+  // minimum required define here to preserve runtime behavior in bootstrap/replay builds.
+  return source.replace(/\bIS_BUN_DEVELOPMENT\b/g, define.IS_BUN_DEVELOPMENT);
 }
 
 function ensureBuildPaths() {
@@ -371,7 +382,7 @@ $$capture_start$$(${fn.async ? "async " : ""}${
     let usesDebug = output.includes("$debug_log");
     let usesAssert = output.includes("$assert");
     const captured = output.match(/\$\$capture_start\$\$([\s\S]+)\.\$\$capture_end\$\$/)![1];
-    const finalReplacement =
+    const finalReplacement = applyFreebsdStage0BuiltinFunctionDefineCompat(
       (fn.directives.sloppy
         ? captured
         : captured.replace(
@@ -383,7 +394,8 @@ $$capture_start$$(${fn.async ? "async " : ""}${
       )
         .replace(/^\((async )?function\(/, "($1function (")
         .replace(/__intrinsic__/g, "@")
-        .replace(/__no_intrinsic__/g, "") + "\n";
+        .replace(/__no_intrinsic__/g, "") + "\n",
+    );
 
     const errors = [...finalReplacement.matchAll(/@bundleError\((.*)\)/g)];
     if (errors.length) {

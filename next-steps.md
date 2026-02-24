@@ -94,3 +94,33 @@ Priority areas:
 2. Phase E core gate is defined and rerun on current checkpoint
 3. Major temporary workarounds are classified and documented
 4. Pre-upstream cleanup queue high-priority items are either fixed or explicitly deferred with rationale
+## Immediate Next Steps (updated 2026-02-24)
+
+1. Fix remaining `spawn-stdin-readable-stream` large chunked data truncation
+   - Repro now stable (no crash):
+     - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
+     - failing case: `ReadableStream with very large chunked data`
+     - expected `1048576`, received `393216`
+   - Likely area remains `FileSink` / subprocess stdin pipe write accounting.
+   - Re-check previously identified `pending.consumed` accounting fixes against current tree state.
+
+2. Re-run Phase E core gate after spawn stdin fix
+   - `test/js/node/process/process-stdio.test.ts` (currently green again)
+   - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`
+   - `test/js/node/util/util.test.js` (currently green again)
+   - `test/js/node/fs/fs.test.ts`
+   - `test/js/node/watch/fs.watch.test.ts` (known remaining `fs.promises.watch` cases)
+
+3. Track and isolate `await p.exited` `ECHILD` probe regression
+   - Minimal repro currently shows:
+     - `Bun.spawn({ stdout: "pipe" })`
+     - access `p.stdout`
+     - `await p.exited` => `ECHILD: waitpid`
+   - Determine whether this affects test coverage or only direct probe timing/shape.
+
+4. Return to strict stage0 `bundle-modules.ts` teardown crash (Phase C replay/strict polish)
+   - Standalone strict pregen path still crashes after successful outputs (`bus error`) in legacy stage0.
+   - `process.reallyExit(0)` -> `process.exit(0)` did not fix it.
+   - This is now a cleanup/polish blocker, not blocking current Phase E progress when `BUN_FREEBSD_CODEGEN_NODE=1`.
+
+5. Document + checkpoint after each material Phase E result (per workflow policy)

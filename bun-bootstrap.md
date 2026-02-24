@@ -4240,3 +4240,48 @@ Fresh strict replay validation completes end-to-end:
   - strict no-fallback bootstrap settings
 - Remaining work should shift to Phase D/E hardening and cleanup of bootstrap-only stage0 workarounds
   (especially the `bake-codegen.ts` placeholder fallback).
+## 2026-02-24 - Phase E baseline regressions: builtin-functions fix and spawn/stdout crash recovery
+
+- Rebuilt a strict baseline (`BUN_FREEBSD_BINDGENV2_NODE=0`, `BUN_FREEBSD_NPM_INSTALL=0`) after fixing
+  `bundle-modules.ts` postbuild rewriting for alias-shaped wrapped default exports.
+- Verified `internal:url` regression was fixed:
+  - `./build/release/bun -e 'import "node:url"; console.log("ok")'` => `ok`
+- Found a second generated-code regression in builtin functions:
+  - `process.stderr/process.stdout` access threw `ReferenceError: IS_BUN_DEVELOPMENT is not defined`
+  - Root cause: FreeBSD stage0 `bundle-functions.ts` transpiler fallback bypassed `Bun.build({ define })`
+    and left `IS_BUN_DEVELOPMENT` unresolved in embedded builtin functions.
+- Fixed `bundle-functions.ts` to apply `IS_BUN_DEVELOPMENT` define compatibility on extracted builtin
+  function source (not raw transpiler wrapper output).
+- Confirmed `process.stderr/process.stdout` works again and `test/js/node/util/util.test.js` returned to green.
+
+- While validating, identified a broader regression:
+  - `Bun.spawn({ stdout: "pipe" })` was crashing when accessing `p.stdout`
+  - Minimal repro:
+    - `const p = Bun.spawn({ cmd: ["/bin/echo", "hi"], stdout: "pipe" }); console.log(typeof p.stdout);`
+  - Crash localized to JSC lexer parsing (`JSC::Lexer::parseIdentifier`) while evaluating generated builtin code.
+- Strongly suspected `bundle-functions.ts` FreeBSD stage0 transpiler-only mode was generating semantically bad
+  builtin-function output for subprocess/stream paths.
+- Changed FreeBSD stage0 `bundle-functions.ts` behavior back to `Bun.build()`-first (transpiler fallback only,
+  opt-in for debugging via `BUN_FREEBSD_STAGE0_BUNDLE_FUNCTIONS_USE_TRANSPILER=1`).
+
+- Attempted strict rebuilds to validate this but hit a recurring legacy stage0 `bundle-modules.ts` teardown crash:
+  - standalone strict pregen invocation (`scripts/bootstrap-freebsd.sh` line 974)
+  - `bundle-modules.ts` finishes postbuild (`outputs: 138`) then stage0 crashes with bus error
+  - replacing `process.reallyExit(0)` with `process.exit(0)` in `bundle-modules.ts` did not eliminate this crash
+- To keep Phase E progress moving, ran a validation rebuild with current-tree codegen on Node only:
+  - `BUN_FREEBSD_CODEGEN_NODE=1`
+  - kept `BUN_FREEBSD_BINDGENV2_NODE=0`, `BUN_FREEBSD_NPM_INSTALL=0`
+  - build completed successfully (`[bootstrap] complete`)
+
+- Validation results on the `BUN_FREEBSD_CODEGEN_NODE=1` rebuild:
+  - `Bun.spawn({ stdout: "pipe" }).stdout` no longer crashes
+  - `await p.stdout.text()` works (`hi`)
+  - `test/js/node/process/process-stdio.test.ts` => `9 pass / 0 fail`
+  - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` => `19 pass / 1 fail / 1 todo`
+    - remaining failure is the known large chunked stdin issue:
+      - `ReadableStream with very large chunked data`
+      - expected `1048576`, received `393216`
+
+- Additional observation (separate from the fixed crash):
+  - A minimal probe using `await p.exited` after touching `p.stdout` can return `ECHILD (waitpid)`
+  - This appears to be a subprocess lifecycle bug separate from the `p.stdout` getter crash.

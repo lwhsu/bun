@@ -85,14 +85,16 @@ if (isFreeBSD && isStage0Bun) {
   // that second invocation so we can exit immediately and reuse the pregenerated outputs.
   if (process.env.BUN_FREEBSD_STAGE0_SKIP_DUPLICATE_BUNDLE_MODULES === "1") {
     console.error("[freebsd-stage0] skipping duplicate bundle-modules.ts after standalone pregen");
-    process.reallyExit(0);
+    // This duplicate-invocation path has no pending codegen work; plain process.exit() avoids a
+    // stage0-only bus-error regression observed with process.reallyExit() here.
+    process.exit(0);
   }
 
   // The legacy FreeBSD stage0 runtime can hang after all async work is complete but before
   // process teardown finishes (especially when invoked by Ninja). Force a clean exit on
   // `beforeExit` once the event loop drains.
   process.once("beforeExit", () => {
-    process.reallyExit(0);
+    process.exit(0);
   });
 }
 // Stage0 on FreeBSD can deadlock in node:child_process spawnSync() during codegen.
@@ -660,6 +662,17 @@ for (const entrypoint of bundledEntryPoints) {
   captured =
     captured
       .replace(/\$\$EXPORT\$\$\((.*)\).\$\$EXPORT_END\$\$;/, "return $1;")
+      // Legacy FreeBSD stage0 alias builds can emit a tiny ESM stub for some modules
+      // (e.g. internal/url.ts) without the usual $$EXPORT wrapper. Convert the common
+      // `export { local as default }` form into a CJS-compatible return.
+      .replace(
+        /\nexport\s*{\s*[\r\n\s]*([$\w]+)\s+as\s+default\s*[\r\n\s]*};?\s*\}\)\s*$/m,
+        "\nreturn $1;\n})",
+      )
+      .replace(
+        /\nexport\s*{\s*[\r\n\s]*([$\w]+)\s+as\s+default\s*[\r\n\s]*};?\s*$/m,
+        "\nreturn $1;\n",
+      )
       .replace(/]\s*,\s*__(debug|assert)_end__\)/g, ")")
       .replace(/]\s*,\s*__debug_end__\)/g, ")")
       .replace(/import.meta.require\((.*?)\)/g, (expr, specifier) => {
@@ -1015,5 +1028,5 @@ if (isFreeBSD && isStage0Bun) {
   // Legacy FreeBSD stage0 can crash during process teardown after successful codegen completion.
   // All outputs have been written by this point, so bypass teardown to keep the bootstrap path
   // deterministic and allow the caller to treat the run as successful.
-  process.reallyExit(0);
+  process.exit(0);
 }
