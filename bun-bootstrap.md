@@ -4511,3 +4511,26 @@ Fresh strict replay validation completes end-to-end:
 - Scope/effort estimate recorded in `docs/freebsd-upstream-bootstrap-plan.md`:
   - minimum (classification-first): ~2-4 days
   - aggressive (replace several temporary shims before Phase F): ~4-8+ days
+
+### Phase D start: action plan inserted + high-priority workaround inventory (first pass)
+
+- Clarification:
+  - `build/freebsd-bootstrap/phase-c-strict-rerun.log` is a raw build log and has no Phase D section.
+  - Added the Phase D action plan to the Phase D section in `docs/freebsd-upstream-bootstrap-plan.md` instead (the canonical roadmap/review doc).
+- Added an initial Phase D workaround inventory table (high-priority first pass) covering:
+  - runtime temporary shims:
+    - stdin->stdio `pipe()` workaround (`Readable.prototype.pipe`)
+    - `ReadableStream.text()` FreeBSD decode fallback
+    - watcher synthetic duplicate event workaround
+    - `node:fs`/`node:fs.promises` `rmdir` errno normalization
+  - upstreamable platform support:
+    - `freebsd_errno.zig` + `sys.zig`
+    - `node_os.zig` FreeBSD implementations
+  - bootstrap-only current-tree codegen workarounds:
+    - `bundle-modules.ts`
+    - `bundle-functions.ts`
+    - `bake-codegen.ts`
+    - `create-hash-table.ts`
+    - `bindgen.ts`
+- Next Phase D step:
+  - expand the inventory beyond the high-priority rows and add replacement/defer targets for every `temporary shim`.

@@ -103,6 +103,12 @@ Priority areas:
      - `temporary shim` (replace later)
      - `bootstrap-only` (legacy/stage0 or strict-bootstrap workaround)
    - Attach repro/validation references from `bun-bootstrap.md` for each high-risk item.
+   - Started:
+     - added Phase D action plan to the Phase D section in `docs/freebsd-upstream-bootstrap-plan.md`
+     - added initial high-priority inventory rows (stdio/watch/fs/codegen/errno/os)
+   - Next in this step:
+     - expand the inventory beyond high-priority rows (networking/shell/spawn internals/cmake-facing runtime toggles)
+     - add `owner/risk/replacement target` notes for each `temporary shim`
    - Priority shims to classify first:
      - `src/js/internal/streams/readable.ts` stdin->stdio `pipe()` workaround
      - `src/js/builtins/ReadableStream*` FreeBSD `text()` fallback

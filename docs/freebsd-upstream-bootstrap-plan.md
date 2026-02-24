@@ -401,6 +401,26 @@ Goal: move from bootstrap success to maintainable FreeBSD runtime support.
 
 Status: **In progress (Phase E core gate green; workaround inventory/classification still pending)**.
 
+Phase D action plan (current):
+
+1. Build a current-tree FreeBSD workaround inventory by subsystem:
+   - `spawn/stdio`
+   - `watch/fs`
+   - `codegen (current-tree stage0 bootstrap paths)`
+   - `os/util/errno`
+   - `networking/http` (only where FreeBSD-specific behavior exists)
+2. Classify each item as one of:
+   - `keep` (upstreamable platform support)
+   - `temporary shim` (runtime compatibility workaround to replace later)
+   - `bootstrap-only` (stage0 / strict-bootstrap survival workaround)
+3. Attach a concrete repro/validation reference for each high-risk item (test file or command) so review is auditable.
+4. Prioritize review of temporary shims that affect runtime semantics:
+   - stdin/stdout pipe behavior
+   - watcher synthetic fallback events
+   - `ReadableStream.text()` fallback decode path
+   - `node:fs` compatibility normalization shims
+5. Keep legacy stage0 replay patches (`scripts/patches/freebsd-stage0-*.patch`) tracked separately from current-tree Phase D inventory.
+
 How to do it:
 
 1. Audit FreeBSD-specific changes by subsystem from `git diff`.
@@ -409,6 +429,22 @@ How to do it:
    - temporary workaround to retire
 3. Replace workaround logic with native FreeBSD behavior when possible.
 4. Re-check spawn/kqueue/stdio behavior under targeted load.
+
+Initial Phase D workaround inventory (high-priority first pass):
+
+| Area | File(s) | Classification | Why / current status | Repro / verify reference |
+|---|---|---|---|---|
+| stdin->stdio pipe completion | `src/js/internal/streams/readable.ts` | `temporary shim` | FreeBSD-only compatibility path ends `process.stdout/stderr` for narrow `process.stdin.pipe(process.stdout|stderr)` case to avoid chunked stdin truncation on process exit. Behavior tradeoff vs Node no-end stdio rule. | `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`; `test/js/node/process/process-stdio.test.ts`; focused 16x64KB stdin->stdout repro |
+| `ReadableStream.text()` decode path | `src/js/builtins/ReadableStream.ts` | `temporary shim` | FreeBSD path decodes via `Buffer.from(bytes).toString()` instead of `TextDecoder` due first-byte corruption observed in subprocess stdout text decoding. Needs root-cause fix in decoder path later. | `test/js/node/process/process-stdio.test.ts`; Unicode subprocess stdout repros logged in `bun-bootstrap.md` |
+| watcher directory rescan fallback | `src/bun.js/node/path_watcher.zig` | `keep` + `temporary shim` | FreeBSD kqueue lacks child-name payloads for directory notifications, so rescan fallback is required (`keep`). Extra synthetic duplicate event is a compatibility workaround (`temporary shim`); timestamp spacing must exceed dedupe threshold. | `test/js/node/watch/fs.watch.test.ts` (`32 pass / 0 fail`) |
+| `rmdir` errno normalization | `src/js/node/fs.ts`, `src/js/node/fs.promises.ts` | `temporary shim` | Maps FreeBSD `EREMOTE` to `ENOTEMPTY` for Node compatibility in `rmdir` paths. Should be replaced/narrowed once lower-level errno handling is aligned. | `test/js/node/fs/fs.test.ts` (`234 pass / 6 skip / 0 fail`) |
+| FreeBSD errno table split | `src/errno/freebsd_errno.zig`, `src/sys.zig` | `keep` | Fundamental platform support: separate errno mapping and `getSystemErrorName` parity. | `test/js/node/util/util.test.js` (`192 pass / 0 fail`) |
+| FreeBSD `node:os` parity | `src/bun.js/node/node_os.zig` | `keep` | Implements `os.loadavg()`, `os.userInfo()` fallback, `os.cpus()` via FreeBSD APIs/sysctl. | `test/js/node/os/os.test.js` (`52 pass / 0 fail`) |
+| stage0 `bundle-modules` workarounds | `src/codegen/bundle-modules.ts` | `bootstrap-only` | Legacy FreeBSD stage0 bundler corruption/hang workarounds (aliasing, retries, hardlink path, teardown handling) for strict bootstrap/replay. Not runtime feature behavior. | strict bootstrap / replay logs in `bun-bootstrap.md`; `scripts/bootstrap-freebsd.sh` strict mode |
+| stage0 builtin-functions workarounds | `src/codegen/bundle-functions.ts` | `bootstrap-only` | Legacy FreeBSD stage0 `tmp_functions` bundling retries/transpiler fallback/entrypoint corruption handling. | strict bootstrap / replay codegen logs |
+| stage0 bake codegen fallback | `src/codegen/bake-codegen.ts` | `bootstrap-only` | Placeholder Bake runtime artifact fallback for stage0 replay (legacy stage0 crashes in Bake `Bun.build()` path). High-priority cleanup item before upstreaming. | fresh replay validation logs (`phase-c-replay-rerun2.log`) |
+| stage0 hash-table generator workaround | `src/codegen/create-hash-table.ts` | `bootstrap-only` | Legacy stage0 process I/O bugs (`stdin` close / `await exited` hangs) worked around via temp files + polling. | strict bootstrap codegen runs; JSSink generation path |
+| stage0 bindgen compatibility shims | `src/codegen/bindgen.ts` | `bootstrap-only` | Legacy stage0 bindgen metadata/name loss recovery for `.bind.ts` processing and generated alias shims. | strict bootstrap no-fallback (`BUN_FREEBSD_BINDGENV2_NODE=0`) |
 
 How to reproduce:
 
