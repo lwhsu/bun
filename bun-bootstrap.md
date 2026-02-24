@@ -4366,3 +4366,16 @@ Fresh strict replay validation completes end-to-end:
 - Tradeoff note:
   - This is a FreeBSD/Bun compatibility workaround that narrows behavior to the common stdin->stdio relay case.
   - It intentionally prefers reliable flush-before-exit over Node's usual "don't end stdio on pipe" rule.
+
+### Phase E core-gate rerun after stdin->stdio pipe fix
+
+- Rebuilt `build/release/bun` (fast current-tree codegen path, `BUN_FREEBSD_CODEGEN_NODE=1`) and reran core gate slices.
+- Results:
+  - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail`
+  - `test/js/node/process/process-stdio.test.ts` => `9 pass / 0 fail`
+  - `test/js/node/process/process-stdin.test.ts` => `6 pass / 0 fail`
+  - `test/js/node/util/util.test.js` => `192 pass / 0 fail`
+  - `test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+  - `test/js/node/watch/fs.watch.test.ts` => `31 pass / 1 fail`
+- Remaining core-gate failure is still the known watcher case:
+  - `fs.promises.watch > add file/folder to folder` (timeout)

@@ -486,7 +486,14 @@ Latest checkpoint (2026-02-22):
    - Current workaround: FreeBSD `ReadableStream.prototype.text()` decodes via `Buffer.from(bytes).toString()` instead of `TextDecoder`.
    - Follow-up: investigate/fix the underlying FreeBSD `TextDecoder` behavior and remove the workaround before upstreaming if possible.
    - Validation follow-up: `process-stdin.test.ts` also passes after mirroring stream cleanup (`stream.$reader = undefined` + `$readableStreamCloseIfPossible(stream)`) in the FreeBSD workaround path.
-9. Node `child_process` broad slice passes on FreeBSD with controlled invocation:
+9. Additional FreeBSD `spawn`/stdio runtime follow-up (later Phase E):
+   - child-side `process.stdin.pipe(process.stdout)` could truncate chunked stdin data on process exit.
+   - Current narrow workaround in `Readable.prototype.pipe()` ends stdio for `process.stdin -> process.stdout|stderr` on FreeBSD when default pipe end semantics are used.
+   - Revalidated after this fix:
+     - `spawn-stdin-readable-stream.test.ts` passes (`20 pass / 1 todo / 0 fail`)
+     - `process-stdio.test.ts` passes (`9 pass / 0 fail`)
+     - `process-stdin.test.ts` passes (`6 pass / 0 fail`)
+10. Node `child_process` broad slice passes on FreeBSD with controlled invocation:
    - `test/js/node/child_process/child_process.test.ts` => `30 pass / 1 todo / 0 fail`
    - Required invocation hygiene:
      - run from outside repo root (or otherwise avoid the repo-local `.env` file)
