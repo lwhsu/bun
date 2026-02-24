@@ -96,15 +96,22 @@ Priority areas:
 4. Pre-upstream cleanup queue high-priority items are either fixed or explicitly deferred with rationale
 ## Immediate Next Steps (updated 2026-02-24)
 
-1. Fix remaining Phase E core-gate watcher timeout
-   - Core-gate rerun after stdin->stdio pipe fix is green except:
-     - `test/js/node/watch/fs.watch.test.ts`
-     - failing case: `fs.promises.watch > add file/folder to folder` (timeout)
-   - Re-check current FreeBSD directory fallback / synthetic event path in `src/bun.js/node/path_watcher.zig`
-     against current `fs.promises.watch()` queueing behavior.
-   - Reproduce in isolation and verify whether the earlier fix regressed or is timing-sensitive.
+1. Freeze and document Phase E core-gate baseline (now green)
+   - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail`
+   - `test/js/node/process/process-stdio.test.ts` => `9 pass / 0 fail`
+   - `test/js/node/process/process-stdin.test.ts` => `6 pass / 0 fail`
+   - `test/js/node/util/util.test.js` => `192 pass / 0 fail`
+   - `test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+   - `test/js/node/watch/fs.watch.test.ts` => `32 pass / 0 fail`
+   - Watcher note:
+     - FreeBSD synthetic duplicate event must use timestamp spacing `> 1` to bypass duplicate filtering.
 
-2. Re-run / freeze Phase E core gate summary after watcher fix
+2. Expand Phase E coverage (next high-value slices)
+   - `test/js/node/child_process/*` broader batch (beyond already-validated focused slices)
+   - `test/js/node/url/*` / `test/js/node/crypto/*` targeted batches
+   - selected package-manager/install flows on FreeBSD (`bun install`, workspace edge cases)
+
+3. Re-run / freeze Phase E core gate summary after watcher fix
    - Fixed FreeBSD child-side truncation in `process.stdin.pipe(process.stdout)` by adding
      a narrow `Readable.prototype.pipe()` compatibility path for stdin->stdio relay on source end.
    - Verified:
@@ -116,21 +123,21 @@ Priority areas:
      - `test/js/node/fs/fs.test.ts` (green)
      - `test/js/node/watch/fs.watch.test.ts` (pending single `fs.promises.watch` timeout)
 
-3. Track behavior impact of the stdin->stdio `pipe()` workaround
+4. Track behavior impact of the stdin->stdio `pipe()` workaround
    - The current FreeBSD workaround ends stdio for the narrow `process.stdin.pipe(process.stdout|stderr)` case.
    - Run targeted process/stdio stream tests to detect regressions in scripts that continue writing after stdin end.
    - If needed, refine to a drain/flush barrier that preserves no-end semantics once the underlying FreeBSD issue is fixed.
 
-4. Track and isolate `await p.exited` `ECHILD` probe regression
+5. Track and isolate `await p.exited` `ECHILD` probe regression
    - Minimal repro currently shows:
      - `Bun.spawn({ stdout: "pipe" })`
      - access `p.stdout`
      - `await p.exited` => `ECHILD: waitpid`
    - Determine whether this affects test coverage or only direct probe timing/shape.
 
-5. Return to strict stage0 `bundle-modules.ts` teardown crash (Phase C replay/strict polish)
+6. Return to strict stage0 `bundle-modules.ts` teardown crash (Phase C replay/strict polish)
    - Standalone strict pregen path still crashes after successful outputs (`bus error`) in legacy stage0.
    - `process.reallyExit(0)` -> `process.exit(0)` did not fix it.
    - This is now a cleanup/polish blocker, not blocking current Phase E progress when `BUN_FREEBSD_CODEGEN_NODE=1`.
 
-6. Document + checkpoint after each material Phase E result (per workflow policy)
+7. Document + checkpoint after each material Phase E result (per workflow policy)

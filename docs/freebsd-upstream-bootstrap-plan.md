@@ -459,7 +459,7 @@ Latest checkpoint (2026-02-22):
    - FreeBSD kqueue registration for `fs.watch` file/directory paths is fixed.
    - FreeBSD directory-event fallback rescans directories when kqueue provides no child names.
    - `fs.promises.watch()` async iterator race (lost wakeup) was fixed.
-   - Current FreeBSD fallback includes a compatibility workaround (extra synthetic directory event per fallback entry) that should be revisited before upstreaming.
+   - Current FreeBSD fallback includes a compatibility workaround (extra synthetic directory event per fallback entry) and the synthetic timestamp must be spaced beyond the duplicate-filter threshold (`time_diff > 1`) or the extra event is dropped.
 5. Next runtime blocker (post-watcher): resolved for current Phase E target.
    - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` had two FreeBSD issues:
      - parent-side `FileSink` pending-write accounting bug (fixed)
@@ -497,7 +497,16 @@ Latest checkpoint (2026-02-22):
    - `test/js/node/child_process/child_process.test.ts` => `30 pass / 1 todo / 0 fail`
    - Required invocation hygiene:
      - run from outside repo root (or otherwise avoid the repo-local `.env` file)
-     - set `PATH` to include `build/release`
+    - set `PATH` to include `build/release`
+
+Phase E core-gate status (current baseline):
+- The current core-gate slices used for FreeBSD bootstrap/runtime confidence are all passing:
+  - `spawn-stdin-readable-stream.test.ts`
+  - `process-stdio.test.ts`
+  - `process-stdin.test.ts`
+  - `util.test.js`
+  - `fs.test.ts`
+  - `fs.watch.test.ts`
      - set `SHELL=/bin/sh` for clean-env runs
    - Notes:
      - earlier `spawn(..., { env })` failure was caused by Bun loading the repo `.env` (cwd-dependent), not by FreeBSD child_process runtime behavior.

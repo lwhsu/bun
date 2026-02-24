@@ -4379,3 +4379,25 @@ Fresh strict replay validation completes end-to-end:
   - `test/js/node/watch/fs.watch.test.ts` => `31 pass / 1 fail`
 - Remaining core-gate failure is still the known watcher case:
   - `fs.promises.watch > add file/folder to folder` (timeout)
+
+### Fix: FreeBSD `fs.promises.watch` folder-add timeout (duplicate filter threshold)
+
+- Root cause was in `src/bun.js/node/path_watcher.zig` FreeBSD directory rescan fallback.
+- We already emitted an extra synthetic directory event per entry for FreeBSD, but the second event
+  used timestamp `+1`, and `PathWatcher.emit()` duplicate filtering drops same-hash/same-type events
+  when `time_diff <= 1`.
+- Fix:
+  - space the extra synthetic event beyond the duplicate threshold (`time_diff > 1`) by bumping the
+    synthetic timestamp before emitting the duplicate.
+- Validation:
+  - `test/js/node/watch/fs.watch.test.ts` => `32 pass / 0 fail`
+
+### Phase E core gate status (current baseline)
+
+- Current core-gate slices are green on the rebuilt baseline:
+  - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail`
+  - `test/js/node/process/process-stdio.test.ts` => `9 pass / 0 fail`
+  - `test/js/node/process/process-stdin.test.ts` => `6 pass / 0 fail`
+  - `test/js/node/util/util.test.js` => `192 pass / 0 fail`
+  - `test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+  - `test/js/node/watch/fs.watch.test.ts` => `32 pass / 0 fail`
