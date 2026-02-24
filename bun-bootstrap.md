@@ -4416,3 +4416,16 @@ Fresh strict replay validation completes end-to-end:
   - spawning Bun with `cwd: "/tmp"` and explicit `env: { TEST: "test" }` reports exactly `{"TEST":"test"}`
 - Outcome:
   - no runtime patch kept for this test case; treat as Phase E invocation hygiene/documentation.
+
+### Phase E expansion: `node:url` and `node:crypto` directory batches
+
+- `test/js/node/url`:
+  - `186 pass / 2 skip / 9 todo / 0 fail`
+  - no new FreeBSD-specific runtime blockers observed in this slice
+- `test/js/node/crypto`:
+  - `789 pass / 22 skip / 1 todo / 0 fail`
+  - no new FreeBSD-specific runtime blockers observed in this slice
+
+- Net effect:
+  - Phase E expansion coverage increased substantially after the core gate without introducing new
+    actionable FreeBSD runtime regressions in these two Node compatibility areas.

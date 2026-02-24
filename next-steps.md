@@ -110,10 +110,12 @@ Priority areas:
    - `test/js/node/child_process/*` broader batch:
      - mostly green under controlled invocation (`PATH` includes `build/release`, avoid repo-root `.env`)
      - remaining `spawn(...,{env})` failure from repo root is `.env` autoload contamination, not runtime semantics
+   - Completed:
+     - `test/js/node/url/*` (`186 pass / 2 skip / 9 todo / 0 fail`)
+     - `test/js/node/crypto/*` (`789 pass / 22 skip / 1 todo / 0 fail`)
    - Next target slices:
-     - `test/js/node/url/*`
-     - `test/js/node/crypto/*` targeted batches
      - selected package-manager/install flows on FreeBSD (`bun install`, workspace edge cases)
+     - additional Node slices with runtime/process/file-system interaction (e.g. more `child_process` cases run outside repo root)
 
 3. Re-run / freeze Phase E core gate summary after watcher fix
    - Fixed FreeBSD child-side truncation in `process.stdin.pipe(process.stdout)` by adding
