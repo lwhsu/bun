@@ -4401,3 +4401,18 @@ Fresh strict replay validation completes end-to-end:
   - `test/js/node/util/util.test.js` => `192 pass / 0 fail`
   - `test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
   - `test/js/node/watch/fs.watch.test.ts` => `32 pass / 0 fail`
+
+### Phase E expansion: `node:child_process` directory batch (env/cwd hygiene finding)
+
+- Ran `test/js/node/child_process` as a broader Phase E expansion slice.
+- Initial failures were mostly invocation-environment related (`bun` not on `PATH`, inherited bootstrap vars).
+- After controlled `PATH` + unsetting injected bootstrap vars, only one failure remained:
+  - `spawn() > should allow us to set env`
+- Root cause analysis:
+  - `Bun.spawn(..., { env: { TEST: "test" } })` passes a clean OS env (`/usr/bin/env` child sees only `TEST=test`)
+  - but a spawned Bun child still showed extra `BUN_*` / `ZIG_*` keys in `process.env` when run from repo root
+  - this was caused by Bun auto-loading the repo-root `.env` file in the child process, not by `node:child_process` env merge semantics
+- Confirmation:
+  - spawning Bun with `cwd: "/tmp"` and explicit `env: { TEST: "test" }` reports exactly `{"TEST":"test"}`
+- Outcome:
+  - no runtime patch kept for this test case; treat as Phase E invocation hygiene/documentation.

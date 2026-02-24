@@ -107,9 +107,13 @@ Priority areas:
      - FreeBSD synthetic duplicate event must use timestamp spacing `> 1` to bypass duplicate filtering.
 
 2. Expand Phase E coverage (next high-value slices)
-   - `test/js/node/child_process/*` broader batch (beyond already-validated focused slices)
-   - `test/js/node/url/*` / `test/js/node/crypto/*` targeted batches
-   - selected package-manager/install flows on FreeBSD (`bun install`, workspace edge cases)
+   - `test/js/node/child_process/*` broader batch:
+     - mostly green under controlled invocation (`PATH` includes `build/release`, avoid repo-root `.env`)
+     - remaining `spawn(...,{env})` failure from repo root is `.env` autoload contamination, not runtime semantics
+   - Next target slices:
+     - `test/js/node/url/*`
+     - `test/js/node/crypto/*` targeted batches
+     - selected package-manager/install flows on FreeBSD (`bun install`, workspace edge cases)
 
 3. Re-run / freeze Phase E core gate summary after watcher fix
    - Fixed FreeBSD child-side truncation in `process.stdin.pipe(process.stdout)` by adding

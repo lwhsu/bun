@@ -497,7 +497,9 @@ Latest checkpoint (2026-02-22):
    - `test/js/node/child_process/child_process.test.ts` => `30 pass / 1 todo / 0 fail`
    - Required invocation hygiene:
      - run from outside repo root (or otherwise avoid the repo-local `.env` file)
-    - set `PATH` to include `build/release`
+     - set `PATH` to include `build/release`
+   - Broader `test/js/node/child_process` directory runs are also mostly green under the same hygiene.
+     A remaining `spawn(..., { env })` failure observed from repo root was traced to child Bun `.env` autoload contamination, not `node:child_process` env replacement semantics.
 
 Phase E core-gate status (current baseline):
 - The current core-gate slices used for FreeBSD bootstrap/runtime confidence are all passing:
