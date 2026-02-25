@@ -4980,3 +4980,19 @@ Fresh strict replay validation completes end-to-end:
   - `util.test.js` => `192 pass / 0 fail`
   - `fs.test.ts` => `234 pass / 6 skip / 0 fail`
   - `fs.watch.test.ts` => `32 pass / 0 fail`
+
+### P3: Remove all FreeBSD-specific debug trace hooks (2026-02-26)
+
+- Removed all env-gated debug trace instrumentation from 5 Zig files and 1 C++ file:
+  - `BUN_FREEBSD_SPAWN_TRACE`: removed from `src/bun.js/api/bun/process.zig` (6 calls + helpers), `src/bun.js/api/bun/subprocess.zig` (5 calls + helpers), `src/shell/subproc.zig` (4 calls + helpers), `src/bun.js/api/bun/js_bun_spawn_bindings.zig` (8 calls + helpers)
+  - `BUN_FREEBSD_MODULE_TRACE`: removed from `src/bun.js/bindings/ZigGlobalObject.cpp` (17 call sites + 3 function definitions in `#if OS(FREEBSD)` / `#else` blocks)
+  - `BUN_FREEBSD_FILESINK_TRACE`: already removed in P1 FileSink cleanup
+- No runtime behavior change — all traces were env-gated no-ops in production
+- Build: Zig recompile + C++ recompile (ZigGlobalObject.cpp changed)
+- Validation: full Phase E core gate green
+  - `spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail` (5 consecutive runs)
+  - `process-stdio.test.ts` => `9 pass / 0 fail`
+  - `process-stdin.test.ts` => `6 pass / 0 fail`
+  - `util.test.js` => `192 pass / 0 fail`
+  - `fs.test.ts` => `234 pass / 6 skip / 0 fail`
+  - `fs.watch.test.ts` => `32 pass / 0 fail`

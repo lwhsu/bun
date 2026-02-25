@@ -192,3 +192,4 @@ Priority areas:
      - fix: use `stream.push(null)` when buffer has data (proper lifecycle drain), direct `emit("end")` when empty
      - FreeBSD `pipe()` flush-barrier workaround in `readable.ts` removed (was masking this bug, not fixing it)
      - all 6 Phase E core gate suites pass; spawn-stdin test 5/5 reliable with fix
+   - **P3 debug trace hooks**: all `BUN_FREEBSD_SPAWN_TRACE`, `BUN_FREEBSD_FILESINK_TRACE`, `BUN_FREEBSD_MODULE_TRACE` env-gated debug instrumentation **REMOVED** from `process.zig`, `subprocess.zig`, `subproc.zig`, `js_bun_spawn_bindings.zig`, `FileSink.zig`, `ZigGlobalObject.cpp`
