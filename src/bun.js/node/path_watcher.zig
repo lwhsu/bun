@@ -280,6 +280,16 @@ pub const PathWatcherManager = struct {
 
                                         watcher.emit(event_type.toEvent(path), hash, synthetic_timestamp, false);
                                         synthetic_timestamp += 1;
+                                        if (comptime Environment.isFreeBSD) {
+                                            // FreeBSD kqueue directory notifications can collapse transient create/remove churn
+                                            // into a single observable event with no child-name payload. Emit one extra
+                                            // synthetic event in the rescan fallback to avoid single-event starvation in
+                                            // higher-level consumers waiting for multiple directory updates. Space it
+                                            // beyond the duplicate-filter threshold (time_diff > 1).
+                                            synthetic_timestamp += 1;
+                                            watcher.emit(event_type.toEvent(path), hash, synthetic_timestamp, false);
+                                            synthetic_timestamp += 1;
+                                        }
                                     }
                                 }
                             }

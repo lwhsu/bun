@@ -117,7 +117,7 @@ Priority areas:
    - Priority shims to classify first:
      - `src/js/internal/streams/readable.ts` stdin->stdio `pipe()` workaround
      - `src/js/builtins/ReadableStream*` FreeBSD `text()` fallback
-     - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround — **REMOVED**
+     - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround
      - `src/js/node/fs.ts` / `src/js/node/fs.promises.ts` compatibility shims
      - current-tree codegen stage0 fallbacks in `src/codegen/*`
 
@@ -129,8 +129,7 @@ Priority areas:
    - `test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
    - `test/js/node/watch/fs.watch.test.ts` => `32 pass / 0 fail`
    - Watcher note:
-     - FreeBSD synthetic duplicate event workaround removed — was only needed before `fs.promises.watch` lost-wakeup fix
-     - Directory rescan fallback remains (`keep`) — required because kqueue lacks child-name payloads
+     - FreeBSD synthetic duplicate event must use timestamp spacing `> 1` to bypass duplicate filtering.
 
 3. Expand Phase E coverage (next high-value slices, after/alongside Phase D inventory)
    - `test/js/node/child_process/*` broader batch:
@@ -181,7 +180,7 @@ Priority areas:
    - `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier: **REMOVED** — root cause was `stream.emit("end")` in `ProcessObjectInternals.ts` bypassing buffer drain; fixed with conditional `stream.push(null)`
    - `src/js/builtins/ProcessObjectInternals.ts` `internalRead()` EOF handling fixed: use `stream.push(null)` when buffer has data, direct `stream.emit("end")` when buffer empty
    - `src/bun.js/webcore/FileSink.zig` FreeBSD completion-order workaround and trace hooks removed (was masking same P0-5 root cause; cleanup completed)
-   - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround **REMOVED** — was only needed before `fs.promises.watch` lost-wakeup fix; directory rescan fallback remains (`keep`)
+   - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround (attempted; still required)
    - `src/js/node/fs.ts` / `src/js/node/fs.promises.ts` `rmdir` errno normalization shim (cleanup completed)
    - `src/bun.js/node/node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler-era workarounds (`readFileWithOptions()` cluster cleanup completed on current baseline)
    - `src/bun.js/node/node_fs.zig` FreeBSD `rmdir` errno-66 manual interception removed (redundant after `freebsd_errno.zig`; cleanup completed)
