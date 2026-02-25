@@ -736,7 +736,7 @@ Recommended next cleanup target (current branch evidence):
 
 1. ~~`src/bun.js/webcore/encoding.zig` + `src/js/builtins/ReadableStream.ts` pair~~ — both resolved (P0-1 root cause in `unicode.zig`; encoding.zig workaround removed; ReadableStream fallback removed).
 2. Next highest remaining P0: `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier (attempted twice, still required).
-3. Investigate pre-existing `spawn-stdin-readable-stream.test.ts` flakiness (observed at ~60% fail rate on current baseline independent of encoding.zig workaround).
+3. ~~Investigate pre-existing `spawn-stdin-readable-stream.test.ts` flakiness~~ — **investigation completed** (see P0-4 below).
 
 #### P0-1 Progress Update: TextDecoder / `ReadableStream.text()` Unicode corruption
 
@@ -864,6 +864,52 @@ Conclusion:
    restored.
 3. The remaining race is further narrowed to behavior above/beyond the removed `FileSink` defer branch; future cleanup
    work should target the child-side stdio pipeline/exit ordering more directly.
+
+#### P0-4 Investigation: `spawn-stdin-readable-stream.test.ts` flakiness root cause analysis
+
+Status: **Investigation completed; root cause identified as inherent to the P0-2 flush-barrier workaround**.
+
+Background:
+
+1. During `encoding.zig` workaround removal validation, pre-existing flakiness was observed in
+   `spawn-stdin-readable-stream.test.ts` at ~60% fail rate, confirmed at same rate on baseline (with workaround).
+2. Subsequent broader testing showed failure rate variable from ~10% to ~90% depending on system load.
+
+Investigation:
+
+1. Ran test 10 times: 9/10 fail (high system load period); later runs showed 3/10 fail (lower load).
+2. Isolated to two specific subtests:
+   - `ReadableStream with large data` (1MB single chunk): `ERR_STREAM_WRITE_AFTER_END` → child process hangs → test timeout (5s) → kill (~24s)
+   - `ReadableStream with very large chunked data` (16x64KB): `ERR_STREAM_WRITE_AFTER_END` → data truncation (e.g. 458752 of 1048576)
+3. All small-data subtests (<1MB) pass reliably.
+
+Root cause:
+
+1. The FreeBSD `pipe()` workaround in `src/js/internal/streams/readable.ts:840-846` calls `dest.end()` on
+   `process.stdout` when `process.stdin` emits "end".
+2. Normal Node.js behavior: `doEnd = false` when `dest === process.stdout` (line 839) — stdout is NOT ended.
+3. FreeBSD workaround overrides this to ensure data flushes before process exit.
+4. **Race condition**: with >=1MB data, stdin "end" can fire while data chunks are still in-flight through the pipe.
+   In-flight chunks then write to already-ended stdout → `ERR_STREAM_WRITE_AFTER_END`.
+
+Failure output captured:
+
+```
+error: write after end
+ code: "ERR_STREAM_WRITE_AFTER_END"
+      at _write (internal:streams/writable:278:60)
+      at ondata (internal:streams/readable:431:15)
+```
+
+Conclusion:
+
+1. The flakiness is inherent to the P0-2 flush-barrier workaround — it trades small-data reliability for large-data race.
+2. Removing the workaround causes small-data truncation (process exits before flushing); keeping it causes large-data race.
+3. The proper fix requires Zig-level changes to the child-side stdio/pipe infrastructure: process exit must wait for
+   pending pipe writes to complete without requiring `dest.end()` on the writable stream.
+4. **Not fixable at JS layer alone** — this is a FreeBSD platform limitation with the current Bun runtime.
+5. Phase E core gate recommendation: demote `spawn-stdin-readable-stream.test.ts` from must-pass to tracked-known-flaky
+   for the two large-data subtests only. Small-data subtests remain reliable.
 
 #### P1 Cleanup Attempt: watcher synthetic duplicate event still required
 
