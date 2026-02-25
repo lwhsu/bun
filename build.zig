@@ -164,7 +164,7 @@ pub fn build(b: *Build) !void {
         else switch (temp_resolved.result.os.tag) {
             .macos => .mac,
             .linux => .linux,
-            .freebsd => .linux,
+            .freebsd => .freebsd,
             .windows => .windows,
             else => |t| std.debug.panic("Unsupported OS tag {}", .{t}),
         };
@@ -759,7 +759,7 @@ fn configureObj(b: *Build, opts: *BunBuildOptions, obj: *Compile) void {
 
     // Object options
     obj.use_llvm = !opts.no_llvm;
-    obj.use_lld = if (opts.os == .mac or opts.os == .linux) false else !opts.no_llvm;
+    obj.use_lld = if (opts.os == .mac or opts.os == .linux or opts.os == .freebsd) false else !opts.no_llvm;
 
     if (opts.optimize == .Debug) {
         if (@hasField(std.meta.Child(@TypeOf(obj)), "llvm_codegen_threads"))
@@ -801,7 +801,7 @@ fn configureObj(b: *Build, opts: *BunBuildOptions, obj: *Compile) void {
         obj.root_module.stack_protector = false;
     }
 
-    if (opts.os == .linux) {
+    if (opts.os == .linux or opts.os == .freebsd) {
         obj.link_emit_relocs = false;
         obj.link_eh_frame_hdr = false;
         obj.link_function_sections = true;
@@ -862,7 +862,7 @@ fn addInternalImports(b: *Build, mod: *Module, opts: *BunBuildOptions) void {
 
     const zlib_internal_path = switch (os) {
         .windows => "src/deps/zlib.win32.zig",
-        .linux, .mac => "src/deps/zlib.posix.zig",
+        .linux, .mac, .freebsd => "src/deps/zlib.posix.zig",
         else => null,
     };
     if (zlib_internal_path) |path| {
@@ -872,7 +872,7 @@ fn addInternalImports(b: *Build, mod: *Module, opts: *BunBuildOptions) void {
     }
 
     const async_path = switch (os) {
-        .linux, .mac => "src/async/posix_event_loop.zig",
+        .linux, .mac, .freebsd => "src/async/posix_event_loop.zig",
         .windows => "src/async/windows_event_loop.zig",
         else => "src/async/stub_event_loop.zig",
     };

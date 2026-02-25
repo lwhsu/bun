@@ -4996,3 +4996,23 @@ Fresh strict replay validation completes end-to-end:
   - `util.test.js` => `192 pass / 0 fail`
   - `fs.test.ts` => `234 pass / 6 skip / 0 fail`
   - `fs.watch.test.ts` => `32 pass / 0 fail`
+
+### P1: watcher synthetic duplicate event — removal reverted (2026-02-26)
+
+- Attempted removing the synthetic duplicate event from `path_watcher.zig` FreeBSD directory-rescan fallback
+- Passed 5/5 in initial testing, but full-suite runs showed consistent `fs.promises.watch` timeout failures
+- The test passes in isolation but fails in the full suite — indicates kqueue event delivery timing sensitivity under concurrent watcher load
+- Reverted: synthetic duplicate event is still required
+- Conclusion: root cause is deeper than the async iterator lost-wakeup fix; likely related to kqueue event coalescing under concurrent watcher registrations
+
+### Fix build.zig: map FreeBSD to `.freebsd` instead of `.linux` (2026-02-26)
+
+- `build.zig` line 167 mapped `.freebsd => .linux` as a bootstrap hack
+- Changed to `.freebsd => .freebsd` (the `OperatingSystem` enum already has a `.freebsd` variant)
+- Added `.freebsd` to all switches that previously only handled `.linux, .mac`:
+  - `zlib_internal_path`: FreeBSD uses `src/deps/zlib.posix.zig` (was falling through to `null`)
+  - `async_path`: FreeBSD uses `src/async/posix_event_loop.zig` (was falling through to stub)
+  - `use_lld`: FreeBSD disables LLD (same as Linux/macOS — CMake handles linking)
+  - `configureObj` linker flags: FreeBSD gets `link_function_sections`/`link_data_sections` (ELF optimizations)
+- No Zig recompile needed (build.zig affects build-system config, not Zig source)
+- Validation: full Phase E core gate green
