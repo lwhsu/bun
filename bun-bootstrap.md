@@ -4963,3 +4963,20 @@ Fresh strict replay validation completes end-to-end:
   - FreeBSD-specific workaround count reduced by 1 (flush-barrier removed)
   - Cross-platform bug fixed (potential benefit for all platforms)
   - Phase E core gate fully green, including previously-flaky spawn-stdin tests
+
+### P1: Remove FileSink FreeBSD completion-order workaround and trace hooks (2026-02-25)
+
+- Now that P0-5 fixed the root cause (`ProcessObjectInternals.ts` EOF handling), the FileSink workaround is no longer needed
+- Removed from `src/bun.js/webcore/FileSink.zig`:
+  - FreeBSD-specific `this.end(null)` path in `handleResolveStream()` — now uses `this.writer.close()` like all platforms
+  - `freebsdFileSinkTrace()` calls in `onWrite`, `onClose`, and `handleResolveStream`
+  - `freebsdFileSinkTraceEnabled()` and `freebsdFileSinkTrace()` helper functions
+  - `BUN_FREEBSD_FILESINK_TRACE` env-gated debug instrumentation
+- Build: full Zig recompile (14 min, .zig file changed)
+- Validation: full Phase E core gate green
+  - `spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail` (5 consecutive runs)
+  - `process-stdio.test.ts` => `9 pass / 0 fail`
+  - `process-stdin.test.ts` => `6 pass / 0 fail`
+  - `util.test.js` => `192 pass / 0 fail`
+  - `fs.test.ts` => `234 pass / 6 skip / 0 fail`
+  - `fs.watch.test.ts` => `32 pass / 0 fail`

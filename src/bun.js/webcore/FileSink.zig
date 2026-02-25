@@ -153,14 +153,7 @@ fn runPending(this: *FileSink) void {
 
 pub fn onWrite(this: *FileSink, amount: usize, status: bun.io.WriteStatus) void {
     log("onWrite({d}, {any})", .{ amount, status });
-    freebsdFileSinkTrace("onWrite amount={} status={s} done={} pending_state={s} writer_pending={} written_before={}", .{
-        amount,
-        @tagName(status),
-        this.done,
-        @tagName(this.pending.state),
-        this.writer.hasPendingData(),
-        this.written,
-    });
+
 
     this.written += amount;
 
@@ -242,12 +235,6 @@ pub fn onReady(this: *FileSink) void {
 
 pub fn onClose(this: *FileSink) void {
     log("onClose()", .{});
-    freebsdFileSinkTrace("onClose done={} pending_state={s} writer_pending={} written={}", .{
-        this.done,
-        @tagName(this.pending.state),
-        this.writer.hasPendingData(),
-        this.written,
-    });
     if (this.readable_stream.has()) {
         if (this.event_loop_handle.globalObject()) |global| {
             if (this.readable_stream.get(global)) |stream| {
@@ -715,44 +702,13 @@ pub const FlushPendingTask = struct {
 
 /// Does not ref or unref.
 fn handleResolveStream(this: *FileSink, globalThis: *jsc.JSGlobalObject) void {
-    freebsdFileSinkTrace("handleResolveStream(begin) done={} pending_state={s} writer_pending={} written={}", .{
-        this.done,
-        @tagName(this.pending.state),
-        this.writer.hasPendingData(),
-        this.written,
-    });
-    // Flush/finish the sink before notifying the JS ReadableStream wrapper. On FreeBSD subprocess
-    // stdin pipes we can otherwise resolve the source stream early and race pending buffered writes,
-    // causing chunked stdin truncation.
     if (!this.done) {
-        if (comptime Environment.isFreeBSD) {
-            switch (this.end(null)) {
-                .err => |err| {
-                    freebsdFileSinkTrace("handleResolveStream(end.err={any})", .{err});
-                    this.writer.close();
-                },
-                .result => {
-                    freebsdFileSinkTrace("handleResolveStream(end.result) done={} writer_pending={} written={}", .{
-                        this.done,
-                        this.writer.hasPendingData(),
-                        this.written,
-                    });
-                },
-            }
-        } else {
-            this.writer.close();
-        }
+        this.writer.close();
     }
 
     if (this.readable_stream.get(globalThis)) |*stream| {
         stream.done(globalThis);
     }
-    freebsdFileSinkTrace("handleResolveStream(end) done={} pending_state={s} writer_pending={} written={}", .{
-        this.done,
-        @tagName(this.pending.state),
-        this.writer.hasPendingData(),
-        this.written,
-    });
 }
 
 /// Does not ref or unref.
@@ -852,13 +808,3 @@ const Blob = webcore.Blob;
 const Sink = webcore.Sink;
 const streams = webcore.streams;
 
-fn freebsdFileSinkTraceEnabled() bool {
-    if (comptime !Environment.isFreeBSD) return false;
-    return bun.getenvZ("BUN_FREEBSD_FILESINK_TRACE") != null;
-}
-
-fn freebsdFileSinkTrace(comptime fmt: []const u8, args: anytype) void {
-    if (comptime !Environment.isFreeBSD) return;
-    if (!freebsdFileSinkTraceEnabled()) return;
-    std.debug.print("[freebsd-filesink] " ++ fmt ++ "\n", args);
-}

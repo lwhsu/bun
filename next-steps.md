@@ -179,7 +179,7 @@ Priority areas:
 3. Execute next P0/P1 cleanup target after P0-1
    - `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier: **REMOVED** — root cause was `stream.emit("end")` in `ProcessObjectInternals.ts` bypassing buffer drain; fixed with conditional `stream.push(null)`
    - `src/js/builtins/ProcessObjectInternals.ts` `internalRead()` EOF handling fixed: use `stream.push(null)` when buffer has data, direct `stream.emit("end")` when buffer empty
-   - `src/bun.js/webcore/FileSink.zig` FreeBSD completion-order branch (cleanup completed; targeted tests green)
+   - `src/bun.js/webcore/FileSink.zig` FreeBSD completion-order workaround and trace hooks removed (was masking same P0-5 root cause; cleanup completed)
    - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround (attempted; still required)
    - `src/js/node/fs.ts` / `src/js/node/fs.promises.ts` `rmdir` errno normalization shim (cleanup completed)
    - `src/bun.js/node/node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler-era workarounds (`readFileWithOptions()` cluster cleanup completed on current baseline)
