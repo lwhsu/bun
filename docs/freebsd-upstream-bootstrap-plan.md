@@ -526,7 +526,7 @@ Detailed classification (current-tree):
 | `src/bun.js/api/bun/subprocess.zig` | `BUN_FREEBSD_SPAWN_TRACE` debug trace helper only | `temporary shim` (debug-only) | Debug instrumentation for FreeBSD spawn diagnosis. Keep locally while Phase D/E remains active; remove or gate behind generic debug tracing before upstreaming if not broadly useful. | `BUN_FREEBSD_SPAWN_TRACE=1` ad hoc repros |
 | `src/bun.js/webcore/FileSink.zig` | FreeBSD flush/resolve ordering changes in `handleResolveStream()`; defer `stream.done()` signaling to `onClose()` on FreeBSD; env-gated trace helper | `mixed` | `keep`: pending-write accounting fixes and ordering correctness if validated as general bugfix. `temporary shim`: FreeBSD-specific completion ordering and trace hooks until child-side stdin path root cause is fully resolved/confirmed. Revisit after broader stdin/pipe parity confidence. | `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`; focused 16x64KB stdin->stdout repro; `BUN_FREEBSD_FILESINK_TRACE=1` instrumentation repro |
 | `src/js/builtins/ReadableStream.ts` | FreeBSD `ReadableStream.text()` fallback decodes via `Buffer.from(bytes).toString()` instead of native `TextDecoder`/fast path | `temporary shim` | Verified runtime compatibility workaround for first-byte corruption in subprocess stdout `.text()`. Replace after root-causing `TextDecoder`/decode-path corruption on FreeBSD. | `test/js/node/process/process-stdio.test.ts`; Unicode stdout repros in `bun-bootstrap.md` |
-| `src/js/internal/streams/readable.ts` | FreeBSD `process.stdin.pipe(process.stdout|stderr)` flush-barrier path calls `dest.end()` for narrow stdio relay case | `temporary shim` | Compatibility workaround to avoid stdin truncation at process exit. Behavior tradeoff vs Node stdio end semantics; replace after child-side stdin/stdio pipeline root cause is fixed. | `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts`; focused stdin->stdout chunked relay repro |
+| `src/js/internal/streams/readable.ts` | (FreeBSD flush-barrier removed) | `resolved` | Root cause was `stream.emit("end")` in `ProcessObjectInternals.ts` bypassing Readable stream buffer drain. Fixed with conditional `stream.push(null)`. Flush-barrier workaround removed — it was masking the real bug, not fixing it. | `spawn-stdin-readable-stream.test.ts` (20/0 x5), `process-stdio.test.ts` (9/0), full Phase E gate green. |
 
 Pass 1 notes / conclusions:
 
@@ -713,7 +713,7 @@ Prioritized cleanup list (temporary shims + `mixed` sub-behaviors):
 | Priority | Item | File(s) | Type | Current status / risk | Replacement target | Removal / downgrade condition |
 |---|---|---|---|---|---|---|
 | P0 | `ReadableStream.text()` FreeBSD Buffer decode fallback | `src/js/builtins/ReadableStream.ts` | `resolved` | Root cause fixed in `unicode.zig` (P0-1); JS fallback removed. | N/A (resolved). | `process-stdio.test.ts` passes without fallback. |
-| P0 | stdin->stdio flush-barrier (`dest.end()`) in `Readable.prototype.pipe()` | `src/js/internal/streams/readable.ts` | `temporary shim` | High runtime semantic risk; explicitly trades off Node stdio-end semantics for reliability in a narrow path. Broadly visible if user code pipes `process.stdin` to stdio. | Fix child-side stdin/stdio pipeline completion/exit ordering so chunked writes are not truncated without ending stdio. Remove special-case branch. | Focused stdin->stdout chunked repro passes without special-case `dest.end()`, and `spawn-stdin-readable-stream` suite remains green. |
+| P0 | stdin->stdio flush-barrier (`dest.end()`) in `Readable.prototype.pipe()` | `src/js/internal/streams/readable.ts` | `resolved` | Root cause was `stream.emit("end")` in `ProcessObjectInternals.ts` bypassing Readable stream buffer drain on EOF. Fixed with conditional `stream.push(null)` when buffer has data. Flush-barrier workaround removed — it was masking the real bug. This is a cross-platform fix (not FreeBSD-specific). | N/A (resolved). | `spawn-stdin-readable-stream` (20/0 x5 runs), `process-stdio` (9/0), `process-stdin` (6/0), full Phase E gate green. |
 | P0 | FreeBSD encoding owned-buffer copy workaround | `src/bun.js/webcore/encoding.zig` | `resolved` | Speculative workaround removed. Was added before real Unicode root cause found in `unicode.zig`. Validated: full Phase E core gate passes; pre-existing `spawn-stdin-readable-stream` flakiness confirmed at same rate with and without workaround. | N/A (resolved). | `process-stdio` (9/0), `process-stdin` (6/0), `util` (192/0), `fs` (234/6skip/0), `fs.watch` (32/0) all pass. |
 | P1 | `FileSink` FreeBSD completion-order workaround (`stream.done()` defer) | `src/bun.js/webcore/FileSink.zig` | `mixed` sub-behavior | Cleanup in progress: FreeBSD-only defer branch has been removed on this branch and targeted tests are green; continue watching for regressions while the higher-level stdio flush-barrier shim still exists. | Keep generic pending-write accounting fixes; validate the shared completion path under broader coverage, then downgrade/remove remaining FreeBSD-specific `FileSink` behavior/debug hooks. | `spawn-stdin-readable-stream`, `process-stdio`, and `process-stdin` remain green after removing the FreeBSD-only defer branch. |
 | P1 | watcher synthetic duplicate event workaround | `src/bun.js/node/path_watcher.zig` | `mixed` sub-behavior | Medium risk; synthetic duplicate event intentionally shapes higher-level behavior and may produce extra notifications. Cleanup attempt on current branch regressed `fs.promises.watch` timeout, so the workaround remains required. | Improve FreeBSD directory fallback event synthesis / consumer readiness so one synthetic event is sufficient, or model explicit create/remove reconciliation more precisely. | `fs.watch.test.ts` remains green without duplicate synthetic event emission. |
@@ -735,8 +735,8 @@ Execution guidance after ranking:
 Recommended next cleanup target (current branch evidence):
 
 1. ~~`src/bun.js/webcore/encoding.zig` + `src/js/builtins/ReadableStream.ts` pair~~ — both resolved (P0-1 root cause in `unicode.zig`; encoding.zig workaround removed; ReadableStream fallback removed).
-2. Next highest remaining P0: `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier (attempted twice, still required).
-3. ~~Investigate pre-existing `spawn-stdin-readable-stream.test.ts` flakiness~~ — **investigation completed** (see P0-4 below).
+2. ~~`src/js/internal/streams/readable.ts` stdin->stdio flush-barrier~~ — **resolved** (see P0-5 below). Root cause was `stream.emit("end")` in `ProcessObjectInternals.ts`; workaround removed.
+3. ~~Investigate pre-existing `spawn-stdin-readable-stream.test.ts` flakiness~~ — **resolved** (see P0-4 investigation → P0-5 fix below).
 
 #### P0-1 Progress Update: TextDecoder / `ReadableStream.text()` Unicode corruption
 
@@ -907,9 +907,50 @@ Conclusion:
 2. Removing the workaround causes small-data truncation (process exits before flushing); keeping it causes large-data race.
 3. The proper fix requires Zig-level changes to the child-side stdio/pipe infrastructure: process exit must wait for
    pending pipe writes to complete without requiring `dest.end()` on the writable stream.
-4. **Not fixable at JS layer alone** — this is a FreeBSD platform limitation with the current Bun runtime.
-5. Phase E core gate recommendation: demote `spawn-stdin-readable-stream.test.ts` from must-pass to tracked-known-flaky
-   for the two large-data subtests only. Small-data subtests remain reliable.
+4. ~~**Not fixable at JS layer alone**~~ — **CORRECTED**: root cause WAS in JS layer; fixed in P0-5 below.
+5. ~~Phase E core gate recommendation: demote~~ — **CORRECTED**: fully fixed; test restored to must-pass.
+
+#### P0-5 Fix: `process.stdin` EOF handling — `stream.emit("end")` → conditional `stream.push(null)`
+
+Status: **Fixed; FreeBSD flush-barrier workaround removed; all Phase E tests pass**.
+
+Root cause (deeper than P0-4 analysis):
+
+1. P0-4 identified the flush-barrier workaround as the source of the race condition.
+2. P0-5 identified the **actual root cause**: `stream.emit("end")` in `src/js/builtins/ProcessObjectInternals.ts`
+   directly emitted the "end" event, **bypassing the Node.js Readable stream's internal buffer drain mechanism**.
+3. When `pipe()` backpressure paused the stream (e.g. stdout pipe buffer full), data remained in the stream's
+   internal buffer. Direct `stream.emit("end")` fired before this buffered data was consumed.
+4. The flush-barrier workaround called `dest.end()` on stdout when "end" fired — setting `kEnding`.
+5. When the stream later resumed (stdout drained), buffered data tried to flow → `dest.write()` after `dest.end()`
+   → `ERR_STREAM_WRITE_AFTER_END`.
+
+Fix applied:
+
+1. `src/js/builtins/ProcessObjectInternals.ts` `internalRead()` EOF branch:
+   - If `stream._readableState.length > 0` (buffered data): use `stream.push(null)` — goes through proper
+     Readable lifecycle, drains buffer before emitting "end".
+   - If buffer is empty or stream destroyed: use direct `stream.emit("end")` + `stream.destroy()` + `disown()`
+     (original synchronous path for immediate cleanup).
+2. `src/js/internal/streams/readable.ts`:
+   - Removed `isFreeBSD` constant.
+   - Removed `useFreeBSDStdioFlushBarrier` logic.
+   - Removed `onStdioFlushBarrierEnd()` function.
+   - `endFn` now follows standard Node.js semantics: `doEnd ? onend : unpipe`.
+
+Key insight: this is a **cross-platform fix**, not FreeBSD-specific. The `stream.emit("end")` bypass could affect
+any platform under sufficient backpressure. FreeBSD exposed it because its pipe buffer sizes and scheduling timing
+made the race window larger.
+
+Validation:
+
+1. `spawn-stdin-readable-stream.test.ts` — 20 pass / 1 todo / 0 fail (5 consecutive runs, 0 flakiness)
+2. `process-stdio.test.ts` — 9 pass / 0 fail (including "close" event test #6713)
+3. `process-stdin.test.ts` — 6 pass / 0 fail
+4. `util.test.js` — 192 pass / 0 fail
+5. `fs.test.ts` — 234 pass / 6 skip / 0 fail
+6. `fs.watch.test.ts` — 32 pass / 0 fail
+7. Instrumented 1MB stdin→stdout relay: 10/10 pass (previously 1/10)
 
 #### P1 Cleanup Attempt: watcher synthetic duplicate event still required
 

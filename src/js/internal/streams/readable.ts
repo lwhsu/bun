@@ -39,7 +39,6 @@ const TypedArrayPrototypeSet = Uint8Array.prototype.set;
 
 const { errorOrDestroy } = destroyImpl;
 const nop = () => {};
-const isFreeBSD = process.platform === "freebsd";
 
 const kErroredValue = Symbol("kErroredValue");
 const kDefaultEncodingValue = Symbol("kDefaultEncodingValue");
@@ -837,13 +836,7 @@ Readable.prototype.pipe = function (dest, pipeOpts) {
 
   const pipeIntoProcessStdio = dest === process.stdout || dest === process.stderr;
   const doEnd = (!pipeOpts || pipeOpts.end !== false) && !pipeIntoProcessStdio;
-  // FreeBSD/Bun compatibility: piping stdin -> stdout/stderr can exit before
-  // pending stdio writes fully flush. For the narrow stdio relay case, prefer
-  // reliability over Node's usual "don't end stdio" rule and end the dest so
-  // pending writes flush before process exit.
-  const useFreeBSDStdioFlushBarrier =
-    isFreeBSD && (!pipeOpts || pipeOpts.end !== false) && src === process.stdin && pipeIntoProcessStdio;
-  const endFn = doEnd ? onend : useFreeBSDStdioFlushBarrier ? onStdioFlushBarrierEnd : unpipe;
+  const endFn = doEnd ? onend : unpipe;
   if ((state[kState] & kEndEmitted) !== 0) process.nextTick(endFn);
   else src.once("end", endFn);
 
@@ -860,11 +853,6 @@ Readable.prototype.pipe = function (dest, pipeOpts) {
 
   function onend() {
     $debug("onend");
-    dest.end();
-  }
-
-  function onStdioFlushBarrierEnd() {
-    $debug("onStdioFlushBarrierEnd");
     dest.end();
   }
 

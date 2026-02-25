@@ -122,7 +122,7 @@ Priority areas:
      - current-tree codegen stage0 fallbacks in `src/codegen/*`
 
 2. Freeze and document Phase E core-gate baseline (now green)
-   - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail` (demoted: tracked-known-flaky for 2 large-data subtests; see P0-4 investigation)
+   - `test/js/bun/spawn/spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail` (flakiness fixed: P0-4 root cause was `stream.emit("end")` bypassing buffer drain; P0-2 flush-barrier workaround removed)
    - `test/js/node/process/process-stdio.test.ts` => `9 pass / 0 fail`
    - `test/js/node/process/process-stdin.test.ts` => `6 pass / 0 fail`
    - `test/js/node/util/util.test.js` => `192 pass / 0 fail`
@@ -177,24 +177,18 @@ Priority areas:
    - validated with TextDecoder repros + `process-stdio.test.ts` + `process-stdin.test.ts`
 2. Keep Phase E core gate as regression floor while touching D-classified areas
 3. Execute next P0/P1 cleanup target after P0-1
-   - `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier (attempted twice, including after `FileSink`
-     cleanup; still required)
+   - `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier: **REMOVED** — root cause was `stream.emit("end")` in `ProcessObjectInternals.ts` bypassing buffer drain; fixed with conditional `stream.push(null)`
+   - `src/js/builtins/ProcessObjectInternals.ts` `internalRead()` EOF handling fixed: use `stream.push(null)` when buffer has data, direct `stream.emit("end")` when buffer empty
    - `src/bun.js/webcore/FileSink.zig` FreeBSD completion-order branch (cleanup completed; targeted tests green)
    - `src/bun.js/node/path_watcher.zig` synthetic duplicate event workaround (attempted; still required)
-   - later retry: `src/js/internal/streams/readable.ts` flush-barrier after additional child-side stdio pipeline fixes
    - `src/js/node/fs.ts` / `src/js/node/fs.promises.ts` `rmdir` errno normalization shim (cleanup completed)
    - `src/bun.js/node/node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler-era workarounds (`readFileWithOptions()` cluster cleanup completed on current baseline)
    - `src/bun.js/node/node_fs.zig` FreeBSD `rmdir` errno-66 manual interception removed (redundant after `freebsd_errno.zig`; cleanup completed)
    - `node_fs.zig` FreeBSD-specific behavior now reduced to copy/cp read-write fallback paths only (`keep`)
    - `src/bun.js/webcore/encoding.zig` FreeBSD owned-buffer copy workaround removed (was speculative; real bug was in `unicode.zig`; cleanup completed)
-   - note: pre-existing `spawn-stdin-readable-stream.test.ts` flakiness (~60% fail rate) observed on current baseline independent of encoding.zig change; needs separate investigation
-   - `spawn-stdin-readable-stream.test.ts` flakiness investigation completed:
-     - root cause: FreeBSD `pipe()` workaround in `src/js/internal/streams/readable.ts:840-846` creates race condition
-     - workaround calls `dest.end()` on stdout when stdin ends (to prevent truncation on process exit)
-     - with large data (>=1MB), stdin "end" fires while data chunks still in-flight → `ERR_STREAM_WRITE_AFTER_END`
-     - two failure modes: "large data" (1MB single chunk) → timeout/hang; "very large chunked data" (16x64KB) → data truncation
-     - failure rate variable (10-90%) depending on system load; small data tests (<1MB) pass reliably
-     - dilemma: removing workaround causes small-data truncation; keeping it causes large-data race
-     - proper fix requires Zig-level stdio/pipe infrastructure changes (process exit must wait for pending writes without ending writable stream)
-     - classified as known FreeBSD limitation; not fixable at JS layer alone
-     - Phase E core gate: demote this test from must-pass to tracked-known-flaky for large-data subtests
+   - `spawn-stdin-readable-stream.test.ts` flakiness **FIXED**:
+     - root cause: `stream.emit("end")` in `ProcessObjectInternals.ts` bypassed Readable stream buffer drain
+     - with backpressure from pipe(), buffered data remained when "end" fired → `ERR_STREAM_WRITE_AFTER_END`
+     - fix: use `stream.push(null)` when buffer has data (proper lifecycle drain), direct `emit("end")` when empty
+     - FreeBSD `pipe()` flush-barrier workaround in `readable.ts` removed (was masking this bug, not fixing it)
+     - all 6 Phase E core gate suites pass; spawn-stdin test 5/5 reliable with fix

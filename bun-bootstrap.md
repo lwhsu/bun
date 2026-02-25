@@ -4923,8 +4923,43 @@ Fresh strict replay validation completes end-to-end:
 - Dilemma:
   - Without workaround: small-data pipe truncation (process exits before flushing)
   - With workaround: large-data race condition (`ERR_STREAM_WRITE_AFTER_END`)
-- Conclusion:
-  - Inherent to the P0-2 flush-barrier workaround; not fixable at JS layer
-  - Proper fix requires Zig-level child-side stdio/pipe exit ordering changes
-  - Small-data subtests (<1MB) remain reliable
-  - Phase E: demote this test from must-pass to tracked-known-flaky for large-data subtests
+- Conclusion (P0-4):
+  - ~~Inherent to the P0-2 flush-barrier workaround; not fixable at JS layer~~
+  - **CORRECTED in P0-5**: root cause was deeper — `stream.emit("end")` in `ProcessObjectInternals.ts` bypassing buffer drain
+
+### P0-5: Fix `process.stdin` EOF race — `stream.emit("end")` → conditional `stream.push(null)` (2026-02-25)
+
+- Deeper investigation of P0-4 findings revealed the actual root cause
+- Root cause: `src/js/builtins/ProcessObjectInternals.ts` `internalRead()` line 211
+  - When native reader returned EOF, `stream.emit("end")` was called directly
+  - This bypasses Node.js Readable stream's internal buffer drain mechanism
+  - With pipe() backpressure (e.g. 1MB data, stdout pipe buffer full), data remained buffered
+  - Direct "end" event fired before all buffered "data" events → `ERR_STREAM_WRITE_AFTER_END`
+- Instrumented test captured exact race:
+  - Run 4/10: `stdin 'end' event fired, writeCount=2, totalBytes=262144`
+  - Then: `RACE: write #3 (786432B) AFTER end! total=1048576`
+  - Only 256KB of 1MB was written before "end" fired; remaining 768KB was buffered
+- Fix applied (two files):
+  1. `src/js/builtins/ProcessObjectInternals.ts`:
+     - If `stream._readableState.length > 0`: use `stream.push(null)` (proper lifecycle drain)
+     - If buffer empty or stream destroyed: use direct `stream.emit("end")` + destroy (immediate cleanup)
+  2. `src/js/internal/streams/readable.ts`:
+     - Removed `isFreeBSD` constant
+     - Removed `useFreeBSDStdioFlushBarrier` logic and `onStdioFlushBarrierEnd()` function
+     - `endFn` now follows standard Node.js semantics: `doEnd ? onend : unpipe`
+- Key insight: cross-platform fix, not FreeBSD-specific
+  - The `stream.emit("end")` bypass could affect any platform under sufficient backpressure
+  - FreeBSD exposed it due to pipe buffer sizes and scheduling timing
+- Build: release rebuild, Zig cached (JS rebundle + link only)
+- Validation (all pass):
+  - `spawn-stdin-readable-stream.test.ts` => `20 pass / 1 todo / 0 fail` (5 consecutive runs, 0 flakiness)
+  - `process-stdio.test.ts` => `9 pass / 0 fail` (including "close" event test #6713)
+  - `process-stdin.test.ts` => `6 pass / 0 fail`
+  - `util.test.js` => `192 pass / 0 fail`
+  - `fs.test.ts` => `234 pass / 6 skip / 0 fail`
+  - `fs.watch.test.ts` => `32 pass / 0 fail`
+  - Instrumented 1MB stdin→stdout relay: 10/10 pass (previously 1/10)
+- Net result:
+  - FreeBSD-specific workaround count reduced by 1 (flush-barrier removed)
+  - Cross-platform bug fixed (potential benefit for all platforms)
+  - Phase E core gate fully green, including previously-flaky spawn-stdin tests

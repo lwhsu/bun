@@ -208,7 +208,20 @@ export function getStdinStream(
       } else {
         if (!stream_endEmitted) {
           stream_endEmitted = true;
-          stream.emit("end");
+          if (stream_destroyed || stream.destroyed || !stream._readableState.length) {
+            // Buffer is empty or stream already destroyed — safe to emit "end"
+            // directly and destroy synchronously. This ensures the full
+            // end → destroy → close chain completes before the process exits.
+            stream.emit("end");
+          } else {
+            // Data is still buffered (e.g. due to backpressure from pipe()).
+            // Use push(null) to go through the proper stream lifecycle so all
+            // buffered data is consumed before "end" fires. Direct emit("end")
+            // would race with buffered data, causing ERR_STREAM_WRITE_AFTER_END.
+            // Let autoDestroy → "close" handler handle cleanup.
+            stream.push(null);
+            return;
+          }
         }
         if (!stream_destroyed) {
           stream_destroyed = true;
