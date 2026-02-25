@@ -5016,3 +5016,81 @@ Fresh strict replay validation completes end-to-end:
   - `configureObj` linker flags: FreeBSD gets `link_function_sections`/`link_data_sections` (ELF optimizations)
 - No Zig recompile needed (build.zig affects build-system config, not Zig source)
 - Validation: full Phase E core gate green
+
+## 2026-02-26: Phase E Test Coverage Expansion
+
+Expanded test coverage beyond the core gate (6 suites / 499 tests) to validate broader FreeBSD runtime stability.
+
+### Batch 1: Low-risk, high-value (all green)
+
+| Suite | Pass | Skip | Todo | Fail |
+|-------|------|------|------|------|
+| `test/js/node/stream/node-stream.test.js` | 36 | 1 | 5 | 0 |
+| `test/js/node/events/event-emitter.test.ts` | 63 | 0 | 0 | 0 |
+| `test/js/node/zlib/zlib.test.js` | 376 | 2 | 0 | 0 |
+
+### Batch 2: Core networking (all green)
+
+| Suite | Pass | Skip | Todo | Fail |
+|-------|------|------|------|------|
+| `test/js/node/http/node-http.test.ts` | 74 | 1 | 0 | 0 |
+| `test/js/node/net/node-net.test.ts` | 31 | 1 | 0 | 0 |
+
+### Batch 3: Process management
+
+| Suite | Pass | Skip | Todo | Fail | Notes |
+|-------|------|------|------|------|-------|
+| `test/js/node/child_process/child_process.test.ts` | 23 | 0 | 1 | 7 | env issue |
+
+- With `bun` in PATH: 26 pass / 1 todo / 4 fail
+- All failures classified as **test environment issues**, not FreeBSD bugs:
+  - 2 failures: `bash` not found (FreeBSD uses `/usr/local/bin/bash`, `shellExe()` returns `bash` without path)
+  - 1 failure: `node` not found in PATH (`execFileSync("node", ...)`)
+  - 1 failure: env leakage from test harness (`BUN_DEBUG_QUIET_LOGS` etc. leak into `getChildEnv({})`)
+  - 3 additional failures without `bun` in PATH: `exec("bun -v")` and `spawnSync("bun", ...)` fail
+
+### Batch 4: Web APIs
+
+| Suite | Pass | Skip | Todo | Fail | Notes |
+|-------|------|------|------|------|-------|
+| `test/js/web/fetch/fetch.test.ts` | 340 | 0 | 0 | 1 | harness gap |
+| `test/js/web/websocket/websocket.test.js` | 23 | 0 | 0 | 1 | test interaction |
+| `test/js/web/websocket/websocket-client.test.ts` | 0 | 0 | 0 | 29 | missing dep |
+| `test/js/web/websocket/websocket-upgrade.test.ts` | 4 | 0 | 0 | 0 | |
+| `test/js/web/websocket/websocket-blob.test.ts` | 3 | 0 | 0 | 0 | |
+| `test/js/web/websocket/websocket-custom-headers.test.ts` | 4 | 0 | 0 | 0 | |
+| `test/js/web/websocket/websocket-permessage-deflate-simple.test.ts` | 5 | 0 | 0 | 0 | |
+| `test/js/web/websocket/websocket-permessage-deflate.test.ts` | 5 | 1 | 0 | 0 | |
+| `test/js/web/websocket/websocket-permessage-deflate-edge-cases.test.ts` | 3 | 0 | 0 | 0 | |
+| `test/js/web/websocket/websocket-close-fragmented.test.ts` | 10 | 0 | 0 | 0 | |
+| `test/js/web/websocket/websocket-pong-fragmented.test.ts` | 3 | 0 | 0 | 0 | |
+| `test/js/web/websocket/websocket-subprotocol-strict.test.ts` | 6 | 0 | 0 | 0 | |
+| `test/js/web/websocket/websocket-client-short-read.test.ts` | 3 | 0 | 0 | 0 | |
+| `test/js/web/websocket/autobahn.test.ts` | 0 | 3 | 0 | 0 | requires external tooling |
+| `test/js/web/websocket/websocket-proxy.test.ts` | — | — | — | error | missing `https-proxy-agent` pkg |
+
+Failure classification:
+- **fetch FIFO test**: `harness.ts:libcPathForDlopen()` has a `TODO` for FreeBSD — test harness gap, not runtime bug
+- **websocket.test.js "should send and receive messages"**: passes in isolation, times out in full suite — test interaction/cleanup issue (stale websocket connections from prior test), not FreeBSD bug
+- **websocket-client.test.ts**: all 29 failures from `ERR_MODULE_NOT_FOUND` — missing npm dependency, not FreeBSD bug
+- **websocket-proxy.test.ts**: missing `https-proxy-agent` package — dependency issue
+
+### Summary
+
+| Category | Suites | Tests Passed | Tests Failed |
+|----------|--------|-------------|-------------|
+| Batch 1 (streams/events/zlib) | 3 | 475 | 0 |
+| Batch 2 (HTTP/net) | 2 | 105 | 0 |
+| Batch 3 (child_process) | 1 | 26* | 4* |
+| Batch 4 (fetch/websocket) | 15 | 409 | 31 |
+| **Total expansion** | **21** | **1015** | **35** |
+
+*with `bun` in PATH
+
+**Zero failures attributable to FreeBSD runtime bugs.** All 35 failures are:
+- Test environment issues (missing `bash`/`node`/`bun` in PATH): 7
+- Test harness gaps (FreeBSD `libcPathForDlopen` TODO): 1
+- Missing npm dependencies (`https-proxy-agent`, websocket-client node module): 30
+- Test interaction issue (websocket cleanup): 1
+
+Combined with prior Phase E results (core gate 499 + url 186 + crypto 789), the FreeBSD port now has **2,489+ tests passing** with no FreeBSD-specific runtime failures.
