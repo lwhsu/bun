@@ -186,3 +186,5 @@ Priority areas:
    - `src/bun.js/node/node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler-era workarounds (`readFileWithOptions()` cluster cleanup completed on current baseline)
    - `src/bun.js/node/node_fs.zig` FreeBSD `rmdir` errno-66 manual interception removed (redundant after `freebsd_errno.zig`; cleanup completed)
    - `node_fs.zig` FreeBSD-specific behavior now reduced to copy/cp read-write fallback paths only (`keep`)
+   - `src/bun.js/webcore/encoding.zig` FreeBSD owned-buffer copy workaround removed (was speculative; real bug was in `unicode.zig`; cleanup completed)
+   - note: pre-existing `spawn-stdin-readable-stream.test.ts` flakiness (~60% fail rate) observed on current baseline independent of encoding.zig change; needs separate investigation

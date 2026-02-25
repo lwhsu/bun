@@ -670,16 +670,16 @@ Detailed classification (current-tree):
 | `src/napi/napi.zig` | Treats FreeBSD with macOS for POSIX V8 mangled-name variant selection | `keep` | Platform ABI/name compatibility glue for N-API/V8 symbol declarations. | N-API build/link/runtime coverage (indirect) |
 | `src/allocators/MimallocArena.zig` | FreeBSD debug path skips `mi_is_in_heap_region()` assertion and uses `mi_free()` directly | `temporary shim` | Debug-only allocator compatibility/workaround on FreeBSD. Should be reviewed against mimalloc behavior/version and narrowed or removed if assert path can be made safe. | Debug builds / allocator stress; no dedicated Phase E test currently |
 | `src/bun.js/bindings/ZigGlobalObject.cpp` | `BUN_FREEBSD_MODULE_TRACE` env-gated module trace logging for FreeBSD | `temporary shim` (debug-only) | Diagnostic instrumentation added for FreeBSD module-loading debugging. Keep only while actively needed; likely remove or convert to generic debug tracing before upstream. | `BUN_FREEBSD_MODULE_TRACE=1` ad hoc module-load repros |
-| `src/bun.js/webcore/encoding.zig` | FreeBSD-owned-buffer fallback copies when creating `bun.String` from converted UTF16/Latin1 buffers | `temporary shim` | FreeBSD runtime correctness workaround in encoding/string ownership path (avoids problematic external-buffer path). Needs root-cause fix/validation before upstream cleanup. | Process/stdout text decoding regressions and Unicode repros; `test/js/node/process/process-stdio.test.ts` |
+| `src/bun.js/webcore/encoding.zig` | (FreeBSD owned-buffer fallback removed) | `resolved` | Speculative workaround was added before the real Unicode corruption root cause was found in `unicode.zig`. Removal validated against full Phase E core gate with no regression. Pre-existing flakiness in `spawn-stdin-readable-stream` confirmed at same rate with and without workaround. | `process-stdio.test.ts` (9/0), `process-stdin.test.ts` (6/0), `util.test.js` (192/0), `fs.test.ts` (234/6skip/0), `fs.watch.test.ts` (32/0) |
 
 Pass 5 notes / conclusions:
 
 1. Phase D inventory queue coverage is now complete across all queued subsystems/files.
-2. Remaining lower-priority temporary items cluster into three categories:
+2. Remaining lower-priority temporary items cluster into two categories:
    - debug instrumentation (`ZigGlobalObject.cpp`, tracing env hooks)
    - capability gating (`feature_flags.zig` SIMDUTF disabled on FreeBSD)
-   - runtime/debug allocator/encoding workarounds (`MimallocArena.zig`, `encoding.zig`, part of `Global.zig`)
-3. `src/bun.js/webcore/encoding.zig` should be treated as a higher-priority temporary runtime shim than the rest of this pass because it intersects with the earlier `ReadableStream.text()`/Unicode debugging path.
+   - debug allocator workarounds (`MimallocArena.zig`, part of `Global.zig`)
+3. `src/bun.js/webcore/encoding.zig` FreeBSD owned-buffer workaround has been removed (was speculative; real bug was in `unicode.zig`).
 
 Pass 5 completion check:
 
@@ -712,9 +712,9 @@ Prioritized cleanup list (temporary shims + `mixed` sub-behaviors):
 
 | Priority | Item | File(s) | Type | Current status / risk | Replacement target | Removal / downgrade condition |
 |---|---|---|---|---|---|---|
-| P0 | `ReadableStream.text()` FreeBSD Buffer decode fallback | `src/js/builtins/ReadableStream.ts` | `temporary shim` | High runtime semantic risk; masks underlying decode-path/TextDecoder corruption on subprocess stdout buffers. Impacts general `.text()` behavior and is difficult to upstream as-is. | Root-cause and fix the FreeBSD decode corruption in native/text decoding path (likely `TextDecoder`/buffer ownership/encoding path). Then restore normal fast-path behavior. | Unicode subprocess stdout repros and `test/js/node/process/process-stdio.test.ts` pass with fallback removed. |
+| P0 | `ReadableStream.text()` FreeBSD Buffer decode fallback | `src/js/builtins/ReadableStream.ts` | `resolved` | Root cause fixed in `unicode.zig` (P0-1); JS fallback removed. | N/A (resolved). | `process-stdio.test.ts` passes without fallback. |
 | P0 | stdin->stdio flush-barrier (`dest.end()`) in `Readable.prototype.pipe()` | `src/js/internal/streams/readable.ts` | `temporary shim` | High runtime semantic risk; explicitly trades off Node stdio-end semantics for reliability in a narrow path. Broadly visible if user code pipes `process.stdin` to stdio. | Fix child-side stdin/stdio pipeline completion/exit ordering so chunked writes are not truncated without ending stdio. Remove special-case branch. | Focused stdin->stdout chunked repro passes without special-case `dest.end()`, and `spawn-stdin-readable-stream` suite remains green. |
-| P0 | FreeBSD encoding owned-buffer copy workaround | `src/bun.js/webcore/encoding.zig` | `temporary shim` | Runtime correctness workaround intersects with prior Unicode/text corruption investigations. Likely related to broader string ownership/decoding behavior. | Identify ownership/lifetime issue in external string creation path; restore external-buffer path or a principled FreeBSD-safe equivalent. | Process/unicode decoding repros pass with workaround removed or reduced; no regressions in process/text slices. |
+| P0 | FreeBSD encoding owned-buffer copy workaround | `src/bun.js/webcore/encoding.zig` | `resolved` | Speculative workaround removed. Was added before real Unicode root cause found in `unicode.zig`. Validated: full Phase E core gate passes; pre-existing `spawn-stdin-readable-stream` flakiness confirmed at same rate with and without workaround. | N/A (resolved). | `process-stdio` (9/0), `process-stdin` (6/0), `util` (192/0), `fs` (234/6skip/0), `fs.watch` (32/0) all pass. |
 | P1 | `FileSink` FreeBSD completion-order workaround (`stream.done()` defer) | `src/bun.js/webcore/FileSink.zig` | `mixed` sub-behavior | Cleanup in progress: FreeBSD-only defer branch has been removed on this branch and targeted tests are green; continue watching for regressions while the higher-level stdio flush-barrier shim still exists. | Keep generic pending-write accounting fixes; validate the shared completion path under broader coverage, then downgrade/remove remaining FreeBSD-specific `FileSink` behavior/debug hooks. | `spawn-stdin-readable-stream`, `process-stdio`, and `process-stdin` remain green after removing the FreeBSD-only defer branch. |
 | P1 | watcher synthetic duplicate event workaround | `src/bun.js/node/path_watcher.zig` | `mixed` sub-behavior | Medium risk; synthetic duplicate event intentionally shapes higher-level behavior and may produce extra notifications. Cleanup attempt on current branch regressed `fs.promises.watch` timeout, so the workaround remains required. | Improve FreeBSD directory fallback event synthesis / consumer readiness so one synthetic event is sufficient, or model explicit create/remove reconciliation more precisely. | `fs.watch.test.ts` remains green without duplicate synthetic event emission. |
 | P1 | `rmdir` errno normalization (JS + Zig layers) | `src/js/node/fs.ts`, `src/js/node/fs.promises.ts`, `src/bun.js/node/node_fs.zig` | `resolved` | Fully resolved: JS shims removed (lower layers already return `ENOTEMPTY`); Zig-layer manual errno-66 interception in `node_fs.zig` also removed (redundant after `freebsd_errno.zig` maps `ENOTEMPTY = 66` and `errnoSysP` handles it natively). | N/A (resolved). | `fs.test.ts` (`234 pass / 6 skip / 0 fail`) after both JS and Zig removals. |
@@ -734,8 +734,9 @@ Execution guidance after ranking:
 
 Recommended next cleanup target (current branch evidence):
 
-1. `src/bun.js/webcore/encoding.zig` + `src/js/builtins/ReadableStream.ts` pair (investigate together)
-   - Reason: both relate to the same Unicode/text-decoding symptom cluster and may share root cause.
+1. ~~`src/bun.js/webcore/encoding.zig` + `src/js/builtins/ReadableStream.ts` pair~~ — both resolved (P0-1 root cause in `unicode.zig`; encoding.zig workaround removed; ReadableStream fallback removed).
+2. Next highest remaining P0: `src/js/internal/streams/readable.ts` stdin->stdio flush-barrier (attempted twice, still required).
+3. Investigate pre-existing `spawn-stdin-readable-stream.test.ts` flakiness (observed at ~60% fail rate on current baseline independent of encoding.zig workaround).
 
 #### P0-1 Progress Update: TextDecoder / `ReadableStream.text()` Unicode corruption
 

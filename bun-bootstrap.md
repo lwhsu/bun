@@ -4874,3 +4874,29 @@ Fresh strict replay validation completes end-to-end:
   - the Zig-layer `rmdir` errno interception is no longer needed
   - `node_fs.zig` FreeBSD-specific behavior is now reduced to copy/cp read-write fallback paths only (`keep`)
   - the entire `rmdir` errno normalization stack (JS shims + Zig interception) is fully retired
+
+### Phase D P0-3 cleanup: removed `encoding.zig` FreeBSD owned-buffer copy workaround
+
+- The FreeBSD-specific owned-buffer copy paths in `src/bun.js/webcore/encoding.zig` (`toBunStringFromOwnedSlice`)
+  were added speculatively during early bootstrap debugging (commit `f78985f527`, part of a checkpoint bundle)
+  before the real Unicode corruption root cause was found in `src/string/immutable/unicode.zig` (P0-1 fix).
+- The workaround avoided `createExternalGloballyAllocated` (which passes ownership to JSC via `mi_free` destructor)
+  by copying into `createUninitialized` buffers instead.
+- Removed both FreeBSD branches (UTF-16 converted path and ASCII/latin1 fallback path).
+- FreeBSD now uses the same `createExternalGloballyAllocated` path as Linux/macOS.
+- Validation (after rebuild):
+  - `./build/release/bun test test/js/node/process/process-stdio.test.ts` => `9 pass / 0 fail`
+  - `./build/release/bun test test/js/node/process/process-stdin.test.ts` => `6 pass / 0 fail`
+  - `./build/release/bun test test/js/node/util/util.test.js` => `192 pass / 0 fail`
+  - `./build/release/bun test test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+  - `./build/release/bun test test/js/node/watch/fs.watch.test.ts` => `32 pass / 0 fail`
+- `spawn-stdin-readable-stream.test.ts` flakiness investigation:
+  - with workaround removed: 2/5 pass, 3/5 fail (same `ReadableStream with large data` timeout/truncation)
+  - with workaround present (baseline): 2/5 pass, 3/5 fail (identical pattern and rate)
+  - conclusion: flakiness is pre-existing and unrelated to `encoding.zig`; needs separate investigation
+- Conclusion:
+  - the `encoding.zig` FreeBSD owned-buffer workaround was speculative and is no longer needed
+  - all three P0 items in the Unicode/text-decoding cluster are now resolved:
+    - P0-1: `unicode.zig` first-byte corruption fix
+    - P0-1 followup: `ReadableStream.text()` JS fallback removed
+    - P0-3: `encoding.zig` owned-buffer workaround removed
