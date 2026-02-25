@@ -5688,13 +5688,6 @@ pub const NodeFS = struct {
 
         const rmdir_path = args.path.sliceZ(&this.sync_error_buf);
         const rmdir_rc = system.rmdir(rmdir_path);
-        if (Environment.isFreeBSD and rmdir_rc != 0) {
-            // Bun currently aliases FreeBSD to Linux errno tables, so ENOTEMPTY (66 on FreeBSD)
-            // is serialized as EREMOTE unless we normalize it here.
-            if (std.c._errno().* == 66) {
-                return .{ .err = bun.sys.Error.fromCode(.NOTEMPTY, .rmdir).withPath(args.path.slice()) };
-            }
-        }
 
         if (Maybe(Return.Rmdir).errnoSysP(rmdir_rc, .rmdir, args.path.slice())) |err| {
             return err;

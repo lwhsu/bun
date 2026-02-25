@@ -79,7 +79,6 @@ Priority areas:
 1. `src/codegen/*` FreeBSD stage0 workarounds
 2. `ReadableStream.prototype.text()` FreeBSD fallback
 3. watcher synthetic fallback events
-4. `node:fs` `rmdir` errno normalization shim
 
 ### 4. Pre-Upstream Cleanup Queue (high-priority items first)
 
@@ -185,4 +184,5 @@ Priority areas:
    - later retry: `src/js/internal/streams/readable.ts` flush-barrier after additional child-side stdio pipeline fixes
    - `src/js/node/fs.ts` / `src/js/node/fs.promises.ts` `rmdir` errno normalization shim (cleanup completed)
    - `src/bun.js/node/node_fs.zig` FreeBSD + Zig 0.13 readFile* compiler-era workarounds (`readFileWithOptions()` cluster cleanup completed on current baseline)
-   - next: clean up stale `node_fs.zig` FreeBSD `rmdir` normalization comment/history and reclassify any remaining `node_fs` FreeBSD branches
+   - `src/bun.js/node/node_fs.zig` FreeBSD `rmdir` errno-66 manual interception removed (redundant after `freebsd_errno.zig`; cleanup completed)
+   - `node_fs.zig` FreeBSD-specific behavior now reduced to copy/cp read-write fallback paths only (`keep`)

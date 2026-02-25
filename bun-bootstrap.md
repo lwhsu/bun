@@ -4857,3 +4857,20 @@ Fresh strict replay validation completes end-to-end:
   - the explicit len-assignment workaround is no longer needed on the current baseline
   - the previously identified FreeBSD `readFileWithOptions()` Zig-0.13-era workaround cluster is effectively retired on
     this branch (for the current/Oven Zig build baseline).
+
+### Phase D cleanup: removed `node_fs.zig` FreeBSD `rmdir` errno-66 manual interception
+
+- The FreeBSD-specific errno-66 interception in `rmdirSync()` (`src/bun.js/node/node_fs.zig`) was added before
+  `src/errno/freebsd_errno.zig` existed. At that time, Bun aliased FreeBSD to Linux errno tables, so FreeBSD
+  `ENOTEMPTY` (errno 66) was serialized as `EREMOTE`.
+- Now that `freebsd_errno.zig` maps `ENOTEMPTY = 66` and `errnoSysP` uses `getErrno()` which reads
+  `std.c._errno().*` and maps it via `@enumFromInt(66)` = `E.ENOTEMPTY`, the manual interception is redundant.
+- Removed the `if (Environment.isFreeBSD and rmdir_rc != 0)` block (lines 5691-5697).
+- Rebuilt (`BUN_FREEBSD_CODEGEN_NODE=1` path).
+- Validation:
+  - `./build/release/bun test test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+  - includes `rmdir`, `rmdirSync`, and `fs.promises.rmdir` coverage
+- Conclusion:
+  - the Zig-layer `rmdir` errno interception is no longer needed
+  - `node_fs.zig` FreeBSD-specific behavior is now reduced to copy/cp read-write fallback paths only (`keep`)
+  - the entire `rmdir` errno normalization stack (JS shims + Zig interception) is fully retired
