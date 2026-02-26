@@ -9,6 +9,11 @@ if(CMAKE_HOST_APPLE)
   set(ZIG_OS_ABI "macos-none")
 elseif(CMAKE_HOST_WIN32)
   set(ZIG_OS_ABI "windows-gnu")
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "FreeBSD")
+  message(FATAL_ERROR
+    "Zig autobuild downloads are not available for FreeBSD hosts. "
+    "Configure with -DUSE_SYSTEM_ZIG=ON and provide a system zig installation."
+  )
 elseif(CMAKE_HOST_UNIX)
   set(ZIG_OS_ABI "linux-musl")
 else()

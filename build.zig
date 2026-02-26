@@ -164,6 +164,7 @@ pub fn build(b: *Build) !void {
         else switch (temp_resolved.result.os.tag) {
             .macos => .mac,
             .linux => .linux,
+            .freebsd => .freebsd,
             .windows => .windows,
             else => |t| std.debug.panic("Unsupported OS tag {}", .{t}),
         };
@@ -195,8 +196,15 @@ pub fn build(b: *Build) !void {
 
     const bun_version = b.option([]const u8, "version", "Value of `Bun.version`") orelse "0.0.0";
 
-    // Lower the default reference trace for incremental
-    b.reference_trace = b.reference_trace orelse if (b.graph.incremental == true) 8 else 16;
+    // Lower the default reference trace for incremental when the Zig Build.Graph
+    // API exposes that flag (newer Zig versions).
+    const default_reference_trace: u32 = brk: {
+        if (@hasField(@TypeOf(b.graph.*), "incremental")) {
+            break :brk if (b.graph.incremental == true) @as(u32, 8) else @as(u32, 16);
+        }
+        break :brk @as(u32, 16);
+    };
+    b.reference_trace = b.reference_trace orelse default_reference_trace;
 
     const obj_format = b.option(ObjectFormat, "obj_format", "Output file for object files") orelse .obj;
 
@@ -672,6 +680,7 @@ fn getTranslateC(b: *Build, initial_target: std.Build.ResolvedTarget, optimize: 
         .{ "WINDOWS", translate_c.target.result.os.tag == .windows },
         .{ "POSIX", translate_c.target.result.os.tag != .windows },
         .{ "LINUX", translate_c.target.result.os.tag == .linux },
+        .{ "FREEBSD", translate_c.target.result.os.tag == .freebsd },
         .{ "DARWIN", translate_c.target.result.os.tag.isDarwin() },
     }) |entry| {
         const str, const value = entry;
@@ -750,14 +759,16 @@ fn configureObj(b: *Build, opts: *BunBuildOptions, obj: *Compile) void {
 
     // Object options
     obj.use_llvm = !opts.no_llvm;
-    obj.use_lld = if (opts.os == .mac or opts.os == .linux) false else !opts.no_llvm;
+    obj.use_lld = if (opts.os == .mac or opts.os == .linux or opts.os == .freebsd) false else !opts.no_llvm;
 
     if (opts.optimize == .Debug) {
         if (@hasField(std.meta.Child(@TypeOf(obj)), "llvm_codegen_threads"))
             obj.llvm_codegen_threads = opts.llvm_codegen_threads orelse 0;
     }
 
-    obj.no_link_obj = opts.os != .windows and !opts.no_llvm;
+    if (@hasField(std.meta.Child(@TypeOf(obj)), "no_link_obj")) {
+        obj.no_link_obj = opts.os != .windows and !opts.no_llvm;
+    }
 
 
     if (opts.enable_asan and !enableFastBuild(b)) {
@@ -790,7 +801,7 @@ fn configureObj(b: *Build, opts: *BunBuildOptions, obj: *Compile) void {
         obj.root_module.stack_protector = false;
     }
 
-    if (opts.os == .linux) {
+    if (opts.os == .linux or opts.os == .freebsd) {
         obj.link_emit_relocs = false;
         obj.link_eh_frame_hdr = false;
         obj.link_function_sections = true;
@@ -851,7 +862,7 @@ fn addInternalImports(b: *Build, mod: *Module, opts: *BunBuildOptions) void {
 
     const zlib_internal_path = switch (os) {
         .windows => "src/deps/zlib.win32.zig",
-        .linux, .mac => "src/deps/zlib.posix.zig",
+        .linux, .mac, .freebsd => "src/deps/zlib.posix.zig",
         else => null,
     };
     if (zlib_internal_path) |path| {
@@ -861,7 +872,7 @@ fn addInternalImports(b: *Build, mod: *Module, opts: *BunBuildOptions) void {
     }
 
     const async_path = switch (os) {
-        .linux, .mac => "src/async/posix_event_loop.zig",
+        .linux, .mac, .freebsd => "src/async/posix_event_loop.zig",
         .windows => "src/async/windows_event_loop.zig",
         else => "src/async/stub_event_loop.zig",
     };

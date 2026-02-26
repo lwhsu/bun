@@ -16,6 +16,8 @@ elseif(LINUX)
   else()
     set(DEFAULT_ZIG_TARGET ${DEFAULT_ZIG_ARCH}-linux-gnu)
   endif()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  set(DEFAULT_ZIG_TARGET ${DEFAULT_ZIG_ARCH}-freebsd)
 else()
   unsupported(CMAKE_SYSTEM_NAME)
 endif()
@@ -64,8 +66,41 @@ else()
 endif()
 optionx(ZIG_COMPILER_SAFE BOOL "Download a ReleaseSafe build of the Zig compiler." DEFAULT ${DEFAULT_ZIG_COMPILER_SAFE})
 
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "FreeBSD")
+  set(DEFAULT_USE_SYSTEM_ZIG ON)
+else()
+  set(DEFAULT_USE_SYSTEM_ZIG OFF)
+endif()
+optionx(USE_SYSTEM_ZIG BOOL "Use the system zig compiler instead of downloading one into vendor/zig" DEFAULT ${DEFAULT_USE_SYSTEM_ZIG})
+
 setenv(ZIG_LOCAL_CACHE_DIR ${ZIG_LOCAL_CACHE_DIR})
 setenv(ZIG_GLOBAL_CACHE_DIR ${ZIG_GLOBAL_CACHE_DIR})
+
+if(USE_SYSTEM_ZIG)
+  if(CMAKE_HOST_SYSTEM_NAME STREQUAL "FreeBSD")
+    set(MIN_SYSTEM_ZIG_VERSION ">=0.13.0")
+  else()
+    set(MIN_SYSTEM_ZIG_VERSION ">=0.15.2")
+  endif()
+
+  find_command(
+    VARIABLE
+      ZIG_EXECUTABLE
+    COMMAND
+      zig
+    VERSION
+      ${MIN_SYSTEM_ZIG_VERSION}
+  )
+
+  set(CMAKE_ZIG_FLAGS
+    --cache-dir ${ZIG_LOCAL_CACHE_DIR}
+    --global-cache-dir ${ZIG_GLOBAL_CACHE_DIR}
+  )
+
+  # Keep the target graph shape stable; BuildBun depends on clone-zig.
+  add_custom_target(clone-zig)
+  return()
+endif()
 
 setx(ZIG_PATH ${VENDOR_PATH}/zig)
 

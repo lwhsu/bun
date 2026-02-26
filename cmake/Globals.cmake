@@ -101,6 +101,8 @@ elseif(CMAKE_HOST_WIN32)
   set(HOST_OS "windows")
 elseif(CMAKE_HOST_LINUX)
   set(HOST_OS "linux")
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "FreeBSD")
+  set(HOST_OS "freebsd")
 else()
   unsupported(CMAKE_HOST_SYSTEM_NAME)
 endif()
@@ -139,6 +141,23 @@ endif()
 
 optionx(VENDOR_PATH FILEPATH "The path to the vendor directory" DEFAULT ${CWD}/vendor)
 optionx(TMP_PATH FILEPATH "The path to the temporary directory" DEFAULT ${BUILD_PATH}/tmp)
+
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "FreeBSD")
+  set(DEFAULT_BUN_FREEBSD_CODEGEN_NODE ON)
+  set(DEFAULT_BUN_FREEBSD_NPM_INSTALL ON)
+  set(DEFAULT_BUN_FREEBSD_GENERATE_CLASSES_NODE OFF)
+  set(DEFAULT_BUN_FREEBSD_BINDGENV2_NODE 1)
+else()
+  set(DEFAULT_BUN_FREEBSD_CODEGEN_NODE OFF)
+  set(DEFAULT_BUN_FREEBSD_NPM_INSTALL OFF)
+  set(DEFAULT_BUN_FREEBSD_GENERATE_CLASSES_NODE OFF)
+  set(DEFAULT_BUN_FREEBSD_BINDGENV2_NODE auto)
+endif()
+
+optionx(BUN_FREEBSD_CODEGEN_NODE BOOL "Use Node.js runners instead of stage0 bun for codegen steps on FreeBSD" DEFAULT ${DEFAULT_BUN_FREEBSD_CODEGEN_NODE})
+optionx(BUN_FREEBSD_NPM_INSTALL BOOL "Use npm install instead of stage0 bun install for dependency bootstrap on FreeBSD" DEFAULT ${DEFAULT_BUN_FREEBSD_NPM_INSTALL})
+optionx(BUN_FREEBSD_GENERATE_CLASSES_NODE BOOL "Use Node.js runner for generate-classes.ts on FreeBSD" DEFAULT ${DEFAULT_BUN_FREEBSD_GENERATE_CLASSES_NODE})
+optionx(BUN_FREEBSD_BINDGENV2_NODE "auto|0|1" "Runner mode for bindgenv2 on FreeBSD: auto, 0 (stage0 list + node generate), 1 (node for both)" DEFAULT ${DEFAULT_BUN_FREEBSD_BINDGENV2_NODE})
 
 # --- Helper functions ---
 
@@ -670,16 +689,31 @@ function(register_bun_install)
     message(FATAL_ERROR "register_bun_install: ${NPM_CWD}/package.json does not have dependencies?")
   endif()
 
+  if(BUN_FREEBSD_NPM_INSTALL)
+    set(BUN_INSTALL_COMMAND
+      npm
+      install
+      --no-package-lock
+      --ignore-scripts
+      --no-audit
+      --no-fund
+    )
+  else()
+    set(BUN_INSTALL_COMMAND
+      ${BUN_EXECUTABLE}
+      ${BUN_FLAGS}
+      install
+      --frozen-lockfile
+    )
+  endif()
+
   register_command(
     COMMENT
       ${NPM_COMMENT}
     CWD
       ${NPM_CWD}
     COMMAND
-      ${BUN_EXECUTABLE}
-        ${BUN_FLAGS}
-        install
-        --frozen-lockfile
+      ${BUN_INSTALL_COMMAND}
     SOURCES
       ${NPM_CWD}/package.json
     OUTPUTS
