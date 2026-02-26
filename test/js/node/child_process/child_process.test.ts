@@ -278,7 +278,7 @@ describe("spawn()", () => {
   });
 
   it("should spawn a process synchronously", () => {
-    const { stdout } = spawnSync("bun", ["-v"], { encoding: "utf8" });
+    const { stdout } = spawnSync("bun", ["-v"], { encoding: "utf8", env: process.env });
     expect(isValidSemver(stdout.trim())).toBe(true);
   });
 
@@ -351,7 +351,7 @@ describe("exec()", () => {
 
 describe("spawnSync()", () => {
   it("should spawn a process synchronously", () => {
-    const { stdout } = spawnSync("bun", ["-v"], { encoding: "utf8" });
+    const { stdout } = spawnSync("bun", ["-v"], { encoding: "utf8", env: process.env });
     expect(isValidSemver(stdout.trim())).toBe(true);
   });
 });
@@ -363,7 +363,7 @@ describe("execFileSync()", () => {
   });
 
   it("should allow us to pass input to the command", () => {
-    const result = execFileSync("node", [import.meta.dir + "/spawned-child.js", "STDIN"], {
+    const result = execFileSync(nodeExe()!, [import.meta.dir + "/spawned-child.js", "STDIN"], {
       input: "hello world!",
       encoding: "utf8",
       env: process.env,

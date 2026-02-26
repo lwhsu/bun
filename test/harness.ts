@@ -12,14 +12,15 @@ import { ChildProcess, execSync, fork } from "child_process";
 import { readdir, readFile, readlink, rm, writeFile } from "fs/promises";
 import fs, { closeSync, openSync, rmSync } from "node:fs";
 import os from "node:os";
-import { dirname, isAbsolute, join } from "path";
+import { delimiter, dirname, isAbsolute, join } from "path";
 import * as numeric from "_util/numeric.ts";
 
 export const BREAKING_CHANGES_BUN_1_2 = false;
 
 export const isMacOS = process.platform === "darwin";
 export const isLinux = process.platform === "linux";
-export const isPosix = isMacOS || isLinux;
+export const isFreeBSD = process.platform === "freebsd";
+export const isPosix = isMacOS || isLinux || isFreeBSD;
 export const isWindows = process.platform === "win32";
 export const isIntelMacOS = isMacOS && process.arch === "x64";
 export const isArm64 = process.arch === "arm64";
@@ -62,6 +63,11 @@ export const bunEnv: NodeJS.Dict<string> = {
   WANTS_LOUD: "0",
   AGENT: "false",
 };
+
+const bunDir = dirname(process.execPath);
+if (bunEnv.PATH && !bunEnv.PATH.split(delimiter).includes(bunDir)) {
+  bunEnv.PATH = bunDir + delimiter + bunEnv.PATH;
+}
 
 const ciEnv = { ...bunEnv };
 
@@ -109,7 +115,8 @@ export function nodeExe(): string | null {
 }
 
 export function shellExe(): string {
-  return isWindows ? "pwsh" : "bash";
+  if (isWindows) return "pwsh";
+  return Bun.which("bash") ?? "sh";
 }
 
 export function gc(force = true) {
@@ -812,8 +819,8 @@ export async function toBeWorkspaceLink(actual: string, expectedLinkPath: string
 }
 
 export function getFDCount(): number {
-  if (isMacOS || isLinux) {
-    return fs.readdirSync(isMacOS ? "/dev/fd" : "/proc/self/fd").length;
+  if (isMacOS || isLinux || isFreeBSD) {
+    return fs.readdirSync(isLinux ? "/proc/self/fd" : "/dev/fd").length;
   }
 
   const maxFD = openSync("/dev/null", "r");
@@ -822,10 +829,10 @@ export function getFDCount(): number {
 }
 
 export function getMaxFD(): number {
-  if (isMacOS || isLinux) {
+  if (isMacOS || isLinux || isFreeBSD) {
     let max = -1;
     // https://github.com/python/cpython/commit/e21a7a976a7e3368dc1eba0895e15c47cb06c810
-    for (let entry of fs.readdirSync(isMacOS ? "/dev/fd" : "/proc/self/fd")) {
+    for (let entry of fs.readdirSync(isLinux ? "/proc/self/fd" : "/dev/fd")) {
       const fd = parseInt(entry.trim(), 10);
       if (Number.isSafeInteger(fd) && fd >= 0) {
         max = Math.max(max, fd);
@@ -1608,6 +1615,8 @@ export function libcPathForDlopen() {
       }
     case "darwin":
       return "libc.dylib";
+    case "freebsd":
+      return "libc.so.7";
     default:
       throw new Error("TODO");
   }
