@@ -788,7 +788,7 @@ pub const FileSystem = struct {
                 const resource = std.posix.rlimit_resource.NOFILE;
                 const limit = try std.posix.getrlimit(resource);
                 Limit.handles_before = limit;
-                file_limit = limit.max;
+                file_limit = @intCast(limit.max);
                 Limit.handles = file_limit;
                 const max_to_use: @TypeOf(limit.max) = if (Environment.isMusl)
                     // musl has extremely low defaults here, so we really want
@@ -805,7 +805,7 @@ pub const FileSystem = struct {
                     new_limit.max = max_to_use;
 
                     std.posix.setrlimit(resource, new_limit) catch break :blk;
-                    file_limit = new_limit.max;
+                    file_limit = @intCast(new_limit.max);
                     Limit.handles = file_limit;
                 }
             }

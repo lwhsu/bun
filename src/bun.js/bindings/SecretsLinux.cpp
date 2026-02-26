@@ -1,6 +1,6 @@
 #include "root.h"
 
-#if OS(LINUX)
+#if OS(LINUX) || OS(FREEBSD)
 
 #include "Secrets.h"
 #include <dlfcn.h>

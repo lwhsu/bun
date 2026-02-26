@@ -460,7 +460,7 @@ extern "C" void bun_initialize_process()
     bun_close_range(4, ~0U, CLOSE_RANGE_CLOEXEC);
 #endif
 
-#if OS(LINUX) || OS(DARWIN)
+#if OS(LINUX) || OS(DARWIN) || OS(FREEBSD)
 
     int devNullFd_ = -1;
     bool anyTTYs = false;
@@ -584,7 +584,7 @@ extern "C" int32_t open_as_nonblocking_tty(int32_t fd, int32_t mode)
 static bool can_open_as_nonblocking_tty(int32_t fd)
 {
     int result;
-#if OS(LINUX) || OS(FreeBSD)
+#if OS(LINUX) || OS(FREEBSD)
     int dummy = 0;
 
     result = ioctl(fd, TIOCGPTN, &dummy) != 0;
@@ -767,7 +767,7 @@ extern "C" int ffi_fileno(FILE* file)
 
 // Handle signals in bun.spawnSync.
 // If we receive a signal, we want to forward the signal to the child process.
-#if OS(LINUX) || OS(DARWIN)
+#if OS(LINUX) || OS(DARWIN) || OS(FREEBSD)
 #include <signal.h>
 #include <pthread.h>
 
@@ -803,6 +803,10 @@ static struct sigaction previous_actions[NSIG];
 #endif
 
 #if OS(DARWIN)
+#define FOR_EACH_SIGNAL(M) FOR_EACH_POSIX_SIGNAL(M)
+#endif
+
+#if OS(FREEBSD)
 #define FOR_EACH_SIGNAL(M) FOR_EACH_POSIX_SIGNAL(M)
 #endif
 
@@ -876,7 +880,7 @@ extern "C" void Bun__unregisterSignalsForForwarding()
 
 #endif
 
-#if OS(LINUX) || OS(DARWIN)
+#if OS(LINUX) || OS(DARWIN) || OS(FREEBSD)
 #include <paths.h>
 
 extern "C" const char* BUN_DEFAULT_PATH_FOR_SPAWN = _PATH_DEFPATH;

@@ -12,6 +12,7 @@
 // - WINDOWS
 // - DARWIN
 // - LINUX
+// - FREEBSD
 // - POSIX
 
 // For `POSIX_SPAWN_SETSID` and some other non-POSIX extensions in glibc
@@ -24,8 +25,11 @@
 
 #if POSIX
 #include <ifaddrs.h>
+#include <netinet/in.h>
 #include <netdb.h>
 #include <pwd.h>
+#include <sys/utsname.h>
+#include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -54,6 +58,14 @@
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/sysinfo.h>
+#elif FREEBSD
+#include <fcntl.h>
+#include <net/if.h>
+#include <net/if_dl.h>
+#include <spawn.h>
+#include <sys/mount.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
 #endif
 
 #if WINDOWS

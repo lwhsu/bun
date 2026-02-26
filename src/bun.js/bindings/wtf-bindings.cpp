@@ -37,7 +37,7 @@ int uv__tcsetattr(int fd, int how, const struct termios* term)
     return 0;
 }
 
-extern "C" int uv_tty_reset_mode(void)
+static int Bun__uv_tty_reset_mode(void)
 {
     int saved_errno;
     int err;
@@ -143,7 +143,7 @@ extern "C" int Bun__ttySetMode(int fd, int mode)
 
         std::call_once(reset_once_flag, [] {
             Bun__atexit([] {
-                uv_tty_reset_mode();
+                Bun__uv_tty_reset_mode();
             });
         });
         break;
@@ -152,7 +152,7 @@ extern "C" int Bun__ttySetMode(int fd, int mode)
 
         std::call_once(reset_once_flag, [] {
             Bun__atexit([] {
-                uv_tty_reset_mode();
+                Bun__uv_tty_reset_mode();
             });
         });
         break;

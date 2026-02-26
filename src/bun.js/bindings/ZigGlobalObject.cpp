@@ -211,6 +211,8 @@
 #include <dlfcn.h>
 #endif
 
+#include <atomic>
+
 #ifdef __APPLE__
 #include <sys/sysctl.h>
 #elif defined(__linux__)
@@ -239,6 +241,7 @@ using JSObject = JSC::JSObject;
 using JSNonFinalObject = JSC::JSNonFinalObject;
 namespace JSCastingHelpers = JSC::JSCastingHelpers;
 // #include <iostream>
+
 
 Structure* createMemoryFootprintStructure(JSC::VM& vm, JSC::JSGlobalObject* globalObject);
 
@@ -3116,7 +3119,6 @@ JSC::Identifier GlobalObject::moduleLoaderResolve(JSGlobalObject* jsGlobalObject
         keyZ = Bun::toStringRef(globalObject, key);
     }
     BunString referrerZ = referrer && !referrer.isUndefinedOrNull() && referrer.isString() ? Bun::toStringRef(globalObject, referrer) : BunStringEmpty;
-
     if (globalObject->onLoadPlugins.hasVirtualModules()) {
         if (auto resolvedString = globalObject->onLoadPlugins.resolveVirtualModule(keyZ.toWTFString(), referrerZ.toWTFString())) {
             return Identifier::fromString(globalObject->vm(), resolvedString.value());
@@ -3132,10 +3134,12 @@ JSC::Identifier GlobalObject::moduleLoaderResolve(JSGlobalObject* jsGlobalObject
 
     if (res.success) {
         if (queryString.len > 0) {
-            return JSC::Identifier::fromString(globalObject->vm(), makeString(res.result.value.toWTFString(BunString::ZeroCopy), Zig::toString(queryString)));
+            auto resolved = makeString(res.result.value.toWTFString(BunString::ZeroCopy), Zig::toString(queryString));
+            return JSC::Identifier::fromString(globalObject->vm(), resolved);
         }
 
-        return Identifier::fromString(globalObject->vm(), res.result.value.toWTFString(BunString::ZeroCopy));
+        auto resolved = res.result.value.toWTFString(BunString::ZeroCopy);
+        return Identifier::fromString(globalObject->vm(), resolved);
     } else {
         auto scope = DECLARE_THROW_SCOPE(globalObject->vm());
         throwException(scope, res.result.err, globalObject);
@@ -3231,9 +3235,11 @@ JSC::JSInternalPromise* GlobalObject::moduleLoaderImportModule(JSGlobalObject* j
         }
 
         if (queryString.len == 0) {
-            resolvedIdentifier = JSC::Identifier::fromString(vm, resolved.result.value.toWTFString());
+            auto resolvedString = resolved.result.value.toWTFString();
+            resolvedIdentifier = JSC::Identifier::fromString(vm, resolvedString);
         } else {
-            resolvedIdentifier = JSC::Identifier::fromString(vm, makeString(resolved.result.value.toWTFString(BunString::ZeroCopy), Zig::toString(queryString)));
+            auto resolvedWithQuery = makeString(resolved.result.value.toWTFString(BunString::ZeroCopy), Zig::toString(queryString));
+            resolvedIdentifier = JSC::Identifier::fromString(vm, resolvedWithQuery);
         }
 
         moduleNameZ.deref();
@@ -3358,7 +3364,6 @@ JSC::JSValue GlobalObject::moduleLoaderEvaluate(JSGlobalObject* lexicalGlobalObj
     JSValue moduleRecordValue, JSValue scriptFetcher,
     JSValue sentValue, JSValue resumeMode)
 {
-
     if (scriptFetcher && scriptFetcher.isObject()) [[unlikely]] {
         return scriptFetcher;
     }

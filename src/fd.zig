@@ -252,7 +252,7 @@ pub const FD = packed struct(backing_int) {
         const fd_fmt = if (Environment.isDebug) std.fmt.bufPrint(&buf, "{f}", .{fd}) catch buf[0..];
 
         const result: ?bun.sys.Error = switch (os) {
-            .linux => result: {
+            .linux, .freebsd => result: {
                 bun.assert(fd.native() >= 0);
                 break :result switch (bun.sys.getErrno(bun.sys.syscall.close(fd.native()))) {
                     .BADF => .{ .errno = @intFromEnum(E.BADF), .syscall = .close, .fd = fd },
@@ -398,30 +398,29 @@ pub const FD = packed struct(backing_int) {
         }
     };
     pub fn stdioTag(fd: FD) ?Stdio {
-        return if (os == .windows) switch (fd.decodeWindows()) {
-            .windows => |handle| {
-                const process = std.os.windows.peb().ProcessParameters;
-                if (handle == process.hStdInput) {
-                    return .std_in;
-                } else if (handle == process.hStdOutput) {
-                    return .std_out;
-                } else if (handle == process.hStdError) {
-                    return .std_err;
-                }
-                return null;
-            },
-            .uv => |file_number| switch (file_number) {
-                0 => .std_in,
-                1 => .std_out,
-                2 => .std_err,
-                else => null,
-            },
-        } else switch (fd.value.as_system) {
-            0 => .std_in,
-            1 => .std_out,
-            2 => .std_err,
-            else => null,
-        };
+        if (comptime os == .windows) {
+            switch (fd.decodeWindows()) {
+                .windows => |handle| {
+                    const process = std.os.windows.peb().ProcessParameters;
+                    if (handle == process.hStdInput) return .std_in;
+                    if (handle == process.hStdOutput) return .std_out;
+                    if (handle == process.hStdError) return .std_err;
+                    return null;
+                },
+                .uv => |file_number| {
+                    if (file_number == 0) return .std_in;
+                    if (file_number == 1) return .std_out;
+                    if (file_number == 2) return .std_err;
+                    return null;
+                },
+            }
+        }
+
+        const file_number = fd.value.as_system;
+        if (file_number == 0) return .std_in;
+        if (file_number == 1) return .std_out;
+        if (file_number == 2) return .std_err;
+        return null;
     }
 
     pub const HashMapContext = struct {

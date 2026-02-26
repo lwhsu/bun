@@ -1583,7 +1583,9 @@ pub fn reloadProcess(
             },
         }
     } else if (comptime Environment.isPosix) {
-        on_before_reload_process_linux();
+        if (comptime !Environment.isFreeBSD) {
+            on_before_reload_process_linux();
+        }
         const err = std.posix.execveZ(
             exec_path,
             newargv,
@@ -1922,6 +1924,7 @@ pub const Stat = if (Environment.isWindows) windows.libuv.uv_stat_t else std.pos
 pub const StatFS = switch (Environment.os) {
     .mac => bun.c.struct_statfs,
     .linux => bun.c.struct_statfs,
+    .freebsd => bun.c.struct_statfs,
     else => windows.libuv.uv_statfs_t,
 };
 
@@ -3140,7 +3143,18 @@ pub fn getRoughTickCount(comptime mock_mode: timespec.MockMode) timespec {
         };
     }
 
-    return 0;
+    if (comptime Environment.isFreeBSD) {
+        var spec = timespec{
+            .nsec = 0,
+            .sec = 0,
+        };
+        const updated = std.posix.clock_gettime(std.posix.CLOCK.MONOTONIC) catch return spec;
+        spec.sec = @intCast(updated.sec);
+        spec.nsec = @intCast(updated.nsec);
+        return spec;
+    }
+
+    return .epoch;
 }
 
 /// When you don't need a super accurate timestamp, this is a fast way to get one.

@@ -2,7 +2,7 @@ pub const Ctx = union(enum) {
     disabled: Disabled,
     enabled: switch (bun.Environment.os) {
         .mac => Darwin,
-        .linux => Linux,
+        .linux => if (bun.Environment.isFreeBSD) Disabled else Linux,
         else => Disabled,
     },
 
@@ -36,7 +36,7 @@ fn isEnabledOnce() void {
         if (Darwin.get() == null) {
             is_enabled.store(false, .seq_cst);
         }
-    } else if (comptime bun.Environment.isLinux) {
+    } else if (comptime bun.Environment.isLinux and !bun.Environment.isFreeBSD) {
         isEnabledOnLinuxOnce();
         if (!Linux.isSupported()) {
             is_enabled.store(false, .seq_cst);
@@ -84,7 +84,7 @@ pub fn trace(comptime name: [:0]const u8) Ctx {
 
     if (comptime bun.Environment.isMac) {
         return .{ .enabled = Darwin.init(@intFromEnum(@field(PerfEvent, name))) };
-    } else if (comptime bun.Environment.isLinux) {
+    } else if (comptime bun.Environment.isLinux and !bun.Environment.isFreeBSD) {
         return .{ .enabled = Linux.init(@field(PerfEvent, name)) };
     }
 

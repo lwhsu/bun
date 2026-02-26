@@ -17,6 +17,7 @@ pub const isPosix = !isWindows and !isWasm;
 pub const isDebug = builtin.mode == .Debug;
 pub const isTest = builtin.is_test;
 pub const isLinux = builtin.target.os.tag == .linux;
+pub const isFreeBSD = builtin.target.os.tag == .freebsd;
 pub const isAarch64 = builtin.target.cpu.arch.isAARCH64();
 pub const isX86 = builtin.target.cpu.arch.isX86();
 pub const isX64 = builtin.target.cpu.arch == .x86_64;
@@ -68,6 +69,7 @@ pub inline fn onlyMac() void {
 pub const OperatingSystem = enum {
     mac,
     linux,
+    freebsd,
     windows,
     // wAsM is nOt aN oPeRaTiNg SyStEm
     wasm,
@@ -87,6 +89,8 @@ pub const OperatingSystem = enum {
         .{ "Linux", .linux },
         .{ "linux-gnu", .linux },
         .{ "gnu/linux", .linux },
+        .{ "freebsd", .freebsd },
+        .{ "FreeBSD", .freebsd },
         .{ "wasm", .wasm },
     });
 
@@ -95,6 +99,7 @@ pub const OperatingSystem = enum {
         return switch (self) {
             .mac => "macOS",
             .linux => "Linux",
+            .freebsd => "FreeBSD",
             .windows => "Windows",
             .wasm => "WASM",
         };
@@ -105,6 +110,7 @@ pub const OperatingSystem = enum {
         return switch (self) {
             .mac => "darwin",
             .linux => "linux",
+            .freebsd => "freebsd",
             .windows => "win32",
             .wasm => "wasm",
         };
@@ -114,6 +120,7 @@ pub const OperatingSystem = enum {
         return switch (self) {
             .mac => .macos,
             .linux => .linux,
+            .freebsd => .freebsd,
             .windows => .windows,
             .wasm => unreachable,
         };
@@ -124,6 +131,7 @@ pub const OperatingSystem = enum {
         return switch (self) {
             .mac => "darwin",
             .linux => "linux",
+            .freebsd => "freebsd",
             .windows => "windows",
             .wasm => "wasm",
         };
@@ -134,6 +142,8 @@ pub const os: OperatingSystem = if (isMac)
     .mac
 else if (isLinux)
     .linux
+else if (isFreeBSD)
+    .freebsd
 else if (isWindows)
     .windows
 else if (isWasm)
