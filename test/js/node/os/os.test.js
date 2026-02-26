@@ -89,7 +89,7 @@ it("hostname", () => {
 });
 
 it("platform", () => {
-  expect(["win32", "darwin", "linux", "wasm"].some(platform => os.platform() === platform)).toBe(true);
+  expect(["win32", "darwin", "linux", "freebsd", "wasm"].some(platform => os.platform() === platform)).toBe(true);
 });
 
 it("release", () => {
@@ -97,7 +97,7 @@ it("release", () => {
 });
 
 it("type", () => {
-  expect(["Windows_NT", "Darwin", "Linux"].some(type => os.type() === type)).toBe(true);
+  expect(["Windows_NT", "Darwin", "Linux", "FreeBSD"].some(type => os.type() === type)).toBe(true);
 });
 
 it("uptime", () => {
@@ -116,8 +116,18 @@ it("userInfo", () => {
   const info = os.userInfo();
 
   if (process.platform !== "win32") {
-    expect(info.username).toBe(process.env.USER);
-    expect(info.shell).toBe(process.env.SHELL || "unknown");
+    if (process.env.USER) {
+      expect(info.username).toBe(process.env.USER);
+    } else {
+      expect(typeof info.username).toBe("string");
+      expect(info.username.length).toBeGreaterThan(0);
+    }
+    if (process.env.SHELL) {
+      expect(info.shell).toBe(process.env.SHELL);
+    } else {
+      expect(typeof info.shell).toBe("string");
+      expect(info.shell.length).toBeGreaterThan(0);
+    }
     expect(info.uid >= 0).toBe(true);
     expect(info.gid >= 0).toBe(true);
   } else {

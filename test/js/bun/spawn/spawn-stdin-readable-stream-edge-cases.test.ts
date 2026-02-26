@@ -421,6 +421,36 @@ describe("spawn stdin ReadableStream edge cases", () => {
     expect(await proc.exited).toBe(0);
   });
 
+  test("ReadableStream with very long single Uint8Array chunk", async () => {
+    const size = 1024 * 1024; // 1MB
+    const chunk = new Uint8Array(size);
+    chunk.fill("x".charCodeAt(0));
+
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+
+    const proc = spawn({
+      cmd: [
+        bunExe(),
+        "-e",
+        `let count = 0;
+         process.stdin.on('data', (chunk) => count += chunk.length);
+         process.stdin.on('end', () => console.log(count));`,
+      ],
+      stdin: stream,
+      stdout: "pipe",
+      env: bunEnv,
+    });
+
+    const text = await proc.stdout.text();
+    expect(parseInt(text.trim())).toBe(size);
+    expect(await proc.exited).toBe(0);
+  });
+
   test("ReadableStream with alternating data types", async () => {
     const stream = new ReadableStream({
       async pull(controller) {

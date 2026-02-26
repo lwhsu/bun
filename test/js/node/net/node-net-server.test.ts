@@ -269,7 +269,15 @@ describe("net.createServer listen", () => {
         } catch (e) {
           err = e as Error;
         }
-        expect(err).toBeNull();
+        if (process.platform === "freebsd") {
+          // FreeBSD (and Node on FreeBSD) does not treat INADDR_ANY as a
+          // connectable remote destination.
+          expect(err).not.toBeNull();
+          expect((err as { code?: string }).code === "ECONNREFUSED" || (err as { code?: string }).code === "ENETUNREACH").toBeTrue();
+          err = null;
+        } else {
+          expect(err).toBeNull();
+        }
 
         try {
           await Bun.connect({

@@ -348,8 +348,9 @@ describe("net.Socket write", () => {
   it(
     "should work with .end(data)",
     runWithServer((server, done) => {
+      const connectHost = process.platform === "freebsd" && server.hostname === "0.0.0.0" ? "127.0.0.1" : server.hostname;
       const socket = new Socket()
-        .connect(server.port, server.hostname)
+        .connect(server.port, connectHost)
         .on("ready", () => {
           expect(socket).toBeDefined();
           expect(socket.connecting).toBe(false);
@@ -362,8 +363,9 @@ describe("net.Socket write", () => {
   it(
     "should work with .write(data).end()",
     runWithServer((server, done) => {
+      const connectHost = process.platform === "freebsd" && server.hostname === "0.0.0.0" ? "127.0.0.1" : server.hostname;
       const socket = new Socket()
-        .connect(server.port, server.hostname, () => {
+        .connect(server.port, connectHost, () => {
           expect(socket).toBeDefined();
           expect(socket.connecting).toBe(false);
         })
@@ -376,8 +378,9 @@ describe("net.Socket write", () => {
   it(
     "should work with multiple .write()s",
     runWithServer((server, done) => {
+      const connectHost = process.platform === "freebsd" && server.hostname === "0.0.0.0" ? "127.0.0.1" : server.hostname;
       const socket = new Socket()
-        .connect(server.port, server.hostname, () => {
+        .connect(server.port, connectHost, () => {
           expect(socket).toBeDefined();
           expect(socket.connecting).toBe(false);
         })
