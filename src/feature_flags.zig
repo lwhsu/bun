@@ -49,7 +49,7 @@ pub const hardcode_localhost_to_127_0_0_1 = false;
 /// https://github.com/oven-sh/bun/issues/10733
 pub const support_jsxs_in_jsx_transform = true;
 
-pub const use_simdutf = bun.Environment.isNative and !bun.Environment.isFreeBSD;
+pub const use_simdutf = bun.Environment.isNative;
 
 pub const inline_properties_in_transpiler = true;
 
