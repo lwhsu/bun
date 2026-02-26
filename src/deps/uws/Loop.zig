@@ -26,6 +26,7 @@ pub const PosixLoop = extern struct {
     const EventType = switch (Environment.os) {
         .linux => std.os.linux.epoll_event,
         .mac => std.posix.system.kevent64_s,
+        .freebsd => std.c.Kevent,
         // TODO:
         .windows => *anyopaque,
         .wasm => @compileError("Unsupported OS"),

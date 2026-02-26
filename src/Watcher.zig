@@ -142,7 +142,7 @@ pub const max_eviction_count = 8096;
 // ideally, the constants above can be inlined
 const Platform = switch (Environment.os) {
     .linux => @import("./watcher/INotifyWatcher.zig"),
-    .mac => @import("./watcher/KEventWatcher.zig"),
+    .freebsd, .mac => @import("./watcher/KEventWatcher.zig"),
     .windows => WindowsWatcher,
     .wasm => @compileError("Unsupported platform"),
 };
@@ -388,7 +388,7 @@ fn appendFileAssumeCapacity(
         .kind = .file,
     };
 
-    if (comptime Environment.isMac) {
+    if (comptime (Environment.isMac or Environment.isFreeBSD)) {
         this.addFileDescriptorToKQueueWithoutChecks(fd, watchlist_id);
     } else if (comptime Environment.isLinux) {
         // var file_path_to_use_ = std.mem.trimRight(u8, file_path_, "/");
@@ -450,7 +450,7 @@ fn appendDirectoryAssumeCapacity(
         .package_json = null,
     };
 
-    if (Environment.isMac) {
+    if (Environment.isMac or Environment.isFreeBSD) {
         const KEvent = std.c.Kevent;
 
         // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/kqueue.2.html
@@ -654,11 +654,18 @@ pub fn addFileByPathSlow(
 
     // Only open fd if we might need it
     var fd: bun.FileDescriptor = bun.invalid_fd;
-    if (Environment.isMac) {
-        const path_z = std.posix.toPosixPath(file_path) catch return false;
-        switch (bun.sys.open(&path_z, bun.c.O_EVTONLY, 0)) {
-            .result => |opened| fd = opened,
-            .err => return false,
+    if (Environment.isMac or Environment.isFreeBSD) {
+        if (Environment.isMac) {
+            const path_z = std.posix.toPosixPath(file_path) catch return false;
+            switch (bun.sys.open(&path_z, bun.c.O_EVTONLY, 0)) {
+                .result => |opened| fd = opened,
+                .err => return false,
+            }
+        } else {
+            switch (bun.sys.openA(file_path, 0, 0)) {
+                .result => |opened| fd = opened,
+                .err => return false,
+            }
         }
     }
 
@@ -667,7 +674,7 @@ pub fn addFileByPathSlow(
         .result => {
             // On macOS, addFile may have found the file already watched (race)
             // and returned success without using our fd. Close it if unused.
-            if ((comptime Environment.isMac) and fd.isValid()) {
+            if ((comptime (Environment.isMac or Environment.isFreeBSD)) and fd.isValid()) {
                 this.mutex.lock();
                 const maybe_idx = this.indexOf(hash);
                 const stored_fd = if (maybe_idx) |idx|
