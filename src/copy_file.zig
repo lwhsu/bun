@@ -144,6 +144,9 @@ pub inline fn disableCopyFileRangeSyscall() void {
     can_use_copy_file_range.store(-1, .monotonic);
 }
 pub fn canUseCopyFileRangeSyscall() bool {
+    if (comptime !Environment.isLinux) {
+        return false;
+    }
     const result = can_use_copy_file_range.load(.monotonic);
     if (result == 0) {
         // This flag mostly exists to make other code more easily testable.
@@ -176,6 +179,9 @@ pub inline fn disable_ioctl_ficlone() void {
     can_use_ioctl_ficlone_.store(-1, .monotonic);
 }
 pub fn can_use_ioctl_ficlone() bool {
+    if (comptime !Environment.isLinux) {
+        return false;
+    }
     const result = can_use_ioctl_ficlone_.load(.monotonic);
     if (result == 0) {
         // This flag mostly exists to make other code more easily testable.
@@ -201,6 +207,9 @@ pub fn can_use_ioctl_ficlone() bool {
 }
 
 pub fn copyFileRange(in: fd_t, out: fd_t, len: usize, flags: u32, copy_file_state: *CopyFileState) Maybe(usize) {
+    if (comptime !Environment.isLinux) {
+        return copyFileReadWriteLoop(in, out, len);
+    }
     if (canUseCopyFileRangeSyscall() and !copy_file_state.has_seen_exdev and !copy_file_state.has_copy_file_range_failed) {
         while (true) {
             const rc = std.os.linux.copy_file_range(in, null, out, null, len, flags);

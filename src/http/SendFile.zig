@@ -42,14 +42,25 @@ pub fn write(
     } else if (Environment.isPosix) {
         var sbytes: std.posix.off_t = adjusted_count;
         const signed_offset = @as(i64, @bitCast(@as(u64, this.offset)));
-        const errcode = bun.sys.getErrno(std.c.sendfile(
-            this.fd.cast(),
-            socket.fd().cast(),
-            signed_offset,
-            &sbytes,
-            null,
-            0,
-        ));
+        const errcode = bun.sys.getErrno(if (Environment.isFreeBSD)
+            std.c.sendfile(
+                this.fd.cast(),
+                socket.fd().cast(),
+                signed_offset,
+                adjusted_count,
+                null,
+                &sbytes,
+                0,
+            )
+        else
+            std.c.sendfile(
+                this.fd.cast(),
+                socket.fd().cast(),
+                signed_offset,
+                &sbytes,
+                null,
+                0,
+            ));
         const wrote = @as(u64, @intCast(sbytes));
         this.offset +|= wrote;
         this.remain -|= wrote;

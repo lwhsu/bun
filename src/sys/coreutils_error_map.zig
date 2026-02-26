@@ -4,7 +4,7 @@ pub const coreutils_error_map = brk: {
     // macOS and Linux have slightly different error messages.
     const entries: []const struct { [:0]const u8, [:0]const u8 } = switch (Environment.os) {
         // Since windows is just an emulation of linux, it will derive the linux error messages.
-        .linux, .windows, .wasm => &.{
+        .linux, .freebsd, .windows, .wasm => &.{
             .{ "EPERM", "Operation not permitted" },
             .{ "ENOENT", "No such file or directory" },
             .{ "ESRCH", "No such process" },
