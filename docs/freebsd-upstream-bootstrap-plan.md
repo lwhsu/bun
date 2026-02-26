@@ -1,6 +1,6 @@
 # FreeBSD Bootstrap and Upstream Readiness Plan
 
-Last updated: 2026-02-22
+Last updated: 2026-02-26
 Repository: `/home/lwhsu/killme/bun`
 Branch at planning time: `freebsd-bootstrap` (`2e7d7b21a7`)
 
@@ -1738,3 +1738,17 @@ Implication for roadmap:
 - Remaining `C-strict` exit work should focus on **full no-fallback bootstrap validation**
   (`BUN_FREEBSD_BINDGENV2_NODE=0`, `BUN_FREEBSD_CODEGEN_NODE=0`, `BUN_FREEBSD_NPM_INSTALL=0`) using the
   documented bootstrap entrypoint.
+
+### Test harness FreeBSD platform support (2026-02-26)
+
+Commit `93251c19b3`: Fixed `test/harness.ts` to properly support FreeBSD as a platform.
+
+Changes:
+- Added `isFreeBSD` constant, included in `isPosix`
+- `shellExe()`: `Bun.which("bash") ?? "sh"` (FreeBSD bash is at `/usr/local/bin/bash`)
+- Added `bunExe()` dir to `bunEnv.PATH` for child process discoverability
+- `getFDCount()`/`getMaxFD()`: FreeBSD uses `/dev/fd` (like macOS, not `/proc/self/fd`)
+- `libcPathForDlopen()`: added `"freebsd"` case returning `"libc.so.7"`
+- `child_process.test.ts`: use `nodeExe()!` instead of bare `"node"`
+
+Impact: child_process tests improved from 26 pass / 4 fail (manual PATH) to 29 pass / 1 fail / 1 todo. Remaining failure is pre-existing bun env leakage (not FreeBSD-specific). Phase E core gate fully green with no regressions.

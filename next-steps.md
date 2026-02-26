@@ -126,12 +126,15 @@ Priority areas:
    - `test/js/node/process/process-stdio.test.ts` => `9 pass / 0 fail`
    - `test/js/node/process/process-stdin.test.ts` => `6 pass / 0 fail`
    - `test/js/node/util/util.test.js` => `192 pass / 0 fail`
-   - `test/js/node/fs/fs.test.ts` => `234 pass / 6 skip / 0 fail`
+   - `test/js/node/fs/fs.test.ts` => `235 pass / 5 skip / 0 fail`
    - `test/js/node/watch/fs.watch.test.ts` => `32 pass / 0 fail`
    - Watcher note:
      - FreeBSD synthetic duplicate event must use timestamp spacing `> 1` to bypass duplicate filtering.
 
 3. Expand Phase E coverage (next high-value slices, after/alongside Phase D inventory)
+   - `test/js/node/child_process/child_process.test.ts` => `29 pass / 1 fail / 1 todo`
+     - harness fix (`93251c19b3`): added `isFreeBSD`, fixed `shellExe()`, `bunEnv.PATH`, `nodeExe()`, `libcPathForDlopen()`, `getFDCount()`/`getMaxFD()`
+     - remaining 1 fail: "should allow us to set env" — pre-existing bun env leakage (BUN_DEBUG_QUIET_LOGS etc. leak through explicit env override)
    - `test/js/node/child_process/*` broader batch:
      - mostly green under controlled invocation (`PATH` includes `build/release`, avoid repo-root `.env`)
      - remaining `spawn(...,{env})` failure from repo root is `.env` autoload contamination, not runtime semantics

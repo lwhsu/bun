@@ -5094,3 +5094,28 @@ Failure classification:
 - Test interaction issue (websocket cleanup): 1
 
 Combined with prior Phase E results (core gate 499 + url 186 + crypto 789), the FreeBSD port now has **2,489+ tests passing** with no FreeBSD-specific runtime failures.
+
+## 2026-02-26: Test harness FreeBSD platform support (`93251c19b3`)
+
+Fixed `test/harness.ts` to properly support FreeBSD as a platform:
+
+- Added `isFreeBSD` constant and included it in `isPosix`
+- Fixed `shellExe()`: use `Bun.which("bash") ?? "sh"` instead of hardcoded `"bash"` (FreeBSD has bash at `/usr/local/bin/bash`, not `/bin/bash`)
+- Added `bunExe()` dir to `bunEnv.PATH` so child processes can find `bun`
+- Fixed `getFDCount()`/`getMaxFD()` to use `/dev/fd` on FreeBSD (like macOS)
+- Added FreeBSD case to `libcPathForDlopen()` returning `"libc.so.7"`
+- Fixed `child_process.test.ts` to use `nodeExe()!` instead of bare `"node"`
+
+### Verification results
+
+Phase E core gate (no regressions):
+- `fs.test.ts`: 235 pass / 5 skip / 0 fail
+- `fs.watch.test.ts`: 32 pass / 0 fail
+- `process-stdin.test.ts`: 6 pass / 0 fail
+- `process-stdio.test.ts`: 9 pass / 0 fail
+- `spawn-stdin-readable-stream.test.ts`: 20 pass / 1 todo / 0 fail
+
+child_process after harness fix:
+- `child_process.test.ts`: 29 pass / 1 fail / 1 todo
+  - Previous: 26 pass / 4 fail (with `bun` manually in PATH)
+  - Remaining 1 fail: "should allow us to set env" — pre-existing bun env leakage issue (not FreeBSD-specific)
