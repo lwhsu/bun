@@ -200,7 +200,7 @@ var access = function access(path, mode, callback) {
       callback = options;
       options = undefined;
     }
-
+    ensureCallback(callback);
     fs.rmdir(path, options).then(nullcallback(callback), callback);
   },
   copyFile = function copyFile(src, dest, mode, callback) {
@@ -591,7 +591,10 @@ var access = function access(path, mode, callback) {
   utimesSync = fs.utimesSync.bind(fs),
   lutimesSync = fs.lutimesSync.bind(fs),
   rmSync = fs.rmSync.bind(fs),
-  rmdirSync = fs.rmdirSync.bind(fs),
+  rmdirSync = function rmdirSync(...args) {
+    // @ts-ignore
+    return fs.rmdirSync.$apply(fs, args);
+  },
   writev = function writev(fd, buffers, position, callback) {
     if (typeof position === "function") {
       callback = position;

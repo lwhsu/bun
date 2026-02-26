@@ -48,14 +48,19 @@ function watch(
   }
   const queue = $createFIFO();
 
-  const watcher = fs.watch(filename, options || {}, (eventType: string, filename: string | Buffer | undefined) => {
+  const notify = (eventType: string, filename: any) => {
     queue.push({ eventType, filename });
     if (nextEventResolve) {
       const resolve = nextEventResolve;
       nextEventResolve = null;
       resolve();
     }
-  });
+  };
+  const watcher = require("node:fs").watch(filename, options || {}, (eventType: string, filename: string | Buffer | undefined) =>
+    notify(eventType, filename),
+  );
+  watcher.on("error", (err: any) => notify("error", err));
+  watcher.on("close", () => notify("close", undefined));
 
   return {
     [Symbol.asyncIterator]() {
@@ -77,6 +82,20 @@ function watch(
             }
             const { promise, resolve } = Promise.withResolvers();
             nextEventResolve = resolve;
+            // Avoid a lost wakeup race: an event may have been queued after the last
+            // shift() returned empty but before nextEventResolve was assigned.
+            while ((event = queue.shift() as Event)) {
+              nextEventResolve = null;
+              if (event.eventType === "close") {
+                closed = true;
+                return { value: undefined, done: true };
+              }
+              if (event.eventType === "error") {
+                closed = true;
+                throw event.filename;
+              }
+              return { value: event, done: false };
+            }
             await promise;
           }
           return { value: undefined, done: true };
@@ -196,7 +215,9 @@ const exports = {
   utimes: asyncWrap(fs.utimes, "utimes"),
   lutimes: asyncWrap(fs.lutimes, "lutimes"),
   rm: asyncWrap(fs.rm, "rm"),
-  rmdir: asyncWrap(fs.rmdir, "rmdir"),
+  rmdir: async function rmdir(...args) {
+    return await fs.rmdir.$apply(fs, args);
+  },
   writev: async (fd, buffers, position) => {
     var bytesWritten = await fs.writev(fd, buffers, position);
     return {

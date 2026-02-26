@@ -477,10 +477,14 @@ function WriteStream(this: FSStream, path: string | null, options?: any): void {
 
   // Enable fast path
   if (fastPath) {
-    this[kWriteStreamFastPath] = fd ? Bun.file(fd).writer() : true;
-    this._write = underscoreWriteFast;
-    this._writev = undefined;
-    this.write = writeFast as any;
+    // On FreeBSD, descriptor-backed Bun.file(fd).writer() can fail with EINVAL (kevent)
+    // during internal startup paths (e.g. color probing). Fall back to legacy fs writes.
+    if (process.platform !== "freebsd" || typeof fd !== "number") {
+      this[kWriteStreamFastPath] = fd ? Bun.file(fd).writer() : true;
+      this._write = underscoreWriteFast;
+      this._writev = undefined;
+      this.write = writeFast as any;
+    }
   }
 
   Writable.$call(this, options);

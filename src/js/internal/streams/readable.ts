@@ -834,8 +834,8 @@ Readable.prototype.pipe = function (dest, pipeOpts) {
   state.pipes.push(dest);
   $debug("pipe count=%d opts=%j", state.pipes.length, pipeOpts);
 
-  const doEnd = (!pipeOpts || pipeOpts.end !== false) && dest !== process.stdout && dest !== process.stderr;
-
+  const pipeIntoProcessStdio = dest === process.stdout || dest === process.stderr;
+  const doEnd = (!pipeOpts || pipeOpts.end !== false) && !pipeIntoProcessStdio;
   const endFn = doEnd ? onend : unpipe;
   if ((state[kState] & kEndEmitted) !== 0) process.nextTick(endFn);
   else src.once("end", endFn);

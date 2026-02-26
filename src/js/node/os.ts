@@ -122,7 +122,9 @@ function bound(binding) {
           ? "Darwin"
           : process.platform === "linux"
             ? "Linux"
-            : $bundleError("TODO: type");
+            : process.platform === "freebsd"
+              ? "FreeBSD"
+              : $bundleError("TODO: type");
     },
     uptime: binding.uptime,
     userInfo: binding.userInfo,
