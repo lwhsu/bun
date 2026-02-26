@@ -3595,7 +3595,7 @@ pub const NodeFS = struct {
             return ret.errnoSysP(c.copyfile(src, dest, null, mode), .copyfile, src) orelse ret.success;
         }
 
-        if (comptime Environment.isLinux) {
+        if (comptime (Environment.isLinux or Environment.isFreeBSD)) {
             var src_buf: bun.PathBuffer = undefined;
             var dest_buf: bun.PathBuffer = undefined;
             const src = args.src.sliceZ(&src_buf);
@@ -3609,7 +3609,7 @@ pub const NodeFS = struct {
                 src_fd.close();
             }
 
-            const stat_: linux.Stat = switch (Syscall.fstat(src_fd)) {
+            const stat_: bun.Stat = switch (Syscall.fstat(src_fd)) {
                 .result => |result| result,
                 .err => |err| return Maybe(Return.CopyFile){ .err = err },
             };
@@ -3630,6 +3630,19 @@ pub const NodeFS = struct {
             };
 
             var size: usize = @intCast(@max(stat_.size, 0));
+
+            if (comptime !Environment.isLinux) {
+                defer {
+                    _ = Syscall.ftruncate(dest_fd, @intCast(@as(u63, @truncate(wrote))));
+                    _ = Syscall.fchmod(dest_fd, stat_.mode);
+                    dest_fd.close();
+                }
+
+                switch (copyFileUsingReadWriteLoop(src, dest, src_fd, dest_fd, size, &wrote)) {
+                    .err => |err| return .{ .err = err },
+                    .result => return ret.success,
+                }
+            }
 
             // https://manpages.debian.org/testing/manpages-dev/ioctl_ficlone.2.en.html
             if (args.mode.isForceClone()) {
@@ -4135,9 +4148,23 @@ pub const NodeFS = struct {
     pub fn mkdtemp(this: *NodeFS, args: Arguments.MkdirTemp, _: Flavor) Maybe(Return.Mkdtemp) {
         var prefix_buf = &this.sync_error_buf;
         const prefix_slice = args.prefix.slice();
-        const len = @min(prefix_slice.len, prefix_buf.len -| 7);
+        var len = @min(prefix_slice.len, prefix_buf.len -| 7);
         if (len > 0) {
             @memcpy(prefix_buf[0..len], prefix_slice[0..len]);
+            // Node's fs.mkdtemp accepts a directory path prefix (e.g. os.tmpdir()) and
+            // creates the temp directory inside it even when the separator is omitted.
+            if (prefix_buf[len - 1] != std.fs.path.sep) {
+                prefix_buf[len] = 0;
+                switch (Syscall.stat(prefix_buf[0..len :0])) {
+                    .result => |stat_| {
+                        if (posix.S.ISDIR(stat_.mode) and len < prefix_buf.len -| 8) {
+                            prefix_buf[len] = std.fs.path.sep;
+                            len += 1;
+                        }
+                    },
+                    .err => {},
+                }
+            }
         }
         prefix_buf[len..][0..6].* = "XXXXXX".*;
         prefix_buf[len..][6] = 0;
@@ -5077,6 +5104,7 @@ pub const NodeFS = struct {
         // --- Optimization: attempt to read up to 256 KB before calling stat()
         // If we manage to read the entire file, we don't need to call stat() at all.
         // This will make it slightly slower to read e.g. 512 KB files, but usually the OS won't return a full 512 KB in one read anyway.
+        //
         const temporary_read_buffer_before_stat_call = brk: {
             const temporary_read_buffer = temporary_read_buffer: {
                 var temporary_read_buffer: []u8 = &async_stack_buffer;
@@ -5277,6 +5305,9 @@ pub const NodeFS = struct {
             }
         }
 
+        // Success path below returns ownership of `buf.items` to the caller.
+        // Mark success before constructing return values so defer does not free it.
+        did_succeed = true;
         buf.items.len = if (comptime string_type == .null_terminated) total + 1 else total;
         if (total == 0) {
             buf.clearAndFree();
@@ -5304,17 +5335,19 @@ pub const NodeFS = struct {
             };
         }
 
+        const result_bytes = buf.items;
+
         return switch (args.encoding) {
             .buffer => .{
                 .result = .{
-                    .buffer = Buffer.fromBytes(buf.items, bun.default_allocator, .Uint8Array),
+                    .buffer = Buffer.fromBytes(result_bytes, bun.default_allocator, .Uint8Array),
                 },
             },
             else => brk: {
                 if (comptime string_type == .default) {
                     break :brk .{
                         .result = .{
-                            .string = buf.items,
+                            .string = result_bytes,
                         },
                     };
                 } else {
@@ -5653,8 +5686,14 @@ pub const NodeFS = struct {
             };
         }
 
-        return Maybe(Return.Rmdir).errnoSysP(system.rmdir(args.path.sliceZ(&this.sync_error_buf)), .rmdir, args.path.slice()) orelse
-            .success;
+        const rmdir_path = args.path.sliceZ(&this.sync_error_buf);
+        const rmdir_rc = system.rmdir(rmdir_path);
+
+        if (Maybe(Return.Rmdir).errnoSysP(rmdir_rc, .rmdir, args.path.slice())) |err| {
+            return err;
+        }
+
+        return .success;
     }
 
     pub fn rm(this: *NodeFS, args: Arguments.Rm, _: Flavor) Maybe(Return.Rm) {
@@ -6390,7 +6429,7 @@ pub const NodeFS = struct {
             return first_try;
         }
 
-        if (Environment.isLinux) {
+        if (comptime (Environment.isLinux or Environment.isFreeBSD)) {
             // https://manpages.debian.org/testing/manpages-dev/ioctl_ficlone.2.en.html
             if (mode.isForceClone()) {
                 return Maybe(Return.CopyFile).todo();
@@ -6412,7 +6451,7 @@ pub const NodeFS = struct {
                 src_fd.close();
             }
 
-            const stat_: linux.Stat = switch (Syscall.fstat(src_fd)) {
+            const stat_: bun.Stat = switch (Syscall.fstat(src_fd)) {
                 .result => |result| result,
                 .err => |err| return Maybe(Return.CopyFile){ .err = err.withFd(src_fd) },
             };
@@ -6461,6 +6500,19 @@ pub const NodeFS = struct {
             };
 
             var size: usize = @intCast(@max(stat_.size, 0));
+
+            if (comptime !Environment.isLinux) {
+                defer {
+                    _ = Syscall.ftruncate(dest_fd, @as(i64, @intCast(@as(u63, @truncate(wrote)))));
+                    _ = Syscall.fchmod(dest_fd, stat_.mode);
+                    dest_fd.close();
+                }
+
+                switch (copyFileUsingReadWriteLoop(src, dest, src_fd, dest_fd, size, &wrote)) {
+                    .err => |err| return .{ .err = err },
+                    .result => return ret.success,
+                }
+            }
 
             if (posix.S.ISREG(stat_.mode) and bun.can_use_ioctl_ficlone()) {
                 const rc = bun.linux.ioctl_ficlone(dest_fd, src_fd);

@@ -873,7 +873,7 @@ pub const ShellSubprocess = struct {
 
         switch (subprocess.process.watch()) {
             .result => {},
-            .err => {
+            .err => |_| {
                 notify_caller_process_already_exited.* = true;
                 spawn_args.lazy = false;
             },
@@ -905,6 +905,10 @@ pub const ShellSubprocess = struct {
             if (!spawn_args.lazy and subprocess.stderr == .pipe) {
                 subprocess.stderr.pipe.readAll();
             }
+        }
+
+        if (comptime Environment.isFreeBSD) {
+            subprocess.process.reapIfExitedNoHang();
         }
 
         should_close_memfd = false;
@@ -1418,3 +1422,5 @@ const FileSink = jsc.WebCore.FileSink;
 
 const sh = bun.shell;
 const Yield = bun.shell.Yield;
+
+

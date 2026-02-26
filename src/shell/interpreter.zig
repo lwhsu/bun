@@ -2025,7 +2025,7 @@ pub fn FlagParser(comptime Opts: type) type {
 pub fn isPollable(fd: bun.FileDescriptor, mode: bun.Mode) bool {
     return switch (bun.Environment.os) {
         .windows, .wasm => false,
-        .linux => posix.S.ISFIFO(mode) or posix.S.ISSOCK(mode) or posix.isatty(fd.native()),
+        .linux, .freebsd => posix.S.ISFIFO(mode) or posix.S.ISSOCK(mode) or posix.isatty(fd.native()),
         // macos DOES allow regular files to be pollable, but we don't want that because
         // our IOWriter code has a separate and better codepath for writing to files.
         .mac => if (posix.S.ISREG(mode)) false else posix.S.ISFIFO(mode) or posix.S.ISSOCK(mode) or posix.isatty(fd.native()),
@@ -2035,7 +2035,7 @@ pub fn isPollable(fd: bun.FileDescriptor, mode: bun.Mode) bool {
 pub fn isPollableFromMode(mode: bun.Mode) bool {
     return switch (bun.Environment.os) {
         .windows, .wasm => false,
-        .linux => posix.S.ISFIFO(mode) or posix.S.ISSOCK(mode),
+        .linux, .freebsd => posix.S.ISFIFO(mode) or posix.S.ISSOCK(mode),
         // macos DOES allow regular files to be pollable, but we don't want that because
         // our IOWriter code has a separate and better codepath for writing to files.
         .mac => if (posix.S.ISREG(mode)) false else posix.S.ISFIFO(mode) or posix.S.ISSOCK(mode),

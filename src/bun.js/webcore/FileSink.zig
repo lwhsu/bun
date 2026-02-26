@@ -154,6 +154,7 @@ fn runPending(this: *FileSink) void {
 pub fn onWrite(this: *FileSink, amount: usize, status: bun.io.WriteStatus) void {
     log("onWrite({d}, {any})", .{ amount, status });
 
+
     this.written += amount;
 
     // TODO: on windows done means ended (no pending data on the buffer) on unix we can still have pending data on the buffer
@@ -172,15 +173,15 @@ pub fn onWrite(this: *FileSink, amount: usize, status: bun.io.WriteStatus) void 
     }
 
     // if we are not done yet and has pending data we just wait so we do not runPending twice
-    if (status == .pending and has_pending_data) {
-        if (this.pending.state == .pending) {
-            this.pending.consumed = @truncate(amount);
+        if (status == .pending and has_pending_data) {
+            if (this.pending.state == .pending) {
+                this.pending.consumed += @truncate(amount);
+            }
+            return;
         }
-        return;
-    }
 
-    if (this.pending.state == .pending) {
-        this.pending.consumed = @truncate(amount);
+        if (this.pending.state == .pending) {
+            this.pending.consumed += @truncate(amount);
 
         // when "done" is true, we will never receive more data.
         if (this.done or status == .end_of_file) {
@@ -560,6 +561,7 @@ pub fn end(this: *FileSink, _: ?bun.sys.Error) bun.sys.Maybe(void) {
                 this.must_be_kept_alive_until_eof = true;
                 this.ref();
             }
+            this.pending.consumed += @truncate(written);
             this.done = true;
             return .success;
         },
@@ -617,6 +619,7 @@ pub fn endFromJS(this: *FileSink, globalThis: *JSGlobalObject) bun.sys.Maybe(JSV
                 this.must_be_kept_alive_until_eof = true;
                 this.ref();
             }
+            this.pending.consumed += @truncate(pending_written);
             this.done = true;
             this.pending.result = .{ .owned = @truncate(pending_written) };
 
@@ -699,12 +702,12 @@ pub const FlushPendingTask = struct {
 
 /// Does not ref or unref.
 fn handleResolveStream(this: *FileSink, globalThis: *jsc.JSGlobalObject) void {
-    if (this.readable_stream.get(globalThis)) |*stream| {
-        stream.done(globalThis);
-    }
-
     if (!this.done) {
         this.writer.close();
+    }
+
+    if (this.readable_stream.get(globalThis)) |*stream| {
+        stream.done(globalThis);
     }
 }
 
@@ -804,3 +807,4 @@ const webcore = bun.webcore;
 const Blob = webcore.Blob;
 const Sink = webcore.Sink;
 const streams = webcore.streams;
+

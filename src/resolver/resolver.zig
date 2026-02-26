@@ -2678,13 +2678,17 @@ pub const Resolver = struct {
             return r.dir_cache.atIndex(top_result.index);
         }
 
-        var dir_info_uncached_path_buf = bufs(.dir_info_uncached_path);
+        var dir_info_uncached_path_buf: bun.PathBuffer = undefined;
 
         var i: i32 = 1;
-        bun.copy(u8, dir_info_uncached_path_buf, input_path);
+        bun.copy(u8, dir_info_uncached_path_buf[0..], input_path);
         var path = dir_info_uncached_path_buf[0..input_path.len];
 
-        bufs(.dir_entry_paths_to_resolve)[0] = DirEntryResolveQueueItem{ .result = top_result, .unsafe_path = path, .safe_path = "" };
+        var dir_entry_paths_to_resolve_buf: [256]DirEntryResolveQueueItem = undefined;
+        var open_dirs_buf: [256]FD = undefined;
+        const max_dir_queue_entries = dir_entry_paths_to_resolve_buf.len;
+
+        dir_entry_paths_to_resolve_buf[0] = DirEntryResolveQueueItem{ .result = top_result, .unsafe_path = path, .safe_path = "" };
         var top = Dirname.dirname(path);
 
         var top_parent: allocators.Result = allocators.Result{
@@ -2713,7 +2717,20 @@ pub const Resolver = struct {
                 top_parent = result;
                 break;
             }
-            bufs(.dir_entry_paths_to_resolve)[@as(usize, @intCast(i))] = DirEntryResolveQueueItem{
+            const queue_index: usize = @intCast(i);
+            if (queue_index >= max_dir_queue_entries) {
+                if (comptime enable_logging) {
+                    r.log.addErrorFmt(
+                        null,
+                        logger.Loc{},
+                        r.allocator,
+                        "Cannot read directory \"{s}\": exceeded resolver queue capacity ({d})",
+                        .{ input_path, max_dir_queue_entries },
+                    ) catch {};
+                }
+                return null;
+            }
+            dir_entry_paths_to_resolve_buf[queue_index] = DirEntryResolveQueueItem{
                 .unsafe_path = top,
                 .result = result,
                 .fd = .invalid,
@@ -2722,8 +2739,8 @@ pub const Resolver = struct {
             if (rfs.entries.get(top)) |top_entry| {
                 switch (top_entry.*) {
                     .entries => {
-                        bufs(.dir_entry_paths_to_resolve)[@as(usize, @intCast(i))].safe_path = top_entry.entries.dir;
-                        bufs(.dir_entry_paths_to_resolve)[@as(usize, @intCast(i))].fd = top_entry.entries.fd;
+                        dir_entry_paths_to_resolve_buf[queue_index].safe_path = top_entry.entries.dir;
+                        dir_entry_paths_to_resolve_buf[queue_index].fd = top_entry.entries.fd;
                     },
                     .err => |err| {
                         debuglog("Failed to load DirEntry {s}  {s} - {s}", .{ top, @errorName(err.original_err), @errorName(err.canonical_error) });
@@ -2739,7 +2756,20 @@ pub const Resolver = struct {
             if (result.status != .unknown) {
                 top_parent = result;
             } else {
-                bufs(.dir_entry_paths_to_resolve)[@as(usize, @intCast(i))] = DirEntryResolveQueueItem{
+                const queue_index: usize = @intCast(i);
+                if (queue_index >= max_dir_queue_entries) {
+                    if (comptime enable_logging) {
+                        r.log.addErrorFmt(
+                            null,
+                            logger.Loc{},
+                            r.allocator,
+                            "Cannot read directory \"{s}\": exceeded resolver queue capacity ({d})",
+                            .{ input_path, max_dir_queue_entries },
+                        ) catch {};
+                    }
+                    return null;
+                }
+                dir_entry_paths_to_resolve_buf[queue_index] = DirEntryResolveQueueItem{
                     .unsafe_path = root_path,
                     .result = result,
                     .fd = .invalid,
@@ -2747,8 +2777,8 @@ pub const Resolver = struct {
                 if (rfs.entries.get(top)) |top_entry| {
                     switch (top_entry.*) {
                         .entries => {
-                            bufs(.dir_entry_paths_to_resolve)[@as(usize, @intCast(i))].safe_path = top_entry.entries.dir;
-                            bufs(.dir_entry_paths_to_resolve)[@as(usize, @intCast(i))].fd = top_entry.entries.fd;
+                            dir_entry_paths_to_resolve_buf[queue_index].safe_path = top_entry.entries.dir;
+                            dir_entry_paths_to_resolve_buf[queue_index].fd = top_entry.entries.fd;
                         },
                         .err => |err| {
                             debuglog("Failed to load DirEntry {s}  {s} - {s}", .{ top, @errorName(err.original_err), @errorName(err.canonical_error) });
@@ -2761,16 +2791,21 @@ pub const Resolver = struct {
             }
         }
 
-        var queue_slice: []DirEntryResolveQueueItem = bufs(.dir_entry_paths_to_resolve)[0..@as(usize, @intCast(i))];
+        var queue_slice: []DirEntryResolveQueueItem = dir_entry_paths_to_resolve_buf[0..@as(usize, @intCast(i))];
         if (Environment.allow_assert) assert(queue_slice.len > 0);
         var open_dir_count: usize = 0;
 
         // When this function halts, any item not processed means it's not found.
         defer {
             if (open_dir_count > 0 and (!r.store_fd or r.fs.fs.needToCloseFiles())) {
-                const open_dirs = bufs(.open_dirs)[0..open_dir_count];
-                for (open_dirs) |open_dir| {
-                    open_dir.close();
+                inline for (0..64) |open_dir_i| {
+                    if (open_dir_i >= open_dir_count) break;
+                    open_dirs_buf[open_dir_i].close();
+                }
+                var open_dir_i: usize = 64;
+                const open_dir_limit = @min(open_dir_count, open_dirs_buf.len);
+                while (open_dir_i < open_dir_limit) : (open_dir_i += 1) {
+                    open_dirs_buf[open_dir_i].close();
                 }
             }
         }
@@ -2872,9 +2907,22 @@ pub const Resolver = struct {
             };
 
             if (!queue_top.fd.isValid()) {
+                if (open_dir_count >= open_dirs_buf.len) {
+                    open_dir.close();
+                    if (comptime enable_logging) {
+                        r.log.addErrorFmt(
+                            null,
+                            logger.Loc{},
+                            r.allocator,
+                            "Cannot read directory \"{s}\": exceeded open directory capacity ({d})",
+                            .{ input_path, open_dirs_buf.len },
+                        ) catch {};
+                    }
+                    return null;
+                }
                 Fs.FileSystem.setMaxFd(open_dir.cast());
                 // these objects mostly just wrap the file descriptor, so it's fine to keep it.
-                bufs(.open_dirs)[open_dir_count] = open_dir;
+                open_dirs_buf[open_dir_count] = open_dir;
                 open_dir_count += 1;
             }
 

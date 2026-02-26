@@ -1308,7 +1308,6 @@ pub const StandaloneModuleGraph = struct {
             // if we hit this branch then the file is corrupted and we should just give up
             return null;
         }
-
         var to_read = try bun.default_allocator.alloc(u8, offsets.byte_count);
         var to_read_from = to_read;
 
@@ -1428,7 +1427,7 @@ pub const StandaloneModuleGraph = struct {
                     return error.FileNotFound;
                 }
             },
-            .mac => {
+            .freebsd, .mac => {
                 // Use of MAX_PATH_BYTES here is valid as the resulting path is immediately
                 // opened with no modification.
                 const self_exe_path = try bun.selfExePath();

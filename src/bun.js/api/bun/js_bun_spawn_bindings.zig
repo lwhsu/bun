@@ -827,7 +827,7 @@ pub fn spawnMaybeSync(
 
         switch (subprocess.process.watch()) {
             .result => {},
-            .err => {
+            .err => |_| {
                 send_exit_notification = true;
                 lazy = false;
             },
@@ -890,6 +890,13 @@ pub fn spawnMaybeSync(
     }
 
     if (comptime !is_sync) {
+        if (comptime Environment.isFreeBSD) {
+            // FreeBSD can miss a NOTE_EXIT delivery for extremely short-lived children
+            // in the watch-registration race window. Probe with WNOHANG once after full
+            // setup so callbacks are already installed.
+            subprocess.process.reapIfExitedNoHang();
+        }
+
         if (!subprocess.process.hasExited()) {
             jsc_vm.onSubprocessSpawn(subprocess.process);
         }
@@ -1131,3 +1138,5 @@ const Writable = Subprocess.Writable;
 const Process = bun.spawn.Process;
 const Rusage = bun.spawn.Rusage;
 const Stdio = bun.spawn.Stdio;
+
+

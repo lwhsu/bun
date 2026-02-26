@@ -415,7 +415,6 @@ pub fn parse(allocator: std.mem.Allocator, ctx: Command.Context, comptime cmd: C
         cmd.printHelp(false);
         Global.exit(1);
     };
-
     const print_help = args.flag("--help");
     if (print_help) {
         cmd.printHelp(true);

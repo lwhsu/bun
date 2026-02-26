@@ -663,15 +663,17 @@ win: {
     };
 } else posix: {
     const C = bun.c;
+    const StdSaFamily = @TypeOf(@as(std.posix.sockaddr, undefined).family);
+    const StdInPort = @TypeOf(@as(std.posix.sockaddr.in, undefined).port);
     break :posix struct {
         pub const IN4ADDR_LOOPBACK = C.IN4ADDR_LOOPBACK;
-        pub const INET6_ADDRSTRLEN = C.INET6_ADDRSTRLEN;
+        pub const INET6_ADDRSTRLEN = if (@hasDecl(C, "INET6_ADDRSTRLEN")) C.INET6_ADDRSTRLEN else 46;
         // Make sure this is in line with IN6ADDR_ANY_INIT in `netinet/in.h` on all platforms.
         pub const IN6ADDR_ANY_INIT: [16]u8 = .{0} ** 16;
         pub const AF_INET = C.AF_INET;
         pub const AF_INET6 = C.AF_INET6;
-        pub const sa_family_t = C.sa_family_t;
-        pub const in_port_t = C.in_port_t;
+        pub const sa_family_t = if (@hasDecl(C, "sa_family_t")) C.sa_family_t else StdSaFamily;
+        pub const in_port_t = if (@hasDecl(C, "in_port_t")) C.in_port_t else StdInPort;
         pub const socklen_t = ares.socklen_t;
         pub const sockaddr_in = std.posix.sockaddr.in;
         pub const sockaddr_in6 = std.posix.sockaddr.in6;

@@ -118,11 +118,11 @@ pub fn getPeerCertificate(this: *This, globalObject: *jsc.JSGlobalObject, callfr
     const ssl_ptr = this.socket.ssl() orelse return .js_undefined;
 
     if (abbreviated) {
-        if (this.isServer()) {
-            const cert = BoringSSL.SSL_get_peer_certificate(ssl_ptr);
-            if (cert) |x509| {
-                return X509.toJS(x509, globalObject);
-            }
+        // Be permissive here: some platforms/backends can expose the peer leaf
+        // certificate via SSL_get_peer_certificate() while the chain accessor is
+        // empty during/after handshake.
+        if (BoringSSL.SSL_get_peer_certificate(ssl_ptr)) |x509| {
+            return X509.toJS(x509, globalObject);
         }
 
         const cert_chain = BoringSSL.SSL_get_peer_cert_chain(ssl_ptr) orelse return .js_undefined;

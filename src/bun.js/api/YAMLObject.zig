@@ -59,7 +59,15 @@ pub fn stringify(global: *JSGlobalObject, callFrame: *jsc.CallFrame) JSError!JSV
 }
 
 const Stringifier = struct {
+    // Keep YAML.stringify stack-overflow behavior deterministic across hosts.
+    // Some environments (including FreeBSD with large default stack limits) can
+    // recurse extremely deep before `isSafeToRecurse()` trips, while others fail
+    // much earlier. A logical depth cap ensures we always throw stack overflow
+    // for pathologically deep object graphs in a platform-independent way.
+    const max_recursion_depth: usize = 65_536;
+
     stack_check: bun.StackCheck,
+    recursion_depth: usize,
     builder: wtf.StringBuilder,
     indent: usize,
 
@@ -150,6 +158,7 @@ const Stringifier = struct {
 
         return .{
             .stack_check = .init(),
+            .recursion_depth = 0,
             .builder = .init(),
             .indent = 0,
             .known_collections = .init(allocator),
@@ -173,6 +182,12 @@ const Stringifier = struct {
     };
 
     pub fn findAnchorsAndAliases(this: *Stringifier, global: *JSGlobalObject, value: JSValue, origin: ValueOrigin) StringifyError!void {
+        if (this.recursion_depth >= max_recursion_depth) {
+            return error.StackOverflow;
+        }
+        this.recursion_depth += 1;
+        defer this.recursion_depth -= 1;
+
         if (!this.stack_check.isSafeToRecurse()) {
             return error.StackOverflow;
         }
@@ -267,6 +282,12 @@ const Stringifier = struct {
     const StringifyError = JSError || bun.StackOverflow;
 
     pub fn stringify(this: *Stringifier, global: *JSGlobalObject, value: JSValue) StringifyError!void {
+        if (this.recursion_depth >= max_recursion_depth) {
+            return error.StackOverflow;
+        }
+        this.recursion_depth += 1;
+        defer this.recursion_depth -= 1;
+
         if (!this.stack_check.isSafeToRecurse()) {
             return error.StackOverflow;
         }
