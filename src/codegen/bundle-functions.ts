@@ -16,30 +16,79 @@
 // - We concatenate all the sources into one big string, which then createsa
 // single JSC::SourceProvider and pass start/end positions to each function's
 // JSC::SourceCode. JSC does this, but WebCore does not seem to.
-import assert from "assert";
 import { readdirSync, rmSync } from "fs";
 import path from "path";
 import { sliceSourceCode } from "./builtin-parser";
 import { createAssertClientJS, createLogClientJS } from "./client-js";
 import { getJS2NativeDTS } from "./generate-js2native";
-import { addCPPCharArray, cap, low, writeIfNotChanged } from "./helpers";
+import { addCPPCharArray, cap, low, readUtf8CompatSync, writeIfNotChanged } from "./helpers";
 import { applyGlobalReplacements, define } from "./replacements";
 
 const PARALLEL = false;
 const KEEP_TMP = true;
 
-if (import.meta.main) {
+const assert = (value: unknown, message?: string): asserts value => {
+  if (!value) throw new Error(message ?? "Assertion failed");
+};
+
+if (import.meta.main && process.argv[1]?.includes("bundle-functions")) {
   throw new Error("This script is not meant to be run directly");
 }
 
-const CMAKE_BUILD_ROOT = globalThis.CMAKE_BUILD_ROOT;
-if (!CMAKE_BUILD_ROOT) {
-  throw new Error("CMAKE_BUILD_ROOT is not defined");
+const SRC_DIR = path.join(import.meta.dir, "../js/builtins");
+let CMAKE_BUILD_ROOT: string | undefined;
+let CODEGEN_DIR = "";
+let TMP_DIR = "";
+let freebsdStage0FunctionAliasCounter = 0;
+
+const isFreeBSDStage0 = process.platform === "freebsd" && Bun.version === "0.0.0";
+const freebsdStage0BuiltinFunctionTranspiler = isFreeBSDStage0 ? new Bun.Transpiler({ loader: "ts" }) : null;
+const useFreebsdStage0BuiltinFunctionTranspiler =
+  // Prefer Bun.build() for correctness; legacy stage0 transpiler is a fallback for specific
+  // corruption/empty-output cases. The transpiler-only mode remains opt-in for debugging.
+  isFreeBSDStage0 && process.env.BUN_FREEBSD_STAGE0_BUNDLE_FUNCTIONS_USE_TRANSPILER === "1";
+
+function buildLogsContainLegacyStage0EntrypointCorruption(logs: readonly any[]) {
+  return logs.some(log => {
+    try {
+      const text =
+        typeof log?.message === "string"
+          ? log.message
+          : typeof log?.toString === "function"
+            ? String(log)
+            : JSON.stringify(log);
+      // Legacy FreeBSD stage0 emits multiple malformed-entrypoint variants here.
+      // Some include a parser-generated fragment (`var __b0;`), others splice tmp file
+      // contents (e.g. `@ts-nocheck`) into the path. For this bootstrap-only retry path,
+      // any "failed to open entry point directory" is a safe signal to retry with a short alias.
+      return text.includes("failed to open entry point directory");
+    } catch {
+      return false;
+    }
+  });
 }
 
-const SRC_DIR = path.join(import.meta.dir, "../js/builtins");
-const CODEGEN_DIR = path.join(CMAKE_BUILD_ROOT, "./codegen");
-const TMP_DIR = path.join(CMAKE_BUILD_ROOT, "./tmp_functions");
+function applyFreebsdStage0BuiltinFunctionDefineCompat(source: string) {
+  if (!isFreeBSDStage0) return source;
+
+  // `Bun.Transpiler` fallback does not apply Bun.build({ define }), so stage0 builds can leave
+  // debug guards like `IS_BUN_DEVELOPMENT` unresolved in embedded builtin functions. Inline the
+  // minimum required define here to preserve runtime behavior in bootstrap/replay builds.
+  return source.replace(/\bIS_BUN_DEVELOPMENT\b/g, define.IS_BUN_DEVELOPMENT);
+}
+
+function ensureBuildPaths() {
+  if (CMAKE_BUILD_ROOT) return;
+
+  const buildRoot = globalThis.CMAKE_BUILD_ROOT;
+  if (!buildRoot) {
+    throw new Error("CMAKE_BUILD_ROOT is not defined");
+  }
+
+  CMAKE_BUILD_ROOT = String(buildRoot);
+  CODEGEN_DIR = path.join(CMAKE_BUILD_ROOT, "./codegen");
+  TMP_DIR = path.join(CMAKE_BUILD_ROOT, "./tmp_functions");
+}
 
 interface ParsedBuiltin {
   name: string;
@@ -284,24 +333,56 @@ $$capture_start$$(${fn.async ? "async " : ""}${
 `,
     );
     await Bun.sleep(1);
-    const build = await Bun.build({
-      entrypoints: [tmpFile],
-      define,
-      target: "bun",
-      minify: { syntax: true, whitespace: false, keepNames: true },
-    });
-    // TODO: Wait a few versions before removing this
-    if (!build.success) {
-      throw new AggregateError(build.logs, "Failed bundling builtin function " + fn.name + " from " + basename + ".ts");
+    let output: string;
+    if (useFreebsdStage0BuiltinFunctionTranspiler && freebsdStage0BuiltinFunctionTranspiler) {
+      // Bootstrap-only workaround: legacy FreeBSD stage0 bundler is unstable for tmp_functions
+      // (entrypoint corruption, bogus empty-module outputs, teardown crashes). The transpiler path
+      // preserves the $$capture_*$$ markers needed by builtin-function extraction and is sufficient
+      // for the temp function sources generated here.
+      output = freebsdStage0BuiltinFunctionTranspiler.transformSync(await Bun.file(tmpFile).text());
+    } else {
+      let build = await Bun.build({
+        entrypoints: [tmpFile],
+        define,
+        target: "bun",
+        minify: { syntax: true, whitespace: false, keepNames: true },
+      });
+      if (!build.success && isFreeBSDStage0 && buildLogsContainLegacyStage0EntrypointCorruption(build.logs)) {
+        // Legacy FreeBSD stage0 can corrupt some tmp_functions entrypoint paths. Retry with a short
+        // alias path to avoid the corruption without changing source content.
+        // Use a non-dot basename: hidden-file aliases can still produce malformed stage0 output on FreeBSD.
+        const aliasTmpFile = path.join(TMP_DIR, `bf${freebsdStage0FunctionAliasCounter++}.ts`);
+        await Bun.write(aliasTmpFile, await Bun.file(tmpFile).text());
+        build = await Bun.build({
+          entrypoints: [aliasTmpFile],
+          define,
+          target: "bun",
+          minify: { syntax: true, whitespace: false, keepNames: true },
+        });
+      }
+      // TODO: Wait a few versions before removing this
+      if (!build.success) {
+        throw new AggregateError(build.logs, "Failed bundling builtin function " + fn.name + " from " + basename + ".ts");
+      }
+      if (build.outputs.length !== 1) {
+        throw new Error("expected one output");
+      }
+      output = (await build.outputs[0].text()).replaceAll("// @bun\n", "");
+      if (
+        isFreeBSDStage0 &&
+        (!output.includes("$$capture_start$$") || !output.includes("$$capture_end$$")) &&
+        freebsdStage0BuiltinFunctionTranspiler
+      ) {
+        // Legacy FreeBSD stage0 can sometimes produce a "successful" bundle output that is an empty
+        // module stub for tmp_functions entries. Fall back to the stage0 transpiler, which preserves
+        // the capture markers we need for builtin-function extraction.
+        output = freebsdStage0BuiltinFunctionTranspiler.transformSync(await Bun.file(tmpFile).text());
+      }
     }
-    if (build.outputs.length !== 1) {
-      throw new Error("expected one output");
-    }
-    let output = (await build.outputs[0].text()).replaceAll("// @bun\n", "");
     let usesDebug = output.includes("$debug_log");
     let usesAssert = output.includes("$assert");
     const captured = output.match(/\$\$capture_start\$\$([\s\S]+)\.\$\$capture_end\$\$/)![1];
-    const finalReplacement =
+    const finalReplacement = applyFreebsdStage0BuiltinFunctionDefineCompat(
       (fn.directives.sloppy
         ? captured
         : captured.replace(
@@ -313,7 +394,8 @@ $$capture_start$$(${fn.async ? "async " : ""}${
       )
         .replace(/^\((async )?function\(/, "($1function (")
         .replace(/__intrinsic__/g, "@")
-        .replace(/__no_intrinsic__/g, "") + "\n";
+        .replace(/__no_intrinsic__/g, "") + "\n",
+    );
 
     const errors = [...finalReplacement.matchAll(/@bundleError\((.*)\)/g)];
     if (errors.length) {
@@ -371,6 +453,9 @@ interface BundleBuiltinFunctionsArgs {
 }
 
 export async function bundleBuiltinFunctions({ requireTransformer }: BundleBuiltinFunctionsArgs) {
+  ensureBuildPaths();
+  files.length = 0;
+
   const filesToProcess = readdirSync(SRC_DIR)
     .filter(x => x.endsWith(".ts") && !x.endsWith(".d.ts"))
     .sort();
@@ -756,10 +841,7 @@ JSBuiltinInternalFunctions::JSBuiltinInternalFunctions(JSC::VM& vm) : m_vm(vm)
     `;
   // Handle builtin names
   {
-    const BunBuiltinNamesHeader = require("fs").readFileSync(
-      path.join(import.meta.dir, "../js/builtins/BunBuiltinNames.h"),
-      "utf8",
-    );
+    const BunBuiltinNamesHeader = readUtf8CompatSync(path.join(import.meta.dir, "../js/builtins/BunBuiltinNames.h"));
     let definedBuiltinNamesStartI = BunBuiltinNamesHeader.indexOf(
       "#define BUN_COMMON_PRIVATE_IDENTIFIERS_EACH_PROPERTY_NAME",
     );

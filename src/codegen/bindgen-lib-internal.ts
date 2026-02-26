@@ -3,9 +3,12 @@
 // various footguns in JavaScript, C++, and the bindings generator to
 // always produce correct code, or bail with an error.
 import { expect } from "bun:test";
-import assert from "node:assert";
 import * as path from "node:path";
 import type { FuncOptions, t } from "./bindgen-lib";
+
+const assert = (value: unknown, message?: string): asserts value => {
+  if (!value) throw new Error(message ?? "Assertion failed");
+};
 
 export const src = path.join(import.meta.dirname, "../");
 

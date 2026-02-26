@@ -1,5 +1,5 @@
-import assert from "node:assert";
 import { CodeStyle, Type, toASCIILiteral } from "./base";
+import { invariant } from "./runtime";
 
 export const String = new (class extends Type {
   /** Converts to a string, as if by calling `String`. */
@@ -20,7 +20,7 @@ export const String = new (class extends Type {
     return this.zigType(style) + ".Optional";
   }
   toCpp(value: string): string {
-    assert(typeof value === "string");
+    invariant(typeof value === "string");
     return toASCIILiteral(value);
   }
 })();

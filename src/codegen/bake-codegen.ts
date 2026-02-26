@@ -1,7 +1,10 @@
-import assert from "node:assert";
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { basename, join } from "node:path";
-import { argParse, writeIfNotChanged } from "./helpers";
+import { existsSync, linkSync, mkdirSync, rmSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { argParse, readUtf8CompatSync, writeIfNotChanged } from "./helpers";
+
+const assert = (value: unknown, message?: string): asserts value => {
+  if (!value) throw new Error(message ?? "Assertion failed");
+};
 
 // arg parsing
 let { "codegen-root": codegenRoot, debug, ...rest } = argParse(["codegen-root", "debug"]);
@@ -10,9 +13,88 @@ if (!codegenRoot) {
   console.error("Missing --codegen-root=...");
   process.exit(1);
 }
+codegenRoot = resolve(codegenRoot);
 
 const base_dir = join(import.meta.dirname, "../bake");
 process.chdir(base_dir); // to make bun build predictable in development
+const isFreeBSDStage0 = process.platform === "freebsd" && typeof Bun !== "undefined" && Bun.version === "0.0.0";
+const freebsdStage0BakeTranspiler = isFreeBSDStage0 ? new Bun.Transpiler({ loader: "ts" }) : null;
+
+async function writeIfNotChangedCompat(file: string, contents: string) {
+  if (!isFreeBSDStage0) {
+    writeIfNotChanged(file, contents);
+    return;
+  }
+
+  if (Array.isArray(contents)) contents = contents.join("");
+  contents = contents.replaceAll("\r\n", "\n").trim() + "\n";
+
+  try {
+    if (readUtf8CompatSync(file) === contents) return;
+  } catch {}
+
+  mkdirSync(dirname(file), { recursive: true });
+  // Stage0 FreeBSD workaround: fs.writeFileSync() can fail with bogus ENOENT for file creation.
+  await Bun.write(file, contents);
+  if (readUtf8CompatSync(file) !== contents) {
+    throw new Error(`Failed to write file ${file}`);
+  }
+}
+
+let stage0BakeBuildCounter = 0;
+const freebsdStage0BakeAliasByLabel: Record<string, string> = {
+  "first-pass-client": "bc.ts",
+  "first-pass-server": "bs.ts",
+  "first-pass-error": "be.ts",
+};
+async function buildCompat(label: string, options: Parameters<typeof Bun.build>[0]) {
+  if (!isFreeBSDStage0 || !options.entrypoints || options.entrypoints.length !== 1) {
+    return await Bun.build(options);
+  }
+
+  const originalEntrypoint = options.entrypoints[0]!;
+  // Keep the alias in the same directory as the original entrypoint so relative imports
+  // (used heavily by Bake runtime files) still resolve under legacy stage0.
+  const makeAlias = async (aliasEntrypoint: string) => {
+    rmSync(aliasEntrypoint, { force: true });
+    if (isFreeBSDStage0) {
+      try {
+        // Hardlink avoids a legacy stage0 crash in Bun.write() when creating source-dir aliases.
+        linkSync(originalEntrypoint, aliasEntrypoint);
+        return;
+      } catch {}
+    }
+    await Bun.write(aliasEntrypoint, readUtf8CompatSync(originalEntrypoint));
+  };
+
+  const aliasBasename = freebsdStage0BakeAliasByLabel[label] ?? `s0b${stage0BakeBuildCounter++}.ts`;
+  const aliasEntrypoint = join(dirname(originalEntrypoint), aliasBasename);
+  await makeAlias(aliasEntrypoint);
+
+  const result = await Bun.build({
+    ...options,
+    entrypoints: [aliasEntrypoint],
+  });
+  if (result.success) return result;
+
+  const logsText = (result.logs ?? [])
+    .map(log => (typeof log?.message === "string" ? log.message : String(log)))
+    .join("\n");
+  if (
+    logsText.includes("failed to open entry point directory") ||
+    logsText.includes("File not found")
+  ) {
+    // Retry once with a fresh shorter alias. Legacy FreeBSD stage0 can poison a first attempt.
+    const retryAlias = join(dirname(originalEntrypoint), `s0r${stage0BakeBuildCounter++}.ts`);
+    await makeAlias(retryAlias);
+    return await Bun.build({
+      ...options,
+      entrypoints: [retryAlias],
+    });
+  }
+
+  return result;
+}
 
 function convertZigEnum(zig: string, names: string[]) {
   let output = "/** Generated from DevServer.zig */\n";
@@ -31,6 +113,11 @@ function convertZigEnum(zig: string, names: string[]) {
 }
 
 function css(file: string, is_development: boolean): string {
+  if (isFreeBSDStage0) {
+    // Legacy FreeBSD stage0 still crashes on spawn/spawnSync paths. Use raw CSS content for bootstrap
+    // codegen; the final build regenerates artifacts with the normal path.
+    return JSON.stringify(readUtf8CompatSync(join(import.meta.dir, file)));
+  }
   const { success, stdout, stderr } = Bun.spawnSync({
     cmd: [process.execPath, "build", file, "--minify"],
     cwd: import.meta.dir,
@@ -41,24 +128,46 @@ function css(file: string, is_development: boolean): string {
 }
 
 async function run() {
-  const devServerZig = readFileSync(join(base_dir, "DevServer.zig"), "utf-8");
-  writeIfNotChanged(join(base_dir, "generated.ts"), convertZigEnum(devServerZig, ["IncomingMessageId", "MessageId"]));
+  const devServerZig = readUtf8CompatSync(join(base_dir, "DevServer.zig"));
+  if (isFreeBSDStage0) {
+    // Legacy stage0 can crash in the early write path before Bake bundling starts.
+    // For bootstrap, the checked-in src/bake/generated.ts is sufficient.
+  } else {
+    await writeIfNotChangedCompat(
+      join(base_dir, "generated.ts"),
+      convertZigEnum(devServerZig, ["IncomingMessageId", "MessageId"]),
+    );
+  }
 
-  const results = await Promise.allSettled(
-    ["client", "server", "error"].map(async file => {
+  if (isFreeBSDStage0) {
+    // Bootstrap-only fallback: legacy FreeBSD stage0 still crashes in Bun.build() while bundling
+    // Bake runtimes (replay path). These outputs are only codegen artifacts needed to satisfy
+    // the build graph at this stage; full runtime parity is validated later with the final Bun.
+    await writeIfNotChangedCompat(join(codegenRoot, "bake.client.js"), "export default async function(){ }\n");
+    await writeIfNotChangedCompat(join(codegenRoot, "bake.server.js"), "export default function(){ return {}; }\n");
+    await writeIfNotChangedCompat(join(codegenRoot, "bake.error.js"), "export default async function(){ }\n");
+    await writeIfNotChangedCompat(join(codegenRoot, "bake_empty_file"), "this is used to fulfill a cmake dependency");
+    process.reallyExit(0);
+  }
+
+  const buildBakeRuntime = async (file: "client" | "server" | "error") => {
       const side = file === "error" ? "client" : file;
-      let result = await Bun.build({
+      const overlayCss = css("../bake/client/overlay.css", !!debug);
+      let result = await buildCompat(`first-pass-${file}`, {
         entrypoints: [join(base_dir, `hmr-runtime-${file}.ts`)],
         define: {
           side: JSON.stringify(side),
           IS_ERROR_RUNTIME: String(file === "error"),
           IS_BUN_DEVELOPMENT: String(!!debug),
-          OVERLAY_CSS: css("../bake/client/overlay.css", !!debug),
+          OVERLAY_CSS: overlayCss,
         },
         minify: {
           syntax: !debug,
         },
-        target: side === "server" ? "bun" : "browser",
+        // Legacy FreeBSD stage0 can crash in Bun.build() on the Bake server runtime
+        // when using target:"bun". For bootstrap codegen, browser target is sufficient
+        // to produce the transform input consumed by the second pass.
+        target: isFreeBSDStage0 && side === "server" ? "browser" : side === "server" ? "bun" : "browser",
         drop: debug ? [] : ["ASSERT", "DEBUG"],
         conditions: [side],
       });
@@ -85,19 +194,31 @@ async function run() {
             __marker__(${in_names.join(",")});
             ${code};
           `;
-      const generated_entrypoint = join(base_dir, `.runtime-${file}.generated.ts`);
+      // Legacy FreeBSD stage0 can fail to create hidden dotfiles via fs.writeFileSync() with a bogus
+      // ENOENT even when the parent directory exists. Use a non-dot temporary filename in stage0.
+      const generated_entrypoint = join(
+        isFreeBSDStage0 ? codegenRoot : base_dir,
+        isFreeBSDStage0 ? `bake-runtime-${file}.generated.ts` : `.runtime-${file}.generated.ts`,
+      );
 
-      writeIfNotChanged(generated_entrypoint, combined_source);
+      await writeIfNotChangedCompat(generated_entrypoint, combined_source);
 
-      result = await Bun.build({
-        entrypoints: [generated_entrypoint],
-        minify: !debug,
-        drop: debug ? [] : ["DEBUG"],
-        target: side === "server" ? "bun" : "browser",
-      });
-      if (!result.success) throw new AggregateError(result.logs);
-      assert(result.outputs.length === 1, "must bundle to a single file");
-      code = (await result.outputs[0].text()).replace(`// ${basename(generated_entrypoint)}`, "").trim();
+      if (isFreeBSDStage0) {
+        // Legacy FreeBSD stage0 can corrupt single-entry Bun.build() outputs in this second pass,
+        // which drops the __marker__ call and breaks name extraction below. The source is already
+        // self-contained after the first pass, so a plain transpile is sufficient for bootstrap.
+        code = freebsdStage0BakeTranspiler!.transformSync(readUtf8CompatSync(generated_entrypoint)).trim();
+      } else {
+        result = await buildCompat(`second-pass-${file}`, {
+          entrypoints: [generated_entrypoint],
+          minify: !debug,
+          drop: debug ? [] : ["DEBUG"],
+          target: side === "server" ? "bun" : "browser",
+        });
+        if (!result.success) throw new AggregateError(result.logs);
+        assert(result.outputs.length === 1, "must bundle to a single file");
+        code = (await result.outputs[0].text()).replace(`// ${basename(generated_entrypoint)}`, "").trim();
+      }
 
       rmSync(generated_entrypoint);
 
@@ -156,20 +277,36 @@ async function run() {
         ]);
       }
 
-      writeIfNotChanged(join(codegenRoot, `bake.${file}.js`), code);
-    }),
-  );
+      await writeIfNotChangedCompat(join(codegenRoot, `bake.${file}.js`), code);
+  };
+
+  // FreeBSD stage0 can crash when switching Bun.build target modes mid-process.
+  // Run the server (target:"bun") build first, then browser-target client/error.
+  const bakeFiles = isFreeBSDStage0
+    ? (["server", "client", "error"] as const)
+    : (["client", "server", "error"] as const);
+  const results = isFreeBSDStage0
+    ? await (async () => {
+        const out: PromiseSettledResult<void>[] = [];
+        for (const file of bakeFiles) {
+          try {
+            await buildBakeRuntime(file);
+            out.push({ status: "fulfilled", value: undefined });
+          } catch (error) {
+            out.push({ status: "rejected", reason: error });
+          }
+        }
+        return out;
+      })()
+    : await Promise.allSettled(bakeFiles.map(buildBakeRuntime));
 
   // print failures in a de-duplicated fashion.
   interface Err {
     kind: ("client" | "server" | "error")[];
     err: any;
   }
-  const failed = [
-    { kind: ["client"], result: results[0] },
-    { kind: ["server"], result: results[1] },
-    { kind: ["error"], result: results[2] },
-  ]
+  const failed = bakeFiles
+    .map((kind, i) => ({ kind: [kind], result: results[i] }))
     .filter(x => x.result.status === "rejected")
     // @ts-ignore
     .map(x => ({ kind: x.kind, err: x.result.reason })) as Err[];
@@ -203,8 +340,15 @@ async function run() {
     console.log("-> bake.client.js, bake.server.js, bake.error.js");
 
     const empty_file = join(codegenRoot, "bake_empty_file");
-    if (!existsSync(empty_file)) writeIfNotChanged(empty_file, "this is used to fulfill a cmake dependency");
+    if (!existsSync(empty_file)) {
+      await writeIfNotChangedCompat(empty_file, "this is used to fulfill a cmake dependency");
+    }
+  }
+
+  // Legacy FreeBSD stage0 can crash during process teardown after successful codegen.
+  // Exit explicitly once outputs are written to make the bootstrap path reliable.
+  if (isFreeBSDStage0) {
+    process.reallyExit(0);
   }
 }
-
 await run();

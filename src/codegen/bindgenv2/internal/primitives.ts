@@ -1,6 +1,5 @@
-import assert from "node:assert";
-import util from "node:util";
 import { CodeStyle, Type } from "./base";
+import { invariant, inspect } from "./runtime";
 
 export const bool = new (class extends Type {
   /** Converts to a boolean, as if by calling `Boolean`. */
@@ -18,7 +17,7 @@ export const bool = new (class extends Type {
     return "bool";
   }
   toCpp(value: boolean): string {
-    assert(typeof value === "boolean");
+    invariant(typeof value === "boolean");
     return value ? "true" : "false";
   }
 })();
@@ -44,7 +43,7 @@ export abstract class IntegerType extends Type {
 }
 
 function makeUnsignedType(width: number): IntegerType {
-  assert(Number.isInteger(width) && width > 0);
+  invariant(Number.isInteger(width) && width > 0);
   return new (class extends IntegerType {
     /** Converts to a number first. */
     get loose() {
@@ -64,7 +63,7 @@ function makeUnsignedType(width: number): IntegerType {
       return `::std::uint${width}_t`;
     }
     toCpp(value: number | bigint): string {
-      assert(typeof value === "bigint" || Number.isSafeInteger(value));
+      invariant(typeof value === "bigint" || Number.isSafeInteger(value));
       const intValue = BigInt(value);
       if (intValue < 0) throw RangeError("unsigned int cannot be negative");
       const max = 1n << BigInt(width);
@@ -75,7 +74,7 @@ function makeUnsignedType(width: number): IntegerType {
 }
 
 function makeSignedType(width: number): IntegerType {
-  assert(Number.isInteger(width) && width > 0);
+  invariant(Number.isInteger(width) && width > 0);
   return new (class extends IntegerType {
     /** Tries to convert to a number first. */
     get loose() {
@@ -95,7 +94,7 @@ function makeSignedType(width: number): IntegerType {
       return `::std::int${width}_t`;
     }
     toCpp(value: number | bigint): string {
-      assert(typeof value === "bigint" || Number.isSafeInteger(value));
+      invariant(typeof value === "bigint" || Number.isSafeInteger(value));
       const intValue = BigInt(value);
       const max = 1n << BigInt(width - 1);
       const min = -max;
@@ -183,7 +182,7 @@ export const f64 = new (class extends Type {
     return `f64`;
   }
   toCpp(value: number): string {
-    assert(typeof value === "number");
+    invariant(typeof value === "number");
     if (Number.isNaN(value)) {
       return "::std::numeric_limits<double>::quiet_NaN()";
     } else if (value === Infinity) {
@@ -191,7 +190,7 @@ export const f64 = new (class extends Type {
     } else if (value === -Infinity) {
       return "-::std::numeric_limits<double>::infinity()";
     } else {
-      return util.inspect(value);
+      return inspect(value);
     }
   }
 })();
@@ -207,9 +206,9 @@ export const FiniteF64 = new (class extends Type {
     return f64.zigType(style);
   }
   toCpp(value: number): string {
-    assert(typeof value === "number");
+    invariant(typeof value === "number");
     if (!Number.isFinite(value)) throw RangeError("number must be finite");
-    return util.inspect(value);
+    return inspect(value);
   }
 })();
 

@@ -3,7 +3,6 @@
 //
 // Generated bindings are available in `bun.generated.<basename>.*` in Zig,
 // or `Generated::<basename>::*` in C++ from including `Generated<basename>.h`.
-import assert from "node:assert";
 import fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -38,12 +37,47 @@ import {
 } from "./bindgen-lib-internal";
 import { argParse, readdirRecursiveWithExclusionsAndExtensionsSync, writeIfNotChanged } from "./helpers";
 
+const assert = (value: unknown, message?: string): asserts value => {
+  if (!value) throw new Error(message ?? "Assertion failed");
+};
+
 // arg parsing
 let { "codegen-root": codegenRoot, debug } = argParse(["codegen-root", "debug"]);
 if (debug === "false" || debug === "0" || debug == "OFF") debug = false;
 if (!codegenRoot) {
   console.error("Missing --codegen-root=...");
   process.exit(1);
+}
+const isFreeBSDStage0 = process.platform === "freebsd" && typeof Bun !== "undefined" && Bun.version === "0.0.0";
+
+function recoverUnnamedBindgenFunctionsFromSnapshot(funcs: Func[]) {
+  for (const fn of funcs) {
+    if (fn.name !== "") continue;
+    const snapshot = fn.snapshot ?? "";
+    const match =
+      snapshot.match(/\bexport\s+const\s+([A-Za-z_$][\w$]*)\s*=\s*fn\s*\(/) ??
+      snapshot.match(/\bexport\s+let\s+([A-Za-z_$][\w$]*)\s*=\s*fn\s*\(/) ??
+      snapshot.match(/\bexport\s+var\s+([A-Za-z_$][\w$]*)\s*=\s*fn\s*\(/);
+    if (match) {
+      fn.name = match[1];
+    }
+  }
+}
+
+function recoverUnnamedBindgenFunctionsFromFileSource(fileName: string, funcs: Func[]) {
+  const unnamed = funcs.filter(fn => fn.name === "");
+  if (unnamed.length === 0) return;
+  const source = fs.readFileSync(fileName, "utf8");
+  const exportedNames = [...source.matchAll(/\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*fn\s*\(/g)].map(
+    m => m[1],
+  );
+  if (exportedNames.length === 0) return;
+  let i = 0;
+  for (const fn of unnamed) {
+    const name = exportedNames[i++];
+    if (!name) break;
+    fn.name = name;
+  }
 }
 
 function resolveVariantStrategies(vari: Variant, name: string) {
@@ -719,21 +753,21 @@ function emitConvertDictionaryFunction(type: TypeImpl) {
   cpp.line();
 }
 
-function emitZigStruct(type: TypeImpl) {
-  zig.add(`pub const ${type.name()} = `);
+function emitZigStructTo(w: CodeWriter, type: TypeImpl) {
+  w.add(`pub const ${type.name()} = `);
 
   switch (type.kind) {
     case "zigEnum":
     case "stringEnum": {
       const signPrefix = "u";
       const tagType = `${signPrefix}${alignForward(type.data.length, 8)}`;
-      zig.line(`enum(${tagType}) {`);
-      zig.indent();
+      w.line(`enum(${tagType}) {`);
+      w.indent();
       for (const value of type.data) {
-        zig.line(`${snake(value)},`);
+        w.line(`${snake(value)},`);
       }
-      zig.dedent();
-      zig.line("};");
+      w.dedent();
+      w.line("};");
       return;
     }
   }
@@ -741,28 +775,32 @@ function emitZigStruct(type: TypeImpl) {
   const externLayout = type.canDirectlyMapToCAbi();
   if (externLayout) {
     if (typeof externLayout === "string") {
-      zig.line(externLayout + ";");
+      w.line(externLayout + ";");
     } else {
-      externLayout.emitZig(zig, "with-semi");
+      externLayout.emitZig(w, "with-semi");
     }
     return;
   }
 
   switch (type.kind) {
     case "dictionary": {
-      zig.line("struct {");
-      zig.indent();
+      w.line("struct {");
+      w.indent();
       for (const { key, type: fieldType } of type.data as DictionaryField[]) {
-        zig.line(`    ${snake(key)}: ${zigTypeName(fieldType)},`);
+        w.line(`    ${snake(key)}: ${zigTypeName(fieldType)},`);
       }
-      zig.dedent();
-      zig.line(`};`);
+      w.dedent();
+      w.line(`};`);
       break;
     }
     default: {
       throw new Error(`TODO: emitZigStruct for Type ${type.kind}`);
     }
   }
+}
+
+function emitZigStruct(type: TypeImpl) {
+  emitZigStructTo(zig, type);
 }
 
 function emitCppStructHeader(w: CodeWriter, type: TypeImpl) {
@@ -815,6 +853,7 @@ function emitConvertEnumFunction(w: CodeWriter, type: TypeImpl) {
   const name = "Generated::" + type.cppName();
   headers.add("JavaScriptCore/JSCInlines.h");
   headers.add("JavaScriptCore/JSString.h");
+  headers.add("JSDOMConvertEnumeration.h");
   headers.add("wtf/NeverDestroyed.h");
   headers.add("wtf/SortedArrayMap.h");
 
@@ -1178,6 +1217,7 @@ for (const fileName of [...unsortedFiles].sort()) {
     files.set(zigFile, file);
   }
 
+  const functionCountBeforeRequire = file.functions.length;
   const exports = import.meta.require(fileName);
 
   // Mark all exported TypeImpl as reachable
@@ -1194,6 +1234,15 @@ for (const fileName of [...unsortedFiles].sort()) {
       const func = value as Func;
       func.name = key;
     }
+  }
+
+  if (isFreeBSDStage0) {
+    // Legacy FreeBSD stage0 can lose exported fn() names when loading some .bind.ts files via
+    // import.meta.require(), leaving file.functions entries unnamed and tripping validation below.
+    // Recover names from the captured source snapshot so bootstrap bindgen remains source-driven.
+    const newFunctions = file.functions.slice(functionCountBeforeRequire);
+    recoverUnnamedBindgenFunctionsFromSnapshot(newFunctions);
+    recoverUnnamedBindgenFunctionsFromFileSource(fileName, newFunctions);
   }
 
   for (const fn of file.functions) {
@@ -1268,6 +1317,66 @@ for (const [filename, { functions, typedefs }] of files) {
 }
 
 let needsWebCore = false;
+// FreeBSD legacy stage0 bindgen can produce GeneratedBindings.zig exports that reference anonymous
+// types whose per-file typedefs are missing. Emit reachable anon_* fallback declarations inside the
+// generated internal bindings struct so dispatch signatures remain self-consistent.
+for (const type of typeHashToReachableType.values()) {
+  if (!type.name().startsWith("anon_")) continue;
+  switch (type.kind) {
+    case "dictionary":
+    case "stringEnum":
+    case "zigEnum":
+      emitZigStructTo(zigInternal, type);
+      break;
+    default:
+      break;
+  }
+}
+
+// FreeBSD legacy stage0 can occasionally lose exported TypeImpl metadata during bindgen module loading.
+// Emit reachable anonymous type declarations directly into GeneratedBindings.cpp so the generated C++
+// remains self-consistent even if a per-module Generated*.h file misses them.
+for (const type of typeHashToReachableType.values()) {
+  if (!type.name().startsWith("anon_")) continue;
+  switch (type.kind) {
+    case "dictionary":
+    case "stringEnum":
+    case "zigEnum":
+      emitCppStructHeader(cpp, type);
+      break;
+    default:
+      break;
+  }
+}
+
+// Anonymous string enums can be referenced by generated dispatch code before the later WebCore
+// specialization definitions are emitted. Forward declare the specializations to prevent implicit
+// instantiation before explicit specialization.
+let emittedAnonEnumWebCoreDecls = false;
+for (const type of typeHashToReachableType.values()) {
+  if (!type.name().startsWith("anon_")) continue;
+  if (type.kind !== "stringEnum") continue;
+  if (!emittedAnonEnumWebCoreDecls) {
+    cpp.line("} // namespace Generated");
+    cpp.line();
+    cpp.line("namespace WebCore {");
+    cpp.line();
+    emittedAnonEnumWebCoreDecls = true;
+  }
+  const name = `Generated::${type.cppName()}`;
+  cpp.line(`template<> JSC::JSString* convertEnumerationToJS(JSC::JSGlobalObject&, ${name});`);
+  cpp.line(`template<> std::optional<${name}> parseEnumerationFromString<${name}>(const String&);`);
+  cpp.line(`template<> std::optional<${name}> parseEnumeration<${name}>(JSC::JSGlobalObject&, JSC::JSValue);`);
+  cpp.line(`template<> ASCIILiteral expectedEnumerationValues<${name}>();`);
+  cpp.line();
+}
+if (emittedAnonEnumWebCoreDecls) {
+  cpp.line("} // namespace WebCore");
+  cpp.line();
+  cpp.line("namespace Generated {");
+  cpp.line();
+}
+
 for (const type of typeHashToReachableType.values()) {
   // Emit convert functions for compound types in the Generated namespace
   switch (type.kind) {
@@ -1289,6 +1398,30 @@ for (const [filename, { functions, typedefs }] of files) {
   zig.line(`/// Generated for "src/${filename}"`);
   zig.line(`pub const ${namespaceVar} = struct {`);
   zig.indent();
+
+  if (isFreeBSDStage0) {
+    // Legacy FreeBSD stage0 bindgen can miss a small set of exported TypeImpl typedefs while still
+    // generating dispatch signatures that reference the underlying anonymous types.
+    // Add explicit aliases in the owning module struct so GeneratedBindings.zig remains
+    // self-consistent for the strict bootstrap build.
+    const typedefNames = new Set(typedefs.map(td => td.name));
+    if (filename === "bun.js/api/BunObject.zig") {
+      if (!typedefNames.has("BracesOptions")) {
+        zig.line(`pub const BracesOptions = binding_internals.anon_dictionary_548121597135544711;`);
+      }
+      if (!typedefNames.has("StringWidthOptions")) {
+        zig.line(`pub const StringWidthOptions = binding_internals.anon_dictionary_12544150949529920075;`);
+      }
+    } else if (filename === "bun.js/node/node_os.zig") {
+      if (!typedefNames.has("UserInfoOptions")) {
+        zig.line(`pub const UserInfoOptions = binding_internals.anon_dictionary_5885013397282848609;`);
+      }
+    } else if (filename === "fmt.zig") {
+      if (!typedefNames.has("Formatter")) {
+        zig.line(`pub const Formatter = binding_internals.anon_stringEnum_5593363293433559422;`);
+      }
+    }
+  }
 
   for (const fn of functions) {
     cpp.line(`// Dispatch for \"fn ${zid(fn.name)}(...)\" in \"src/${fn.zigFile}\"`);

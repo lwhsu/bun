@@ -1538,7 +1538,7 @@ export function parseNumber(value) {
 
 /**
  * @param {string} string
- * @returns {"darwin" | "linux" | "windows"}
+ * @returns {"darwin" | "linux" | "freebsd" | "windows"}
  */
 export function parseOs(string) {
   if (/darwin|apple|mac/i.test(string)) {
@@ -1547,6 +1547,9 @@ export function parseOs(string) {
   if (/linux/i.test(string)) {
     return "linux";
   }
+  if (/freebsd/i.test(string)) {
+    return "freebsd";
+  }
   if (/win/i.test(string)) {
     return "windows";
   }
@@ -1554,7 +1557,7 @@ export function parseOs(string) {
 }
 
 /**
- * @returns {"darwin" | "linux" | "windows"}
+ * @returns {"darwin" | "linux" | "freebsd" | "windows"}
  */
 export function getOs() {
   return parseOs(process.platform);
@@ -1660,7 +1663,7 @@ export function getAbiVersion() {
 
 /**
  * @typedef {object} Target
- * @property {"darwin" | "linux" | "windows"} os
+ * @property {"darwin" | "linux" | "freebsd" | "windows"} os
  * @property {"x64" | "aarch64"} arch
  * @property {"musl"} [abi]
  * @property {boolean} [baseline]

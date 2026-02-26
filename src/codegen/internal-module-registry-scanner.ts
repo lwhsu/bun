@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { readdirRecursive, resolveSyncOrNull } from "./helpers";
+import { readUtf8CompatSync, readdirRecursive, resolveSyncOrNull } from "./helpers";
 
 export function createInternalModuleRegistry(basedir: string) {
   const moduleList = ["bun", "node", "thirdparty", "internal"]
@@ -35,7 +35,7 @@ export function createInternalModuleRegistry(basedir: string) {
   const nativeModuleEnumToId: Record<string, number> = {};
 
   // Native Module registry
-  const nativeModuleH = fs.readFileSync(path.join(basedir, "../bun.js/modules/_NativeModule.h"), "utf8");
+  const nativeModuleH = readUtf8CompatSync(path.join(basedir, "../bun.js/modules/_NativeModule.h"));
   for (const [_, idString, enumValue] of nativeModuleH.matchAll(/macro\((.*?),(.*?)\)/g)) {
     const processedIdString = JSON.parse(idString.trim().replace(/_s$/, ""));
     const processedEnumValue = enumValue.trim();
