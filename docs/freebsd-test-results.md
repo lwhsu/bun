@@ -1,7 +1,7 @@
 # FreeBSD Test Results — Comprehensive Suite
 
-**Date**: 2026-02-27
-**Build**: bun v1.3.10-canary.1 (026b460b) FreeBSD x64
+**Date**: 2026-02-28
+**Build**: bun v1.3.10-canary.1 (0b03ade1) FreeBSD x64
 **Branch**: claude/freebsd-support
 **Platform**: FreeBSD 15.0-STABLE amd64
 
@@ -9,12 +9,12 @@
 
 | Category | Pass | Fail | Notes |
 |----------|------|------|-------|
-| **Total counted** | **~20,000+** | **~210** | Across 80+ test directories |
-| FreeBSD-specific failures | — | ~8 | PTY, worker cleanup, EPIPE, etc. |
-| Missing deps (not FreeBSD) | — | ~25 | strip-ansi, uuid, svelte, grpc, etc. |
-| Timeout/load (not FreeBSD) | — | ~80 | WebSocket/fetch under load |
+| **Total counted** | **~25,000+** | **~180** | Across 90+ test directories |
+| FreeBSD-specific failures | — | ~7 | PTY, worker cleanup, EPIPE, spawnSync microtask |
+| Missing deps (not FreeBSD) | — | ~25 | strip-ansi, uuid, svelte, grpc, filenamify, etc. |
+| Timeout/load (not FreeBSD) | — | ~70 | WebSocket/fetch under load, backpressure |
 | Memory leak tests (not FreeBSD) | — | ~10 | GC/RSS thresholds |
-| Upstream test issues | — | ~60 | Snapshot drift, cross-process serialization |
+| Upstream test issues | — | ~40 | Snapshot drift, cross-process serialization |
 | Cross-file contamination | — | ~30 | Pass individually, fail in batch |
 
 ## Detailed Results by Directory
@@ -33,15 +33,15 @@
 | string_decoder | 84 | 0 | — | |
 | timers | 20 | 0 | — | |
 | dns | 67 | 0 | — | |
-| crypto | 812 | 0 | — | |
-| url | 6 | 0 | — | |
-| zlib | 400 | 14 | — | Cross-file test contamination (kMaxLength.global) |
+| crypto | 789 | 0 | 22 skip, 1 todo | |
+| url | 186 | 0 | 2 skip, 9 todo | |
+| zlib | 384 | 14 | 2 skip | Cross-file contamination (pass individually) |
 | util | 516 | 1 | — | Missing `strip-ansi` dep |
 | fs | 286 | 3 | — | Phase E core suite |
 | watch | 32 | 0 | — | Phase E core suite |
 | process (stdin) | 9 | 0 | — | Phase E core suite |
 | process (stdio) | 10 | 0 | — | Phase E core suite |
-| child_process | 147 | 1 | — | env leak (not FreeBSD) |
+| child_process | 78 | 1 | 5 todo | run-p stderr ordering (not FreeBSD) |
 | async_hooks | 110 | 1 | 3 todo | Bun.build plugin (not FreeBSD) |
 | http2 | 267 | 0 | 6 skip | |
 | net | 156 | 1 | 5 skip | RSS margin (**FIXED**) |
@@ -59,7 +59,7 @@
 | worker_threads | 30 | 0* | — | *worker_destruction hangs (kqueue) |
 | cluster | 3 | 0 | — | |
 | dgram | 16 | 0 | — | |
-| http | 3 | 0 | — | |
+| http | 122 | 5 | 1 skip, 5 todo | Backpressure timeout, load tests |
 
 ### Bun-specific (test/js/bun/)
 
@@ -69,11 +69,11 @@
 | http | 904 | 16 | Timeouts, memory leak tests, HTML routes |
 | websocket | 108 | 30 | Connection timeouts (pass individually) |
 | ffi | 30 | 1 | TinyCC `__SIZE_TYPE__` (known limitation), dlopen path **FIXED** |
-| resolve | 187 | 2 | Missing dep + TOML crash |
-| glob | 30 | 1 | Missing `fast-glob` dep |
+| resolve | 22 | 1 | Missing `reflect-metadata` dep |
+| glob | 29 | 1 | Missing `fast-glob` dep |
 | sqlite | OK | 0 | |
 | css | 2077 | 0 | 67 skip |
-| io | 33 | 1 | |
+| io | 34 | 0 | **FIXED** — copyFileUsingReadWriteLoop while/else bug |
 | shell (individual) | 480+ | 3 | `yes` pipe timeout, epipe timeout, shell-load hang |
 | spawn (individual) | 113+ | 2 | spawn-maxbuf timeout, spawnSync microtask drain |
 | transpiler | 34 | 0 | |
@@ -133,6 +133,12 @@
 | install | 3333 | ~5 | Git working dir, verdaccio dep |
 | create | 2 | 10 | Snapshot + dev server (not FreeBSD) |
 
+### Bundler Tests (test/bundler/)
+
+| Suite | Pass | Fail | Notes |
+|-------|------|------|-------|
+| bundler | 552 | 58 | 25 skip, 22 todo. Missing `filenamify` dep, CSS WPT errors |
+
 ### Regression Tests (test/regression/)
 
 | Suite | Pass | Fail | Notes |
@@ -145,18 +151,18 @@
 1. **FFI dlopen libc path**: FreeBSD uses `libc.so.7` not `libc.so.6`
 2. **Net handle-leak RSS margin**: FreeBSD RSS reporting differs, increased margin to 40MB
 3. **Init test snapshots**: Updated for CLAUDE.md (cross-platform fix)
+4. **copy_file ftruncate**: FreeBSD read-write copy loop missing ftruncate (destination not truncated to written size)
+5. **copyFileUsingReadWriteLoop byte limit**: Zig `while`/`else` semantics bug caused unlimited copy even when byte limit specified — `Bun.write(Bun.file().slice(0,N), source)` now works correctly (cross-platform fix, but only manifested on FreeBSD)
 
 ### Known FreeBSD-Specific Issues (not fixed)
 1. **Bun.Terminal (PTY)**: Not implemented for FreeBSD — 84 terminal tests + 13 REPL tests fail
 2. **worker_destruction.test.ts**: Hangs on FreeBSD (worker cleanup with kqueue)
-3. **spawnSync microtask drain**: Microtasks fire during spawnSync on FreeBSD (stdout shows "MICROTASK_FIRED" instead of "SUCCESS")
+3. **spawnSync microtask drain**: Microtasks fire during spawnSync on FreeBSD (stdout shows "MICROTASK_FIRED" instead of "SUCCESS"). Root cause: the SpawnSyncEventLoop's `tickWithoutJS` drains the shared JSC VM microtask queue via `drainMicrotasksWithGlobal` when processing kqueue exit events. On Linux, the process exit is handled differently (pidfd/WaiterThread) so microtasks don't get drained.
 4. **fuzzy-wuzzy.test.ts**: Segfault crash when calling `Bun.redis.*` methods with no arguments (may also affect Linux — needs verification)
 5. **Shell `yes` builtin piping**: `yes | head` timeout (EPIPE not propagated through kqueue)
 6. **Shell epipe**: `yes | head` builtin-to-command pipe hangs (same EPIPE issue)
 7. **Hot reload file watcher timing**: `hot-file-loader.file` and `.css` tests timeout at 10s (kqueue notification delay)
 8. **TinyCC FreeBSD**: `__SIZE_TYPE__` not handled in FreeBSD system headers
-9. **Bun.write self-truncation**: `Bun.file.slice()` write to same file doesn't truncate (copy_file/sendfile behavior)
-10. **kqueue socket drain events**: `setSocketOptions` small buffer sizes don't trigger expected partial write behavior
 
 ### Not FreeBSD-Specific
 - Missing npm deps: strip-ansi, uuid, svelte, fast-glob, happy-dom, v8-heapsnapshot, msgpackr-extract, reflect-metadata, verdaccio, grpc, filenamify, testing-library
