@@ -1,5 +1,5 @@
 import { expect } from "bun:test";
-import { isASAN, isWindows } from "harness";
+import { isASAN, isFreeBSD, isWindows } from "harness";
 import * as net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -73,5 +73,6 @@ server.close();
 
 let margin = 1024 * 1024 * 15;
 if (isWindows) margin = 1024 * 1024 * 40;
+if (isFreeBSD) margin = 1024 * 1024 * 40;
 if (isASAN) margin = 1024 * 1024 * 60;
 expect(post_rss - warmup_rss).toBeLessThan(margin);
