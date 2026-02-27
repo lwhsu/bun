@@ -9,12 +9,13 @@
 
 | Category | Pass | Fail | Notes |
 |----------|------|------|-------|
-| **Total counted** | **~15,500+** | **~170** | Across 70+ test directories |
-| FreeBSD-specific failures | — | ~8 | Fixable platform issues |
-| Missing deps (not FreeBSD) | — | ~15 | strip-ansi, uuid, svelte, etc. |
+| **Total counted** | **~20,000+** | **~210** | Across 80+ test directories |
+| FreeBSD-specific failures | — | ~8 | PTY, worker cleanup, EPIPE, etc. |
+| Missing deps (not FreeBSD) | — | ~25 | strip-ansi, uuid, svelte, grpc, etc. |
 | Timeout/load (not FreeBSD) | — | ~80 | WebSocket/fetch under load |
 | Memory leak tests (not FreeBSD) | — | ~10 | GC/RSS thresholds |
-| Upstream test issues | — | ~50 | Snapshot drift, cross-process serialization |
+| Upstream test issues | — | ~60 | Snapshot drift, cross-process serialization |
+| Cross-file contamination | — | ~30 | Pass individually, fail in batch |
 
 ## Detailed Results by Directory
 
@@ -129,6 +130,14 @@
 | run | 995 | 1 | Missing dep |
 | test | 118 | 0 | |
 | watch | 6 | 0 | |
+| install | 3333 | ~5 | Git working dir, verdaccio dep |
+| create | 2 | 10 | Snapshot + dev server (not FreeBSD) |
+
+### Regression Tests (test/regression/)
+
+| Suite | Pass | Fail | Notes |
+|-------|------|------|-------|
+| regression | 724 | 28 | 25 skip, 5 errors. Most pass individually (cross-file contamination) |
 
 ## FreeBSD-Specific Issues
 
@@ -140,16 +149,21 @@
 ### Known FreeBSD-Specific Issues (not fixed)
 1. **Bun.Terminal (PTY)**: Not implemented for FreeBSD — 84 terminal tests + 13 REPL tests fail
 2. **worker_destruction.test.ts**: Hangs on FreeBSD (worker cleanup with kqueue)
-3. **spawnSync microtask drain**: Microtasks fire during spawnSync on FreeBSD
-4. **fuzzy-wuzzy.test.ts**: Segfault crash (possibly SIMD/string related)
-5. **Shell `yes` builtin piping**: `yes | head` timeout (5s)
-6. **Hot reload file watcher timing**: 10s timeout on file change detection
-7. **TinyCC FreeBSD**: `__SIZE_TYPE__` not handled in FreeBSD headers
+3. **spawnSync microtask drain**: Microtasks fire during spawnSync on FreeBSD (stdout shows "MICROTASK_FIRED" instead of "SUCCESS")
+4. **fuzzy-wuzzy.test.ts**: Segfault crash when calling `Bun.redis.*` methods with no arguments (may also affect Linux — needs verification)
+5. **Shell `yes` builtin piping**: `yes | head` timeout (EPIPE not propagated through kqueue)
+6. **Shell epipe**: `yes | head` builtin-to-command pipe hangs (same EPIPE issue)
+7. **Hot reload file watcher timing**: `hot-file-loader.file` and `.css` tests timeout at 10s (kqueue notification delay)
+8. **TinyCC FreeBSD**: `__SIZE_TYPE__` not handled in FreeBSD system headers
+9. **Bun.write self-truncation**: `Bun.file.slice()` write to same file doesn't truncate (copy_file/sendfile behavior)
+10. **kqueue socket drain events**: `setSocketOptions` small buffer sizes don't trigger expected partial write behavior
 
 ### Not FreeBSD-Specific
-- Missing npm deps: strip-ansi, uuid, svelte, fast-glob, happy-dom, v8-heapsnapshot, msgpackr-extract, reflect-metadata
+- Missing npm deps: strip-ansi, uuid, svelte, fast-glob, happy-dom, v8-heapsnapshot, msgpackr-extract, reflect-metadata, verdaccio, grpc, filenamify, testing-library
 - WebSocket/fetch connection timeouts under load (pass individually)
-- Memory leak test thresholds (GC behavior)
-- Cross-file test contamination (zlib kMaxLength)
+- Memory leak test thresholds (GC behavior — streams-leak, spawn-pipe-leak)
+- Cross-file test contamination (zlib kMaxLength, shell interpolation tests)
 - expect.assertions test runner behavior
 - Structured clone cross-process (SharedArrayBuffer stdin pipe)
+- JSONC deep nesting (stack size limit difference, non-crash)
+- Various intl/v8 regress tests
