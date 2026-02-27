@@ -609,6 +609,10 @@ pub const CopyFile = struct {
                 },
                 .result => {
                     this.read_len = @truncate(wrote);
+                    // Truncate destination to exact bytes written, matching
+                    // Linux and macOS behavior. Without this, writing a sliced
+                    // file leaves stale data beyond the written range.
+                    _ = bun.sys.ftruncate(this.destination_fd, @intCast(wrote));
                 },
             }
             this.doClose();
