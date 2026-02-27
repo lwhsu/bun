@@ -3429,26 +3429,28 @@ pub const NodeFS = struct {
         }
 
         var remain = @as(u64, @intCast(@max(stat_size, 0)));
-        toplevel: while (remain > 0) {
-            const amt = switch (Syscall.read(src_fd, buf[0..@min(buf.len, remain)])) {
-                .result => |result| result,
-                .err => |err| return Maybe(Return.CopyFile){ .err = if (src.len > 0) err.withPath(src) else err },
-            };
-            // 0 == EOF
-            if (amt == 0) {
-                break :toplevel;
-            }
-            wrote.* += amt;
-            remain -|= amt;
-
-            var slice = buf[0..amt];
-            while (slice.len > 0) {
-                const written = switch (Syscall.write(dest_fd, slice)) {
+        if (remain > 0) {
+            toplevel: while (remain > 0) {
+                const amt = switch (Syscall.read(src_fd, buf[0..@min(buf.len, remain)])) {
                     .result => |result| result,
-                    .err => |err| return Maybe(Return.CopyFile){ .err = if (dest.len > 0) err.withPath(dest) else err },
+                    .err => |err| return Maybe(Return.CopyFile){ .err = if (src.len > 0) err.withPath(src) else err },
                 };
-                if (written == 0) break :toplevel;
-                slice = slice[written..];
+                // 0 == EOF
+                if (amt == 0) {
+                    break :toplevel;
+                }
+                wrote.* += amt;
+                remain -|= amt;
+
+                var slice = buf[0..amt];
+                while (slice.len > 0) {
+                    const written = switch (Syscall.write(dest_fd, slice)) {
+                        .result => |result| result,
+                        .err => |err| return Maybe(Return.CopyFile){ .err = if (dest.len > 0) err.withPath(dest) else err },
+                    };
+                    if (written == 0) break :toplevel;
+                    slice = slice[written..];
+                }
             }
         } else {
             outer: while (true) {
